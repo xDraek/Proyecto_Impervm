@@ -1,10 +1,21 @@
 import './style.css';
+import { isMuted, play, setAmbienceLevel, setMuted, unlockAudio } from './audio.js';
 import { GAME_SPEED } from './config.js';
 import { BUILDINGS, ISLAND_BY_ID, RESOURCES } from './game/data.js';
 import { Game } from './game/Game.js';
 import { World } from './scene/World.js';
 import { Hud } from './ui/Hud.js';
 import { fmtNum } from './ui/format.js';
+
+const DAYNIGHT_KEY = 'imperium.daynight';
+
+function readDayNight() {
+  try {
+    return localStorage.getItem(DAYNIGHT_KEY) !== '0';
+  } catch {
+    return true;
+  }
+}
 
 const game = new Game();
 
@@ -18,14 +29,33 @@ function select(id) {
 function setView(view) {
   world.setView(view);
   hud.setView(view);
+  setAmbienceLevel(view === 'mapa' ? 0.35 : 1);
   if (hud.selected && (view === 'mapa') !== !!ISLAND_BY_ID[hud.selected]) {
     world.select(null);
     hud.select(null);
   }
 }
 
+const settings = {
+  sound: () => !isMuted(),
+  setSound: (on) => {
+    setMuted(!on);
+    if (on) unlockAudio();
+  },
+  dayNight: () => world.dayNight,
+  setDayNight: (on) => {
+    world.setDayNight(on);
+    try {
+      localStorage.setItem(DAYNIGHT_KEY, on ? '1' : '0');
+    } catch {
+      // sin almacenamiento: solo dura esta sesión
+    }
+  },
+};
+
 const world = new World(document.getElementById('scene'), game, { onSelect: select });
-const hud = new Hud(game, { onSelect: select, onView: setView });
+world.setDayNight(readDayNight());
+const hud = new Hud(game, { onSelect: select, onView: setView, settings });
 
 window.addEventListener('keydown', (e) => {
   if (e.target.matches?.('input, select, textarea')) return;
@@ -34,6 +64,19 @@ window.addEventListener('keydown', (e) => {
     else select(null);
   }
   if (e.key === 'm' || e.key === 'M') setView(world.view === 'isla' ? 'mapa' : 'isla');
+});
+
+// El navegador solo deja sonar audio tras la primera interacción
+window.addEventListener('pointerdown', unlockAudio, { once: true });
+window.addEventListener('keydown', unlockAudio, { once: true });
+document.addEventListener('click', (e) => {
+  if (e.target.closest('button, .list li, [data-select]')) play('click');
+});
+game.addEventListener('notify', (e) => {
+  const { text, kind } = e.detail;
+  if (text.includes('¡Velas piratas')) play('horn');
+  else if (kind === 'success') play('success');
+  else if (kind === 'error') play('error');
 });
 
 if (game.offlineGains && Object.keys(game.offlineGains).length) {

@@ -97,9 +97,9 @@ function ayuntamiento(level) {
     for (const x of [-w / 3, 0, w / 3]) {
       const isDoor = i === 0 && x === 0;
       const h = isDoor ? 0.75 : 0.42;
-      g.add(box(isDoor ? 0.6 : 0.32, h, 0.05, C.dark, x, y + (isDoor ? 0 : 0.38), w / 2 + 0.01));
-      g.add(box(0.05, 0.42, 0.32, C.dark, w / 2 + 0.01, y + 0.38, x));
-      g.add(box(0.05, 0.42, 0.32, C.dark, -w / 2 - 0.01, y + 0.38, x));
+      g.add(box(isDoor ? 0.6 : 0.32, h, 0.05, C.dark, x, y + (isDoor ? 0 : 0.38), w / 2 + 0.01, isDoor ? undefined : WINDOW_GLOW));
+      g.add(box(0.05, 0.42, 0.32, C.dark, w / 2 + 0.01, y + 0.38, x, WINDOW_GLOW));
+      g.add(box(0.05, 0.42, 0.32, C.dark, -w / 2 - 0.01, y + 0.38, x, WINDOW_GLOW));
     }
     y += 1.1;
     g.add(box(w + 0.24, 0.14, w + 0.24, C.stone, 0, y, 0));
@@ -130,7 +130,7 @@ function aserradero(level) {
   g.add(box(2.2, 1.2, 1.7, C.wood, -0.4, 0, -0.4));
   g.add(gableRoof(2.6, 0.9, 2.0, C.woodDark, -0.4, 1.2, -0.4));
   g.add(box(0.45, 0.75, 0.05, C.dark, -0.4, 0, 0.47));
-  g.add(box(0.35, 0.3, 0.05, C.dark, -1.1, 0.55, 0.47));
+  g.add(box(0.35, 0.3, 0.05, C.dark, -1.1, 0.55, 0.47, WINDOW_GLOW));
 
   // Mesa de sierra con disco giratorio
   g.add(box(1.3, 0.5, 0.55, C.woodLight, 1.1, 0, 0.8));
@@ -498,6 +498,156 @@ function puerto(level) {
   return g;
 }
 
+function templo(level) {
+  const g = new THREE.Group();
+  // Escalinata de tres peldaños
+  for (let i = 0; i < 3; i++) g.add(box(3.6 - i * 0.3, 0.16, 2.8 - i * 0.3, i % 2 ? C.wallDark : C.wall, 0, i * 0.16, 0));
+  const base = 0.48;
+  const w = 2.6;
+  const d = 1.9;
+  // Naos y columnata (más columnas con el nivel)
+  g.add(box(w - 0.9, 1.4, d - 0.8, C.wall, 0, base, -0.05));
+  const perSide = Math.min(6, 3 + Math.floor(level / 2));
+  for (let i = 0; i < perSide; i++) {
+    const x = -w / 2 + (w * i) / (perSide - 1);
+    for (const z of [-d / 2, d / 2]) g.add(cyl(0.1, 0.12, 1.4, 8, C.white, x, base, z));
+  }
+  for (const x of [-w / 2, w / 2]) g.add(cyl(0.1, 0.12, 1.4, 8, C.white, x, base, 0));
+  g.add(box(w + 0.3, 0.22, d + 0.3, C.wallDark, 0, base + 1.4, 0));
+  const gold = level >= 5;
+  g.add(gableRoof(d + 0.3, 0.6, w + 0.4, gold ? C.gold : C.roofRed, 0, base + 1.62, 0));
+  g.children.at(-1).rotation.y = Math.PI / 2;
+  // Altar con fuego sagrado delante del templo
+  g.add(box(0.5, 0.45, 0.5, C.stone, 0, 0, 1.75));
+  const fire = mesh(new THREE.ConeGeometry(0.18, 0.45, 6), '#ffb347', { emissive: '#ff7a00', emissiveIntensity: 1.6 });
+  fire.position.set(0, 0.68, 1.75);
+  fire.userData.flicker = true;
+  g.add(fire);
+  // Estatua del dios desde el nivel 3
+  if (level >= 3) {
+    g.add(box(0.35, 0.3, 0.35, C.stone, 1.55, 0, 1.4));
+    const statue = mesh(new THREE.CylinderGeometry(0.1, 0.18, 0.7, 6), gold ? C.gold : '#cfd4da', gold ? { metalness: 0.6, roughness: 0.35 } : undefined);
+    statue.position.set(1.55, 0.65, 1.4);
+    g.add(statue);
+    const head = mesh(new THREE.SphereGeometry(0.1, 8, 6), gold ? C.gold : '#cfd4da');
+    head.position.set(1.55, 1.08, 1.4);
+    g.add(head);
+  }
+  return g;
+}
+
+const BRONZE = { metalness: 0.55, roughness: 0.45 };
+
+/** El Coloso se levanta por fases: pedestal, piernas, torso, cabeza y antorcha. */
+function coloso(level) {
+  const g = new THREE.Group();
+  const done = level >= 10;
+  const metal = done ? C.gold : '#a8743a';
+  // Pedestal escalonado
+  g.add(box(3.6, 0.5, 3.6, C.stone, 0, 0, 0), box(2.8, 0.6, 2.8, C.stoneDark, 0, 0.5, 0), box(2.2, 0.35, 2.2, C.stone, 0, 1.1, 0));
+  const y0 = 1.45;
+  const fig = new THREE.Group();
+  fig.position.y = y0;
+  // La figura mira hacia el mar (-Z)
+  fig.rotation.y = Math.PI;
+  g.add(fig);
+  const part = (geo, x, y, z, rx = 0, rz = 0) => {
+    const m = mesh(geo, metal, BRONZE);
+    m.position.set(x, y, z);
+    m.rotation.set(rx, 0, rz);
+    fig.add(m);
+    return m;
+  };
+  if (level >= 1) {
+    part(new THREE.BoxGeometry(0.45, 0.3, 0.7), -0.45, 0.15, 0.1);
+    part(new THREE.BoxGeometry(0.45, 0.3, 0.7), 0.45, 0.15, 0.1);
+  }
+  if (level >= 2) {
+    part(new THREE.CylinderGeometry(0.22, 0.26, 2.0, 7), -0.45, 1.3, 0);
+    part(new THREE.CylinderGeometry(0.22, 0.26, 2.0, 7), 0.45, 1.3, 0);
+  }
+  if (level >= 4) {
+    // Túnica y torso
+    part(new THREE.CylinderGeometry(0.7, 0.95, 1.4, 8), 0, 2.6, 0);
+    part(new THREE.CylinderGeometry(0.55, 0.7, 1.4, 8), 0, 3.95, 0);
+  }
+  if (level >= 6) {
+    part(new THREE.CylinderGeometry(0.18, 0.2, 0.35, 7), 0, 4.8, 0);
+    part(new THREE.SphereGeometry(0.42, 10, 8), 0, 5.25, 0);
+    // Corona de rayos
+    for (let i = 0; i < 7; i++) {
+      const a = (i / 7) * Math.PI * 2;
+      const ray = part(new THREE.ConeGeometry(0.06, 0.45, 4), Math.sin(a) * 0.38, 5.55, Math.cos(a) * 0.38);
+      ray.rotation.set(Math.cos(a) * 0.5, 0, -Math.sin(a) * 0.5);
+    }
+  }
+  if (level >= 8) {
+    // Brazo izquierdo abajo con escudo; brazo derecho alzado con la antorcha
+    part(new THREE.CylinderGeometry(0.14, 0.16, 1.5, 6), -0.75, 3.7, 0, 0, -0.15);
+    part(new THREE.CylinderGeometry(0.42, 0.42, 0.08, 10), -0.95, 3.4, 0.15, Math.PI / 2, 0);
+    part(new THREE.CylinderGeometry(0.14, 0.16, 1.6, 6), 0.75, 5.0, 0, 0, 0.25);
+    part(new THREE.CylinderGeometry(0.12, 0.08, 0.6, 6), 0.95, 6.05, 0);
+  }
+  if (done) {
+    const flame = mesh(new THREE.ConeGeometry(0.22, 0.6, 7), '#ffcf5a', { emissive: '#ff9a00', emissiveIntensity: 2 });
+    flame.position.set(0.95, 6.6, 0);
+    flame.userData.flicker = true;
+    fig.add(flame);
+  } else {
+    // Andamio permanente mientras la maravilla no esté terminada
+    const h = 1 + Math.min(level, 9) * 0.65;
+    const s = 1.5;
+    for (const [x, z] of [[-s, -s], [s, -s], [-s, s], [s, s]]) g.add(box(0.1, h, 0.1, C.woodLight, x, y0, z));
+    for (let y = y0 + 0.9; y < y0 + h; y += 1.1) {
+      g.add(box(2 * s, 0.07, 0.07, C.woodLight, 0, y, s), box(2 * s, 0.07, 0.07, C.woodLight, 0, y, -s));
+      g.add(box(0.07, 0.07, 2 * s, C.woodLight, s, y, 0), box(0.07, 0.07, 2 * s, C.woodLight, -s, y, 0));
+    }
+  }
+  return g;
+}
+
+// ── Vida en la isla ──────────────────────────────────────────────────────────
+
+const CLOTHES = ['#b8442f', '#3f6fa8', '#e3b23c', '#6bbf59', '#8a5ab8', '#d9d2c3'];
+
+/** Aldeano diminuto (0,5 de alto). */
+export function createVillager(i) {
+  const g = new THREE.Group();
+  g.add(cyl(0.07, 0.1, 0.28, 6, CLOTHES[i % CLOTHES.length]));
+  const head = mesh(new THREE.SphereGeometry(0.06, 6, 5), '#e8c39e');
+  head.position.y = 0.34;
+  g.add(head);
+  if (i % 3 === 0) g.add(box(0.14, 0.14, 0.14, C.woodLight, 0, 0.36, -0.04));
+  for (const m of g.children) m.castShadow = false;
+  return g;
+}
+
+export function createGull() {
+  const g = new THREE.Group();
+  const white = mat('#f4f4f2');
+  const body = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.12, 0.5), white);
+  g.add(body);
+  for (const s of [-1, 1]) {
+    const wing = new THREE.Group();
+    wing.position.x = s * 0.07;
+    const blade = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.03, 0.22), white);
+    blade.position.x = s * 0.35;
+    const tip = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.031, 0.18), mat('#3a3a3a'));
+    tip.position.x = s * 0.62;
+    wing.add(blade, tip);
+    wing.userData.side = s;
+    g.add(wing);
+  }
+  return g;
+}
+
+/** Material de las ventanas: la escena las enciende al anochecer. */
+export const WINDOW_GLOW = { emissive: '#ffb347', emissiveIntensity: 0 };
+
+export function windowMaterial() {
+  return mat(C.dark, WINDOW_GLOW);
+}
+
 export function wallHeight(level) {
   return 1.0 + Math.min(level, 10) * 0.12;
 }
@@ -540,12 +690,12 @@ function emptyPlot(id) {
   return g;
 }
 
-const FACTORIES = { ayuntamiento, aserradero, cantera, granja, mina, fundicion, mercado, almacen, academia, cuartel, puerto, muralla };
+const FACTORIES = { ayuntamiento, aserradero, cantera, granja, mina, fundicion, mercado, almacen, academia, templo, cuartel, puerto, muralla, coloso };
 
 export function createBuilding(id, level) {
   if (level <= 0) return emptyPlot(id);
   const g = FACTORIES[id](level);
-  if (id !== 'puerto' && id !== 'muralla') g.scale.setScalar(1 + Math.min(level, 15) * 0.025);
+  if (id !== 'puerto' && id !== 'muralla' && id !== 'coloso') g.scale.setScalar(1 + Math.min(level, 15) * 0.025);
   return g;
 }
 

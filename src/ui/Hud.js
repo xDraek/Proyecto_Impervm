@@ -1,8 +1,25 @@
-import { BUILDINGS, BUILDING_KEYS, ISLANDS, ISLAND_BY_ID, ISLAND_TYPES, MISSION_TYPES, PLAYER_UNITS, RESEARCH, RESOURCES, RESOURCE_KEYS, UNITS } from '../game/data.js';
-import { canAfford, multiplyCost } from '../game/rules.js';
+import { play } from '../audio.js';
+import { GAME_SPEED } from '../config.js';
+import {
+  BUILDINGS,
+  BUILDING_KEYS,
+  ISLANDS,
+  ISLAND_BY_ID,
+  ISLAND_TYPES,
+  MISSION_TYPES,
+  PLAYER_UNITS,
+  POWERS,
+  RESEARCH,
+  RESOURCES,
+  RESOURCE_KEYS,
+  UNITS,
+  VISITORS,
+} from '../game/data.js';
+import { HOUR_MS, canAfford, multiplyCost } from '../game/rules.js';
 import { buildingPanel } from './buildingPanel.js';
-import { costItems, fmtNum, fmtTime, unitList } from './format.js';
+import { bag, costItems, fmtNum, fmtTime, unitList } from './format.js';
 import { fleetFor, islandPanel, readFleet } from './islandPanel.js';
+import { questsHtml, rankingHtml } from './modals.js';
 import { reportsHtml } from './reports.js';
 
 const $ = (sel) => document.querySelector(sel);
@@ -14,10 +31,13 @@ const $ = (sel) => document.querySelector(sel);
  * el sitio con atributos data-*, para no perder clics ni lo que estés tecleando.
  */
 export class Hud {
-  constructor(game, { onSelect, onView }) {
+  constructor(game, { onSelect, onView, settings }) {
     this.game = game;
     this.onSelect = onSelect;
     this.onView = onView;
+    this.settings = settings;
+    this.modalKind = null;
+    this.claimable = game.claimableQuests();
     this.selected = null;
     this.view = 'isla';
     this.panelView = null;
@@ -31,6 +51,10 @@ export class Hud {
     this.modal = $('#modal');
     this.viewBtn = $('#view-btn');
     this.reportsBtn = $('#reports-btn');
+    this.questsBtn = $('#quests-btn');
+    this.favorEl = $('#favor');
+    this.visitorEl = $('#visitor');
+    this.menu = $('#menu');
 
     this.#buildResources();
 
@@ -48,10 +72,46 @@ export class Hud {
     this.alert.addEventListener('click', () => this.onSelect('muralla'));
     this.viewBtn.addEventListener('click', () => this.onView(this.view === 'isla' ? 'mapa' : 'isla'));
     this.reportsBtn.addEventListener('click', () => this.openReports());
+    this.questsBtn.addEventListener('click', () => this.openModal('quests'));
+    $('#rank-btn').addEventListener('click', () => this.openModal('ranking'));
+    this.favorEl.addEventListener('click', () => this.onSelect('templo'));
     this.modal.addEventListener('click', (e) => {
       if (e.target === this.modal || e.target.closest('[data-action="close-modal"]')) this.closeModal();
+      const claim = e.target.closest('[data-action="claim"]');
+      if (claim && !claim.disabled) {
+        const res = game.claimQuest(claim.dataset.id);
+        if (res.ok) play('coins');
+        else this.toast(res.reason, 'error');
+      }
     });
-    $('#menu-btn').addEventListener('click', () => {
+    this.visitorEl.addEventListener('click', (e) => {
+      const btn = e.target.closest('[data-action]');
+      if (!btn || btn.disabled) return;
+      if (btn.dataset.action === 'accept') {
+        const res = game.acceptVisitor();
+        if (res.ok) play('coins');
+        else this.toast(res.reason, 'error');
+      } else {
+        game.dismissVisitor();
+      }
+    });
+
+    // Menú de opciones
+    $('#menu-btn').addEventListener('click', (e) => {
+      e.stopPropagation();
+      this.menu.hidden = !this.menu.hidden;
+      this.menu.querySelector('[name="sound"]').checked = settings.sound();
+      this.menu.querySelector('[name="daynight"]').checked = settings.dayNight();
+    });
+    document.addEventListener('click', (e) => {
+      if (!this.menu.hidden && !this.menu.contains(e.target)) this.menu.hidden = true;
+    });
+    this.menu.addEventListener('change', (e) => {
+      if (e.target.name === 'sound') settings.setSound(e.target.checked);
+      if (e.target.name === 'daynight') settings.setDayNight(e.target.checked);
+    });
+    this.menu.querySelector('[data-action="reset"]').addEventListener('click', () => {
+      this.menu.hidden = true;
       if (confirm('¿Reiniciar la partida? Perderás todo el progreso.')) {
         game.reset();
         this.onSelect(null);
@@ -95,15 +155,29 @@ export class Hud {
   }
 
   openReports() {
+    this.modalKind = 'reports';
     this.modal.innerHTML = reportsHtml(this.game.reports);
     this.modal.hidden = false;
     this.modal.querySelector('details')?.setAttribute('open', '');
     this.game.markReportsRead();
   }
 
+  openModal(kind) {
+    this.modalKind = kind;
+    this.cache.modal = '';
+    this.modal.hidden = false;
+    this.#renderModal();
+  }
+
   closeModal() {
+    this.modalKind = null;
     this.modal.hidden = true;
     this.modal.innerHTML = '';
+  }
+
+  #renderModal() {
+    if (this.modalKind === 'quests') this.#setHtml(this.modal, 'modal', questsHtml(this.game));
+    else if (this.modalKind === 'ranking') this.#setHtml(this.modal, 'modal', rankingHtml(this.game));
   }
 
   /** Regenera lo que dependa de la partida (solo si su HTML cambia). */
@@ -112,19 +186,34 @@ export class Hud {
     this.#renderPanel();
     this.#renderDock();
     this.#renderAlert();
+    this.#renderVisitor();
+    this.#renderModal();
     const unread = this.game.unreadReports;
     const badge = this.reportsBtn.querySelector('.badge');
     badge.hidden = !unread;
     badge.textContent = unread;
+
+    // Avisar cuando una misión queda lista para reclamar
+    const claimable = this.game.claimableQuests();
+    const qBadge = this.questsBtn.querySelector('.badge');
+    qBadge.hidden = !claimable;
+    qBadge.textContent = claimable;
+    if (claimable > this.claimable) {
+      const q = this.game.activeQuests().find((x) => x.done);
+      if (q) this.toast(`📋 Misión cumplida: ${q.title}. ¡Reclama la recompensa!`, 'success');
+    }
+    this.claimable = claimable;
     this.update();
   }
 
   /** Refresco rápido: recursos, barras y botones. */
   update() {
     this.#updateResources();
+    this.#updateFavor();
     this.#refreshLive(this.panel);
     this.#refreshLive(this.dock);
     this.#refreshLive(this.alert);
+    this.#refreshLive(this.visitorEl);
     this.panelView?.refresh?.(this.panel);
   }
 
@@ -185,6 +274,16 @@ export class Hud {
       if (starving) lines.push('Hambruna: la producción cae a la mitad');
       els.root.title = lines.join('\n');
     }
+  }
+
+  #updateFavor() {
+    const game = this.game;
+    const show = game.level('templo') > 0;
+    this.favorEl.hidden = !show;
+    if (!show) return;
+    const text = `🙏 ${fmtNum(game.favor)}`;
+    if (this.favorEl.textContent !== text) this.favorEl.textContent = text;
+    this.favorEl.title = `Favor de los dioses: ${fmtNum(game.favor)} / ${fmtNum(game.favorMax())}\nClic para abrir el templo`;
   }
 
   // ── Barra lateral ─────────────────────────────────────────────────────────
@@ -312,9 +411,14 @@ export class Hud {
     const game = this.game;
     const root = this.panel;
     const action = btn.dataset.action;
-    const report = (res, okText) => {
-      if (!res?.ok) this.toast(res?.reason ?? 'No se ha podido.', 'error');
-      else if (okText) this.toast(okText, 'success');
+    const report = (res, okText, sound = 'build') => {
+      if (!res?.ok) {
+        this.toast(res?.reason ?? 'No se ha podido.', 'error');
+        play('error');
+        return;
+      }
+      play(sound);
+      if (okText) this.toast(okText, 'success');
     };
 
     switch (action) {
@@ -356,7 +460,7 @@ export class Hud {
         const to = root.querySelector('[name="t-to"]').value;
         const amount = Number(root.querySelector('[name="t-amount"]').value);
         const res = game.trade(from, to, amount);
-        report(res, res.ok ? `⚖️ Cambiados ${RESOURCES[from].icon} ${fmtNum(res.paid)} por ${RESOURCES[to].icon} ${fmtNum(res.got)}` : null);
+        report(res, res.ok ? `⚖️ Cambiados ${RESOURCES[from].icon} ${fmtNum(res.paid)} por ${RESOURCES[to].icon} ${fmtNum(res.got)}` : null, 'coins');
         break;
       }
       case 'open-map':
@@ -374,7 +478,13 @@ export class Hud {
         const isl = ISLAND_BY_ID[this.selected];
         const res = game.sendMission(type, this.selected, units);
         if (res.ok) for (const input of root.querySelectorAll('input[name^="f-"]')) input.value = '';
-        report(res, `${MISSION_TYPES[type].icon} La flota zarpa hacia ${isl.name}`);
+        report(res, `${MISSION_TYPES[type].icon} La flota zarpa hacia ${isl.name}`, 'sail');
+        break;
+      }
+      case 'power': {
+        const p = POWERS[btn.dataset.id];
+        report(game.castPower(btn.dataset.id), null, 'magic');
+        if (btn.dataset.id === 'rayo') this.toast(`${p.icon} ¡Un rayo parte los mástiles piratas!`, 'success');
         break;
       }
     }
@@ -410,11 +520,17 @@ export class Hud {
       const more = tq.length > 1 ? ` (+${tq.length - 1})` : '';
       rows.push(row({ icon: u.icon, title: `${head.done}/${head.count} ${u.name}${more}`, start: head.start, end: tq.at(-1).end, select: building }));
     }
+    for (const [id, p] of Object.entries(POWERS)) {
+      const until = game.buffUntil(id);
+      if (!until) continue;
+      const start = until - (p.duration * HOUR_MS) / GAME_SPEED;
+      rows.push(row({ icon: p.icon, title: p.name, start, end: until, select: 'templo' }));
+    }
     for (const m of game.missions) {
       const isl = ISLAND_BY_ID[m.target];
       const t = MISSION_TYPES[m.type];
       const going = m.phase === 'ida';
-      const start = going ? m.depart : m.recalled ? (m.back + m.depart) / 2 : m.arrive;
+      const start = going ? m.depart : (m.turn ?? (m.recalled ? (m.back + m.depart) / 2 : m.arrive));
       const end = going ? m.arrive : m.back;
       rows.push(
         row({
@@ -471,6 +587,23 @@ export class Hud {
       <div><b>¡Piratas a la vista!</b> Llegan en <span data-until="${raid.arrival}"></span>
       <div class="small">${unitList(raid.army)} · Defiende con tropas en casa y la muralla</div></div>`;
     this.#setHtml(this.alert, 'alert', html);
+  }
+
+  #renderVisitor() {
+    const v = this.game.visitor;
+    this.visitorEl.hidden = !v;
+    if (!v) {
+      this.cache.visitor = '';
+      return;
+    }
+    const info = VISITORS[v.kind];
+    const offer = v.units ? unitList(v.units) : bag(v.get);
+    const html = `<span class="alert-icon">${info.icon}</span>
+      <div class="visitor-body"><b>${info.name}</b> · se va en <span data-until="${v.expires}"></span>
+        <div class="small">Te ofrece ${offer} a cambio de ${bag(v.give)}</div></div>
+      <button class="primary small auto" data-action="accept" data-need='${JSON.stringify(v.give)}' data-blocked="0">Aceptar</button>
+      <button class="ghost small" data-action="dismiss">No</button>`;
+    this.#setHtml(this.visitorEl, 'visitor', html);
   }
 
   #setHtml(el, key, html) {

@@ -97,7 +97,7 @@ export const BUILDINGS = {
   almacen: {
     name: 'Almacén',
     icon: '📦',
-    description: 'Amplía la capacidad máxima de todos los recursos.',
+    description: 'Amplía la capacidad máxima de todos los recursos y esconde una parte de cada uno, que los piratas no pueden robar.',
     baseCost: { madera: 100, piedra: 60 },
     costFactor: 1.7,
     baseTime: 45,
@@ -110,6 +110,15 @@ export const BUILDINGS = {
     costFactor: 1.75,
     baseTime: 80,
     requires: { ayuntamiento: 2 },
+  },
+  templo: {
+    name: 'Templo',
+    icon: '🛕',
+    description: 'Los sacerdotes ganan el favor de los dioses, que puedes gastar en poderes divinos. Cada nivel da más favor por hora y permite acumular más.',
+    baseCost: { madera: 250, piedra: 350, cristal: 60 },
+    costFactor: 1.7,
+    baseTime: 110,
+    requires: { ayuntamiento: 3, academia: 1 },
   },
   cuartel: {
     name: 'Cuartel',
@@ -137,6 +146,16 @@ export const BUILDINGS = {
     costFactor: 1.75,
     baseTime: 100,
     requires: { cuartel: 1 },
+  },
+  coloso: {
+    name: 'Coloso',
+    icon: '🗽',
+    description: 'Una maravilla del mundo que vigila el mar. Cada nivel aumenta un 5 % toda la producción. Al nivel 10, tu imperio será leyenda.',
+    baseCost: { madera: 5000, piedra: 8000, hierro: 2000, cristal: 3000, oro: 2000 },
+    costFactor: 1.45,
+    baseTime: 3600,
+    maxLevel: 10,
+    requires: { ayuntamiento: 8, arquitectura: 4 },
   },
 };
 
@@ -403,7 +422,7 @@ export const RESEARCH = {
   navegacion: {
     name: 'Navegación',
     icon: '🧭',
-    description: 'Brújulas y velas latinas. Nivel 1: trirremes. Nivel 3: galeones.',
+    description: 'Brújulas y velas latinas. Nivel 1: trirremes. Nivel 2: expediciones al Mar de las Brumas. Nivel 3: galeones.',
     effect: (n) => `Flotas un ${n * 10} % más rápidas`,
     baseCost: { madera: 300, cristal: 100 },
     baseTime: 220,
@@ -434,6 +453,7 @@ export const ISLAND_TYPES = {
   ruinas: { name: 'Ruinas antiguas', icon: '🏺' },
   libre: { name: 'Isla deshabitada', icon: '🌴' },
   kraken: { name: 'Guarida del Kraken', icon: '🐙' },
+  brumas: { name: 'Mar abierto', icon: '🌫️' },
 };
 
 export const ISLANDS = [
@@ -477,6 +497,7 @@ export const ISLANDS = [
     loot: { max: 24000, rate: 1000, mix: { madera: 0.2, hierro: 0.3, cristal: 0.2, oro: 0.3 } },
   },
   { id: 'herrumbre', name: 'Isla Herrumbre', angle: 8, dist: 190, size: 6.5, type: 'libre', specialty: 'hierro', yield: 110 },
+  { id: 'brumas', name: 'Mar de las Brumas', angle: 236, dist: 245, size: 5, type: 'brumas' },
   {
     id: 'kraken', name: 'Fosa del Kraken', angle: 98, dist: 222, size: 8, type: 'kraken', tier: 7,
     garrison: { kraken: 1, corsario: 10 }, wall: 0.4, regenHours: 36,
@@ -493,4 +514,111 @@ export const MISSION_TYPES = {
   explorar: { name: 'Explorar', icon: '🔭' },
   atacar: { name: 'Atacar', icon: '⚔️' },
   colonizar: { name: 'Colonizar', icon: '🚩' },
+  expedicion: { name: 'Expedición', icon: '🧭' },
+};
+
+// ── Templo ───────────────────────────────────────────────────────────────────
+// duration: horas de juego que dura el efecto (0 = instantáneo).
+
+export const POWERS = {
+  cosecha: {
+    name: 'Cosecha abundante',
+    icon: '🌾',
+    description: '+25 % de toda la producción durante 2 horas.',
+    cost: 60,
+    duration: 2,
+  },
+  inspiracion: {
+    name: 'Inspiración',
+    icon: '🦉',
+    description: 'La obra y la investigación en curso terminan un 30 % antes.',
+    cost: 50,
+    duration: 0,
+  },
+  viento: {
+    name: 'Viento favorable',
+    icon: '🌬️',
+    description: 'Tus flotas en el mar se ahorran la mitad de lo que les queda de trayecto.',
+    cost: 70,
+    duration: 0,
+  },
+  egida: {
+    name: 'Égida',
+    icon: '🛡️',
+    description: '+50 % de vida para los defensores de tu isla durante 3 horas.',
+    cost: 80,
+    duration: 3,
+  },
+  rayo: {
+    name: 'Ira de los dioses',
+    icon: '⚡',
+    description: 'Un rayo hunde el 40 % de la flota pirata que se acerca.',
+    cost: 120,
+    duration: 0,
+  },
+};
+
+export const POWER_KEYS = Object.keys(POWERS);
+
+// ── Clasificación ────────────────────────────────────────────────────────────
+// Imperios rivales: sus puntos crecen con las horas de juego (base + rate·h^0,85).
+
+export const RIVALS = [
+  { name: 'Talasocracia de Nerea', base: 40, rate: 38 },
+  { name: 'Liga de Corinto', base: 120, rate: 26 },
+  { name: 'Reino de Tálasa', base: 60, rate: 21 },
+  { name: 'Casa Velar', base: 200, rate: 14 },
+  { name: 'Dominio de Kérkyra', base: 30, rate: 17 },
+  { name: 'Imperio Escarlata', base: 90, rate: 11 },
+  { name: 'Hermandad del Coral', base: 20, rate: 8 },
+  { name: 'Señorío de Ítaca', base: 15, rate: 5 },
+  { name: 'Tribu del Cuervo', base: 10, rate: 3 },
+];
+
+// ── Misiones (objetivos con recompensa) ──────────────────────────────────────
+// goal(game) → [actual, objetivo]. Se muestran en orden, unas pocas a la vez.
+
+const lvl = (id, n) => (g) => [Math.min(g.level(id), n), n];
+const res = (id, n) => (g) => [Math.min(g.researchLevel(id), n), n];
+const stat = (key, n) => (g) => [Math.min(g.stats[key] ?? 0, n), n];
+
+export const QUESTS = [
+  { id: 'q-aserradero', title: 'Más madera', text: 'Mejora el aserradero a nivel 2.', goal: lvl('aserradero', 2), reward: { madera: 150, piedra: 100 } },
+  { id: 'q-granja', title: 'Pan para todos', text: 'Construye la granja.', goal: lvl('granja', 1), reward: { comida: 250, madera: 100 } },
+  { id: 'q-cantera', title: 'Cimientos', text: 'Mejora la cantera a nivel 2.', goal: lvl('cantera', 2), reward: { piedra: 200 } },
+  { id: 'q-almacen', title: 'Un lugar para todo', text: 'Construye el almacén.', goal: lvl('almacen', 1), reward: { madera: 200, piedra: 150 } },
+  { id: 'q-ayto2', title: 'Villa en crecimiento', text: 'Mejora el ayuntamiento a nivel 2.', goal: lvl('ayuntamiento', 2), reward: { madera: 300, piedra: 300, comida: 200 } },
+  { id: 'q-academia', title: 'Amor al saber', text: 'Construye la academia.', goal: lvl('academia', 1), reward: { madera: 250, piedra: 250 } },
+  { id: 'q-silvi', title: 'Primeros sabios', text: 'Investiga Silvicultura.', goal: res('silvicultura', 1), reward: { madera: 400 } },
+  { id: 'q-cuartel', title: 'Hombres de armas', text: 'Construye el cuartel.', goal: lvl('cuartel', 1), reward: { comida: 300, madera: 200 } },
+  { id: 'q-lanceros', title: 'La primera guardia', text: 'Ten 10 lanceros en tu ejército.', goal: (g) => [Math.min(g.armyCount('lancero'), 10), 10], reward: { comida: 300, madera: 300 } },
+  { id: 'q-puerto', title: 'Rumbo al mar', text: 'Construye el puerto.', goal: lvl('puerto', 1), reward: { madera: 400, piedra: 200 } },
+  { id: 'q-explora', title: 'Tierra a la vista', text: 'Explora una isla del archipiélago.', goal: (g) => [Math.min(g.exploredCount(), 1), 1], reward: { madera: 300, comida: 300 } },
+  { id: 'q-fundicion', title: 'Edad del hierro', text: 'Construye la fundición.', goal: lvl('fundicion', 1), reward: { piedra: 400, comida: 200 } },
+  { id: 'q-ayto3', title: 'Ciudad', text: 'Mejora el ayuntamiento a nivel 3. ¡Cuidado con los piratas!', goal: lvl('ayuntamiento', 3), reward: { madera: 600, piedra: 600, hierro: 200 } },
+  { id: 'q-muralla', title: 'Puertas cerradas', text: 'Construye la muralla.', goal: lvl('muralla', 1), reward: { piedra: 600 } },
+  { id: 'q-saqueo', title: 'Botín bárbaro', text: 'Gana un ataque contra una isla enemiga.', goal: stat('victories', 1), reward: { hierro: 300, oro: 100 } },
+  { id: 'q-mercado', title: 'Comerciantes', text: 'Construye el mercado.', goal: lvl('mercado', 1), reward: { oro: 200, cristal: 150 } },
+  { id: 'q-defensa', title: 'Ni un paso atrás', text: 'Rechaza un asalto pirata.', goal: stat('raidsRepelled', 1), reward: { oro: 300, hierro: 300 } },
+  { id: 'q-templo', title: 'Favor divino', text: 'Construye el templo.', goal: lvl('templo', 1), reward: { cristal: 300, oro: 150 } },
+  { id: 'q-poder', title: 'Los dioses escuchan', text: 'Invoca un poder divino.', goal: stat('powers', 1), reward: { favor: 40 } },
+  { id: 'q-tesoro', title: 'Cazatesoros', text: 'Encuentra el tesoro de unas ruinas.', goal: stat('treasures', 1), reward: { oro: 300 } },
+  { id: 'q-cartografia', title: 'Cartas náuticas', text: 'Investiga Cartografía.', goal: res('cartografia', 1), reward: { madera: 800, comida: 800 } },
+  { id: 'q-colonia', title: 'Nuevo mundo', text: 'Funda tu primera colonia.', goal: (g) => [Math.min(g.colonies().length, 1), 1], reward: { oro: 500, cristal: 400 } },
+  { id: 'q-expedicion', title: 'Más allá de la niebla', text: 'Vuelve de una expedición al Mar de las Brumas.', goal: stat('expeditions', 1), reward: { hierro: 600, oro: 300 } },
+  { id: 'q-ejercito', title: 'Gran ejército', text: 'Ten 100 tropas de tierra.', goal: (g) => [Math.min(g.landArmy(), 100), 100], reward: { comida: 2000, hierro: 800 } },
+  { id: 'q-saqueos', title: 'Terror de los mares', text: 'Gana 10 ataques.', goal: stat('victories', 10), reward: { oro: 1500, cristal: 1000 } },
+  { id: 'q-ayto8', title: 'Capital del archipiélago', text: 'Mejora el ayuntamiento a nivel 8.', goal: lvl('ayuntamiento', 8), reward: { madera: 5000, piedra: 5000, oro: 1000 } },
+  { id: 'q-kraken', title: 'Matador de monstruos', text: 'Derrota al Kraken.', goal: stat('kraken', 1), reward: { oro: 5000, cristal: 5000 } },
+  { id: 'q-coloso1', title: 'Primera piedra', text: 'Empieza el Coloso (nivel 1).', goal: lvl('coloso', 1), reward: { oro: 2000, hierro: 2000 } },
+  { id: 'q-coloso', title: 'Leyenda eterna', text: 'Termina el Coloso (nivel 10).', goal: lvl('coloso', 10), reward: { oro: 20000 } },
+];
+
+// ── Visitantes que llegan a la isla de vez en cuando ─────────────────────────
+
+export const VISITORS = {
+  mercader: { name: 'Mercader ambulante', icon: '🧳' },
+  mercenarios: { name: 'Mercenarios', icon: '🗡️' },
+  peregrinos: { name: 'Peregrinos', icon: '🕯️' },
+  naufragio: { name: 'Restos de un naufragio', icon: '🛟' },
 };

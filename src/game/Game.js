@@ -5,38 +5,51 @@ import {
   ISLANDS,
   ISLAND_BY_ID,
   ISLAND_TYPES,
+  LAND_UNITS,
   PLAYER_UNITS,
+  POWERS,
+  QUESTS,
   RESEARCH,
   RESEARCH_KEYS,
   RESOURCES,
   RESOURCE_KEYS,
+  RIVALS,
   STARTING_RESOURCES,
   UNITS,
+  VISITORS,
 } from './data.js';
 import { battle, count, hasCombat } from './combat.js';
 import {
   HOUR_MS,
   buildSeconds,
+  buildingMax,
   canAfford,
   colonyCost,
   costFor,
   economy,
+  favorMax,
+  favorRate,
   fleetSlots,
+  investedIn,
   maxColonies,
   missingRequirements,
   multiplyCost,
   playerCombat,
+  protectedAmount,
   researchCost,
   researchMax,
   researchSeconds,
+  rivalScore,
+  scoreOf,
   storageCapacity,
+  sum,
   tradeRate,
   travelSeconds,
   unitSeconds,
   wallBonus,
 } from './rules.js';
 
-const SAVE_VERSION = 2;
+const SAVE_VERSION = 3;
 const MAX_REPORTS = 40;
 
 // Piratas: el primer asalto llega un rato después de que el ayuntamiento alcance
@@ -48,6 +61,9 @@ const RAID_MAX_H = 7;
 const RAID_WARNING_MIN = 20;
 const RAID_THEFT = 0.2;
 const LOOT_SHARE = 0.5;
+const VISIT_MIN_H = 3;
+const VISIT_MAX_H = 6;
+const ACTIVE_QUESTS = 3;
 
 const hours = (h) => (h * HOUR_MS) / GAME_SPEED;
 
@@ -55,7 +71,7 @@ function freshIsland(isl, t) {
   const stock = {};
   for (const [res, k] of Object.entries(isl.loot?.mix ?? {})) stock[res] = isl.loot.max * k * 0.6;
   return {
-    explored: false,
+    explored: isl.type === 'brumas',
     colonized: false,
     looted: false,
     garrison: { ...(isl.garrison ?? {}) },
@@ -88,6 +104,13 @@ function newState(now) {
     raid: null,
     nextRaidAt: null,
     reports: [],
+    favor: 0,
+    buffs: {},
+    stats: { spent: 0, victories: 0, raidsRepelled: 0, expeditions: 0, powers: 0, treasures: 0, kraken: 0 },
+    quests: { claimed: [] },
+    visitor: null,
+    nextVisitAt: null,
+    startedAt: now,
     seq: 1,
     lastUpdate: now,
   };
@@ -98,8 +121,8 @@ function loadState() {
     const raw = localStorage.getItem(SAVE_KEY);
     if (!raw) return null;
     const saved = JSON.parse(raw);
-    // La versión 1 solo tenía recursos, edificios y la cola de obras: se amplía.
-    if (saved?.version !== 1 && saved?.version !== SAVE_VERSION) return null;
+    // Las versiones antiguas tienen menos campos: se completan con los de una partida nueva.
+    if (![1, 2, SAVE_VERSION].includes(saved?.version)) return null;
     const base = newState(saved.lastUpdate ?? Date.now());
     const islands = { ...base.islands };
     for (const [id, isl] of Object.entries(saved.islands ?? {})) if (islands[id]) islands[id] = { ...islands[id], ...isl };
@@ -114,6 +137,10 @@ function loadState() {
       training: { ...base.training, ...saved.training },
       missions: saved.missions ?? [],
       reports: saved.reports ?? [],
+      buffs: saved.buffs ?? {},
+      stats: { ...base.stats, ...saved.stats, spent: saved.stats?.spent ?? investedIn({ ...base, ...saved }) },
+      quests: { claimed: saved.quests?.claimed ?? [] },
+      startedAt: saved.startedAt ?? Date.now(),
       islands,
     };
   } catch {
@@ -139,6 +166,7 @@ export class Game extends EventTarget {
     const now = Date.now();
     this.state = loadState() ?? newState(now);
     this.#ensureRaid(this.state.lastUpdate);
+    this.#ensureVisits(this.state.lastUpdate);
     const before = { ...this.state.resources };
     const away = now - this.state.lastUpdate;
     this.#advance(now);
@@ -188,17 +216,95 @@ export class Game extends EventTarget {
     return this.state.reports.filter((r) => !r.read).length;
   }
 
+  get stats() {
+    return this.state.stats;
+  }
+
+  get favor() {
+    return this.state.favor;
+  }
+
+  get visitor() {
+    return this.state.visitor;
+  }
+
+  favorRate() {
+    return favorRate(this.state);
+  }
+
+  favorMax() {
+    return favorMax(this.state);
+  }
+
+  /** Hasta cuándo dura un efecto divino (0 si no está activo). */
+  buffUntil(id, now = Date.now()) {
+    const until = this.state.buffs[id] ?? 0;
+    return until > now ? until : 0;
+  }
+
+  /** Unidades de un tipo contando las que están en el mar. */
+  armyCount(id) {
+    return (this.state.units[id] ?? 0) + this.state.missions.reduce((a, m) => a + (m.units[id] ?? 0), 0);
+  }
+
+  landArmy() {
+    return LAND_UNITS.reduce((a, id) => a + this.armyCount(id), 0);
+  }
+
+  exploredCount() {
+    return ISLANDS.filter((i) => i.type !== 'brumas' && this.state.islands[i.id].explored).length;
+  }
+
+  // ── Misiones (objetivos) ───────────────────────────────────────────────────
+
+  /** Las próximas misiones sin reclamar, con su progreso. */
+  activeQuests() {
+    const claimed = new Set(this.state.quests.claimed);
+    return QUESTS.filter((q) => !claimed.has(q.id))
+      .slice(0, ACTIVE_QUESTS)
+      .map((q) => {
+        const [current, target] = q.goal(this);
+        return { ...q, current, target, done: current >= target };
+      });
+  }
+
+  questsLeft() {
+    return QUESTS.length - this.state.quests.claimed.length;
+  }
+
+  claimableQuests() {
+    return this.activeQuests().filter((q) => q.done).length;
+  }
+
+  // ── Clasificación ──────────────────────────────────────────────────────────
+
+  score() {
+    return scoreOf(this.state.stats.spent);
+  }
+
+  ranking(now = Date.now()) {
+    const h = ((now - this.state.startedAt) / HOUR_MS) * GAME_SPEED;
+    const rows = RIVALS.map((r) => ({ name: r.name, points: rivalScore(r, h), player: false }));
+    rows.push({ name: 'Tu imperio', points: this.score(), player: true });
+    rows.sort((a, b) => b.points - a.points);
+    return rows.map((r, i) => ({ ...r, rank: i + 1 }));
+  }
+
   economy() {
-    return economy(this.state);
+    return economy(this.state, Date.now());
+  }
+
+  protectedAmount() {
+    return protectedAmount(this.state);
   }
 
   /** Producción neta por hora (con hambruna si no queda comida). */
   production() {
-    const eco = economy(this.state);
+    const eco = economy(this.state, Date.now());
     return this.starving(eco) ? eco.hungry : eco.net;
   }
 
-  starving(eco = economy(this.state)) {
+  starving(eco = economy(this.state, Date.now())) {
     return eco.net.comida < 0 && this.state.resources.comida < 1;
   }
 
@@ -228,6 +334,7 @@ export class Game extends EventTarget {
     const cost = costFor(id, level);
     return {
       level,
+      maxed: level > buildingMax(id),
       cost,
       seconds: buildSeconds(this.state, id, level),
       missing: missingRequirements(this.state, BUILDINGS[id].requires),
@@ -318,6 +425,7 @@ export class Game extends EventTarget {
     this.#advance(now);
     if (this.state.queue) return this.#fail('Ya hay una obra en marcha.');
     const next = this.nextUpgrade(id);
+    if (next.maxed) return this.#fail('Ya está terminado.');
     if (next.missing.length) return this.#fail('No cumples los requisitos.');
     if (!next.affordable) return this.#fail('No tienes recursos suficientes.');
 
@@ -450,6 +558,11 @@ export class Game extends EventTarget {
 
     if (type === 'explorar') {
       if (Object.keys(sent).some((id) => !UNITS[id].explorer)) reason ||= 'Para explorar envía solo botes exploradores.';
+    } else if (type === 'expedicion') {
+      if (isl.type !== 'brumas') reason ||= 'Las expediciones zarpan hacia el Mar de las Brumas.';
+      else if (this.researchLevel('navegacion') < 2) reason ||= 'Investiga Navegación 2 para aventurarte en la niebla.';
+    } else if (isl.type === 'brumas') {
+      reason ||= 'En el Mar de las Brumas solo caben expediciones.';
     } else if (type === 'atacar') {
       if (rt.colonized) reason ||= 'Es tu colonia.';
       else if (rt.explored && (isl.type === 'libre' || isl.type === 'ruinas')) reason ||= 'Aquí no hay nada que atacar.';
@@ -499,7 +612,70 @@ export class Game extends EventTarget {
     if (!m || m.phase !== 'ida') return;
     m.phase = 'vuelta';
     m.back = now + (now - m.depart);
+    m.turn = now;
     m.recalled = true;
+    this.#flush(true);
+  }
+
+  claimQuest(id, now = Date.now()) {
+    this.#advance(now);
+    const q = this.activeQuests().find((x) => x.id === id);
+    if (!q) return this.#fail('Esa misión no está disponible.');
+    if (!q.done) return this.#fail('Todavía no la has cumplido.');
+    this.state.quests.claimed.push(id);
+    const { favor, ...rest } = q.reward;
+    this.#gain(rest);
+    if (favor) this.state.favor += favor;
+    return this.#done();
+  }
+
+  castPower(id, now = Date.now()) {
+    this.#advance(now);
+    const p = POWERS[id];
+    const s = this.state;
+    if (!p) return this.#fail('Poder desconocido.');
+    if (this.level('templo') < 1) return this.#fail('Necesitas un templo.');
+    if (s.favor < p.cost) return this.#fail('No tienes favor suficiente.');
+    if (id === 'inspiracion') {
+      const qs = [s.queue, s.researchQueue].filter(Boolean);
+      if (!qs.length) return this.#fail('No hay ninguna obra ni investigación en curso.');
+      for (const q of qs) q.end = now + (q.end - now) * 0.7;
+    } else if (id === 'viento') {
+      if (!s.missions.length) return this.#fail('No tienes flotas en el mar.');
+      for (const m of s.missions) {
+        if (m.phase === 'ida') m.arrive = now + (m.arrive - now) * 0.5;
+        else m.back = now + (m.back - now) * 0.5;
+      }
+    } else if (id === 'rayo') {
+      if (!s.raid) return this.#fail('No hay piratas a la vista.');
+      for (const u of Object.keys(s.raid.army)) s.raid.army[u] = Math.round(s.raid.army[u] * 0.6);
+    } else {
+      s.buffs[id] = Math.max(s.buffs[id] ?? 0, now) + hours(p.duration);
+    }
+    s.favor -= p.cost;
+    s.stats.powers++;
+    this.#note(`${p.icon} ${p.name}`, 'success');
+    return this.#done();
+  }
+
+  acceptVisitor(now = Date.now()) {
+    this.#advance(now);
+    const v = this.state.visitor;
+    if (!v) return this.#fail('Ya no hay nadie esperando.');
+    if (v.give && !canAfford(this.state.resources, v.give)) return this.#fail('No tienes lo que te piden.');
+    if (v.give) this.#pay(v.give, false);
+    if (v.get) this.#gain(v.get);
+    if (v.units) for (const [id, n] of Object.entries(v.units)) this.state.units[id] += n;
+    this.state.visitor = null;
+    this.#scheduleVisit(now);
+    return this.#done();
+  }
+
+  dismissVisitor(now = Date.now()) {
+    this.#advance(now);
+    if (!this.state.visitor) return;
+    this.state.visitor = null;
+    this.#scheduleVisit(now);
     this.#flush(true);
   }
 
@@ -561,12 +737,20 @@ export class Game extends EventTarget {
     return r;
   }
 
-  #pay(cost) {
+  /** Gasto que cuenta para la puntuación (salvo que `invest` sea false). */
+  #pay(cost, invest = true) {
     for (const [res, n] of Object.entries(cost)) this.state.resources[res] -= n;
+    if (invest) this.state.stats.spent += sum(cost);
   }
 
   #refund(cost) {
     for (const [res, n] of Object.entries(cost)) this.state.resources[res] += n;
+    this.state.stats.spent = Math.max(0, this.state.stats.spent - sum(cost));
+  }
+
+  /** Recursos que llegan de fuera: botines, recompensas, regalos. */
+  #gain(bag) {
+    for (const [res, n] of Object.entries(bag ?? {})) this.state.resources[res] += n;
   }
 
   #garrisonAt(isl, rt, t) {
@@ -616,15 +800,21 @@ export class Game extends EventTarget {
     for (const m of s.missions) consider(m.phase === 'ida' ? m.arrive : m.back, (t) => this.#missionEvent(m, t));
     if (s.raid) consider(s.raid.arrival, (t) => this.#resolveRaid(t));
     else if (s.nextRaidAt) consider(s.nextRaidAt, (t) => this.#spawnRaid(t));
+    if (s.visitor) consider(s.visitor.expires, (t) => this.#visitorLeaves(t));
+    else if (s.nextVisitAt) consider(s.nextVisitAt, (t) => this.#spawnVisitor(t));
+    // El final de un efecto divino también es un suceso: cambia la producción
+    for (const [id, until] of Object.entries(s.buffs)) consider(until, () => delete s.buffs[id]);
     return best;
   }
 
   #accrue(t) {
     const s = this.state;
-    const h = Math.max(0, t - s.lastUpdate) / HOUR_MS;
-    s.lastUpdate = Math.max(s.lastUpdate, t);
+    const start = s.lastUpdate;
+    const h = Math.max(0, t - start) / HOUR_MS;
+    s.lastUpdate = Math.max(start, t);
     if (h === 0) return;
-    const eco = economy(s);
+    s.favor = Math.min(Math.max(s.favor, favorMax(s)), s.favor + favorRate(s) * h);
+    const eco = economy(s, start);
     const cap = storageCapacity(s);
     // Si el mantenimiento se come la comida, a partir de ese momento hay hambruna
     let fed = h;
@@ -650,6 +840,17 @@ export class Game extends EventTarget {
     const b = BUILDINGS[q.id];
     this.#note(`${b.icon} ${b.name} ha alcanzado el nivel ${q.level}`, 'success');
     this.#ensureRaid(t);
+    this.#ensureVisits(t);
+    if (q.id === 'coloso' && q.level >= buildingMax('coloso')) {
+      this.#report({
+        t,
+        kind: 'victoria',
+        outcome: 'victoria',
+        title: '¡El Coloso está terminado!',
+        text: 'Marineros de todo el archipiélago lo ven brillar desde el horizonte. Tu imperio ya es leyenda.',
+      });
+      this.#note('🗽 ¡Has terminado el Coloso! Tu imperio será recordado para siempre.', 'success');
+    }
   }
 
   #finishResearch() {
@@ -689,10 +890,12 @@ export class Game extends EventTarget {
     if (m.type === 'explorar') this.#arriveExplore(m, t);
     else if (m.type === 'atacar') this.#arriveAttack(m, t);
     else if (m.type === 'colonizar') this.#arriveColonize(m, t);
+    else if (m.type === 'expedicion') this.#arriveExpedition(m, t);
 
     if (count(m.units) > 0) {
       m.phase = 'vuelta';
-      m.back = t + (m.arrive - m.depart);
+      m.turn = t;
+      m.back = t + (m.arrive - m.depart) * (m.slow ?? 1);
     } else {
       this.state.missions = this.state.missions.filter((x) => x !== m);
     }
@@ -711,6 +914,7 @@ export class Game extends EventTarget {
     let text = `${ISLAND_TYPES[isl.type].icon} Es ${ISLAND_TYPES[isl.type].name.toLowerCase()}.`;
     if (isl.type === 'ruinas' && !rt.looted) {
       rt.looted = true;
+      this.state.stats.treasures++;
       for (const [res, n] of Object.entries(isl.treasure)) m.cargo[res] = (m.cargo[res] ?? 0) + n;
       text += ' ¡Entre los escombros había un tesoro!';
     } else if (isl.type === 'libre') {
@@ -734,6 +938,7 @@ export class Game extends EventTarget {
     rt.explored = true;
     if (isl.type === 'ruinas' && !rt.looted) {
       rt.looted = true;
+      this.state.stats.treasures++;
       for (const [res, n] of Object.entries(isl.treasure)) m.cargo[res] = (m.cargo[res] ?? 0) + n;
     }
     const garrison = this.#garrisonAt(isl, rt, t);
@@ -773,9 +978,93 @@ export class Game extends EventTarget {
       outcome === 'victoria' ? `⚔️ ${title}${loot && fmtBag(loot) ? ` · botín ${fmtBag(loot)}` : ''}` : `⚔️ ${title}`,
       outcome === 'victoria' ? 'success' : 'error',
     );
+    if (outcome === 'victoria') this.state.stats.victories++;
     if (isl.type === 'kraken' && outcome === 'victoria') {
+      this.state.stats.kraken++;
       this.#note('🐙 ¡Has derrotado al Kraken! Los mares son tuyos.', 'success');
     }
+  }
+
+  /** Expedición al Mar de las Brumas: un poco de todo, como en OGame. */
+  #arriveExpedition(m, t) {
+    const s = this.state;
+    s.stats.expeditions++;
+    let capacity = 0;
+    let power = 0;
+    for (const [id, n] of Object.entries(m.units)) {
+      capacity += n * (UNITS[id].cargo ?? 0);
+      power += n * UNITS[id].atk;
+    }
+    const roll = Math.random();
+    const report = { t, kind: 'expedicion', island: m.target, outcome: null };
+    const add = (bag) => {
+      for (const [res, n] of Object.entries(bag)) m.cargo[res] = (m.cargo[res] ?? 0) + n;
+    };
+    if (roll < 0.28) {
+      const pool = ['madera', 'piedra', 'hierro', 'cristal', 'oro'].sort(() => Math.random() - 0.5).slice(0, 2 + Math.floor(Math.random() * 2));
+      const total = Math.max(400, capacity * (0.4 + Math.random() * 0.6));
+      const bag = {};
+      for (const res of pool) bag[res] = Math.floor(total / pool.length / RESOURCES[res].value);
+      add(bag);
+      Object.assign(report, { title: 'Un pecio a la deriva', text: 'Entre la niebla aparece un barco mercante abandonado con la bodega llena.', loot: bag, outcome: 'victoria' });
+    } else if (roll < 0.4) {
+      const n = 1 + Math.floor(Math.random() * 3);
+      const type = Math.random() < 0.7 ? 'mercante' : 'trirreme';
+      m.units[type] = (m.units[type] ?? 0) + n;
+      Object.assign(report, { title: 'Barcos sin tripulación', text: `${n} × ${UNITS[type].name} flotaban vacíos en la niebla. Ahora navegan bajo tu bandera.`, outcome: 'victoria' });
+    } else if (roll < 0.48) {
+      const bag = { oro: Math.floor(600 + Math.random() * 1400), cristal: Math.floor(300 + Math.random() * 700) };
+      add(bag);
+      Object.assign(report, { title: 'Una isla que no sale en los mapas', text: 'En una cala escondida hay un cofre con el tesoro de algún pirata olvidado.', loot: bag, outcome: 'victoria' });
+    } else if (roll < 0.66) {
+      Object.assign(report, { title: 'Solo niebla', text: 'Días de niebla, gaviotas y silencio. La flota vuelve sin nada que contar.' });
+    } else if (roll < 0.78) {
+      const pirata = Math.max(3, Math.round((power / 11) * (0.4 + Math.random() * 0.5)));
+      const army = { pirata, corsario: Math.floor(pirata / 12) };
+      const { atkMul, hpMul } = playerCombat(s);
+      const result = battle({ units: army }, { units: m.units, atkMul, hpMul });
+      m.units = result.def.left;
+      const won = result.winner !== 'att';
+      const loot = won ? { oro: 15 * pirata } : null;
+      if (loot) add(loot);
+      Object.assign(report, {
+        title: won ? 'Emboscada pirata rechazada' : 'Emboscada pirata',
+        text: won ? 'Unos piratas os atacan entre la niebla, pero tu flota los pone en fuga.' : 'Unos piratas os atacan entre la niebla y hunden tu flota.',
+        battle: pick(result),
+        loot,
+        outcome: won ? 'victoria' : 'derrota',
+        defending: true,
+      });
+    } else if (roll < 0.86) {
+      m.slow = 2;
+      Object.assign(report, { title: 'Perdidos en la niebla', text: 'La flota se desorienta y tardará el doble en volver.', outcome: 'empate' });
+    } else if (roll < 0.93) {
+      const lost = {};
+      for (const [id, n] of Object.entries(m.units)) {
+        const k = Math.floor(n * 0.3);
+        if (k) {
+          lost[id] = k;
+          m.units[id] = n - k;
+        }
+      }
+      Object.assign(report, { title: '¡Una serpiente marina!', text: 'Un monstruo surge de las profundidades y se lleva parte de la flota.', lostUnits: lost, outcome: 'derrota' });
+    } else if (roll < 0.97) {
+      const hidden = ISLANDS.filter((i) => !s.islands[i.id].explored).slice(0, 3);
+      for (const isl of hidden) {
+        s.islands[isl.id].explored = true;
+        this.#intel(isl, s.islands[isl.id], t);
+      }
+      Object.assign(report, {
+        title: 'Cartas náuticas',
+        text: hidden.length ? `Un viejo navegante os vende sus cartas: ahora conoces ${hidden.map((i) => i.name).join(', ')}.` : 'Un viejo navegante os vende sus cartas, pero ya conocías todo lo que aparece en ellas.',
+        outcome: 'victoria',
+      });
+    } else {
+      s.favor += 50;
+      Object.assign(report, { title: 'Un altar en la niebla', text: 'Tus marineros encuentran un altar olvidado y hacen ofrendas. Los dioses te sonríen (+50 de favor).', outcome: 'victoria' });
+    }
+    this.#report(report);
+    this.#note(`🧭 Expedición: ${report.title}`, report.outcome === 'derrota' ? 'error' : 'success');
   }
 
   #arriveColonize(m, t) {
@@ -826,7 +1115,8 @@ export class Game extends EventTarget {
     const raid = s.raid;
     const wall = wallBonus(this.level('muralla'));
     const { atkMul, hpMul } = playerCombat(s);
-    const result = battle({ units: raid.army }, { units: { ...s.units }, atkMul, hpMul: hpMul + wall.hp, extraAtk: wall.towers });
+    const aegis = (s.buffs.egida ?? 0) > t ? 0.5 : 0;
+    const result = battle({ units: raid.army }, { units: { ...s.units }, atkMul, hpMul: hpMul + wall.hp + aegis, extraAtk: wall.towers });
     for (const id of PLAYER_UNITS) s.units[id] = result.def.left[id] ?? 0;
 
     let stolen = null;
@@ -835,13 +1125,15 @@ export class Game extends EventTarget {
     if (result.winner === 'att') {
       outcome = 'derrota';
       const bag = {};
-      for (const res of RESOURCE_KEYS) bag[res] = s.resources[res] * RAID_THEFT;
+      const safe = protectedAmount(s);
+      for (const res of RESOURCE_KEYS) bag[res] = Math.max(0, s.resources[res] - safe) * RAID_THEFT;
       stolen = takeLoot(bag, 500 * raid.tier, 1);
       for (const [res, n] of Object.entries(stolen)) s.resources[res] -= n;
     } else {
       outcome = result.winner === 'def' ? 'victoria' : 'empate';
       reward = outcome === 'victoria' ? { oro: 80 * raid.tier, hierro: 60 * raid.tier } : null;
-      if (reward) this.#refund(reward);
+      if (reward) this.#gain(reward);
+      s.stats.raidsRepelled++;
     }
     const title = {
       victoria: 'Asalto pirata rechazado',
@@ -852,6 +1144,68 @@ export class Game extends EventTarget {
     this.#note(`🏴‍☠️ ${title}${stolen ? ` · se llevan ${fmtBag(stolen)}` : ''}`, outcome === 'derrota' ? 'error' : 'success');
     s.raid = null;
     s.nextRaidAt = t + hours(RAID_MIN_H + Math.random() * (RAID_MAX_H - RAID_MIN_H));
+  }
+
+  // ── Visitantes ─────────────────────────────────────────────────────────────
+
+  #ensureVisits(t) {
+    const s = this.state;
+    if (!s.visitor && !s.nextVisitAt && this.level('ayuntamiento') >= 2) s.nextVisitAt = t + hours(1 + Math.random() * 2);
+  }
+
+  #scheduleVisit(t) {
+    this.state.nextVisitAt = t + hours(VISIT_MIN_H + Math.random() * (VISIT_MAX_H - VISIT_MIN_H));
+  }
+
+  #spawnVisitor(t) {
+    const s = this.state;
+    s.nextVisitAt = null;
+    const roll = Math.random();
+    const scale = 1 + this.level('ayuntamiento') * 0.4;
+    if (roll < 0.45) {
+      // Compra lo que te sobra y paga en algo escaso, mejor que el mercado
+      const common = ['madera', 'piedra', 'comida'].sort((a, b) => s.resources[b] - s.resources[a])[0];
+      const rare = ['hierro', 'cristal', 'oro'][Math.floor(Math.random() * 3)];
+      const give = Math.round((300 + Math.random() * 500) * scale);
+      const get = Math.round((give * RESOURCES[common].value * (0.8 + Math.random() * 0.3)) / RESOURCES[rare].value);
+      s.visitor = { kind: 'mercader', give: { [common]: give }, get: { [rare]: get }, expires: t + hours(1) };
+    } else if (roll < 0.7 && this.level('cuartel') >= 1) {
+      const type = ['lancero', 'arquero', 'espadachin'][Math.floor(Math.random() * 3)];
+      const n = Math.round((6 + Math.random() * 8) * Math.sqrt(scale));
+      const price = Math.round(n * (type === 'espadachin' ? 22 : 12));
+      s.visitor = { kind: 'mercenarios', give: { oro: price }, units: { [type]: n }, expires: t + hours(1) };
+    } else if (roll < 0.85) {
+      const bag = this.level('templo') ? null : { oro: Math.round(80 * scale) };
+      if (bag) this.#gain(bag);
+      else s.favor += 30;
+      this.#report({
+        t,
+        kind: 'visita',
+        title: 'Llegan peregrinos',
+        text: bag ? 'Unos peregrinos de paso dejan ofrendas en la plaza.' : 'Los peregrinos rezan en tu templo: +30 de favor.',
+        loot: bag,
+      });
+      this.#note(`${VISITORS.peregrinos.icon} Llegan peregrinos${bag ? '' : ' (+30 de favor)'}`, 'success');
+      this.#scheduleVisit(t);
+      return;
+    } else {
+      const bag = {};
+      for (const res of ['madera', 'hierro', 'comida']) bag[res] = Math.round((60 + Math.random() * 140) * scale);
+      this.#gain(bag);
+      this.#report({ t, kind: 'visita', title: 'Restos de un naufragio', text: 'La marea arrastra a la playa barriles y tablones de un barco hundido.', loot: bag });
+      this.#note(`${VISITORS.naufragio.icon} El mar trae restos de un naufragio: ${fmtBag(bag)}`, 'success');
+      this.#scheduleVisit(t);
+      return;
+    }
+    const v = VISITORS[s.visitor.kind];
+    this.#note(`${v.icon} ${v.name} en el puerto`, 'info');
+  }
+
+  #visitorLeaves(t) {
+    const v = VISITORS[this.state.visitor.kind];
+    this.state.visitor = null;
+    this.#scheduleVisit(t);
+    this.#note(`${v.icon} ${v.name}: se han marchado`, 'info');
   }
 }
 

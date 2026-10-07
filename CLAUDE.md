@@ -14,5 +14,7 @@ Juego de navegador de gestión de imperio al estilo de OGame o Ikariam: un archi
 
 - Servidor de desarrollo: configuración `imperium` en `.claude/launch.json` (puerto 5173).
 - `?speed=N` acelera la producción, las obras, las investigaciones, los reclutas y los viajes.
+- `?save=prueba` usa otra partida guardada. Úsalo siempre para probar: el usuario juega en el mismo navegador y no hay que tocar su partida.
 - En la consola tienes `window.__IMPERIUM__` (`game`, `world`, `hud`, `select`, `setView`). Los clics sintéticos sobre el canvas y en los botones sí funcionan.
-- Si cambias niveles a mano en `game.state` para probar algo, llama después a `game.reset()` para no dejar la partida trucada guardada.
+- Si cambias niveles a mano en `game.state` para probar algo, hazlo en una partida `?save=…` aparte.
+- Los efectos con duración (poderes del templo) guardan su fin en `state.buffs` y ese fin es un suceso más, para que la producción se calcule bien por tramos.

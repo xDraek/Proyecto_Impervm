@@ -3,7 +3,7 @@ import { bag, fmtAgo, fmtNum, unitList } from './format.js';
 
 // Informes de combate, exploración y colonias.
 
-const KIND_ICON = { ataque: '⚔️', defensa: '🏴‍☠️', exploracion: '🔭', colonia: '🚩' };
+const KIND_ICON = { ataque: '⚔️', defensa: '🏴‍☠️', exploracion: '🔭', colonia: '🚩', expedicion: '🧭', visita: '🧳', victoria: '🗽' };
 
 function sideTable(title, side) {
   const rows = Object.entries(side.start)
@@ -21,8 +21,10 @@ function reportBody(r) {
   const parts = [];
   if (r.text) parts.push(`<p>${r.text}</p>`);
   if (r.battle) {
-    const attTitle = r.kind === 'defensa' ? 'Piratas' : 'Tu ejército';
-    const defTitle = r.kind === 'defensa' ? 'Tus defensores' : 'Defensores';
+    // En los asaltos piratas (y emboscadas de expedición) los piratas atacan
+    const defending = r.kind === 'defensa' || r.defending;
+    const attTitle = defending ? 'Piratas' : 'Tu ejército';
+    const defTitle = defending ? (r.kind === 'defensa' ? 'Tus defensores' : 'Tu flota') : 'Defensores';
     parts.push(`<div class="battle">${sideTable(attTitle, r.battle.att)}${sideTable(defTitle, r.battle.def)}</div>`);
     const notes = [`${r.battle.rounds} ${r.battle.rounds === 1 ? 'asalto' : 'asaltos'}`];
     if (r.towers) notes.push(`las torres dispararon ${fmtNum(r.towers)} por asalto`);
@@ -37,6 +39,7 @@ function reportBody(r) {
     const label = r.kind === 'defensa' ? 'Se han llevado' : 'Botín';
     parts.push(`<div class="info-row"><span>${label}</span><span>${bag(r.loot)}</span></div>`);
   }
+  if (r.lostUnits) parts.push(`<div class="info-row"><span>Barcos y tropas perdidos</span><span>${unitList(r.lostUnits)}</span></div>`);
   if (r.reward) parts.push(`<div class="info-row"><span>Botín de los piratas</span><span>${bag(r.reward)}</span></div>`);
   return parts.join('');
 }

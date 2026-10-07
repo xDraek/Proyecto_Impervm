@@ -46,6 +46,10 @@ export function multiplyCost(cost, n) {
 
 // ── Edificios ────────────────────────────────────────────────────────────────
 
+export function buildingMax(id) {
+  return BUILDINGS[id].maxLevel ?? Infinity;
+}
+
 /** Coste para subir el edificio `id` hasta `level`. */
 export function costFor(id, level) {
   const b = BUILDINGS[id];
@@ -153,11 +157,19 @@ export function upkeepPerHour(state) {
   return total * GAME_SPEED;
 }
 
+/** Multiplicador de toda la producción: Coloso y Cosecha abundante. */
+export function productionBonus(state, t = state.lastUpdate) {
+  let k = 1 + 0.05 * lvl(state, 'coloso');
+  if ((state.buffs?.cosecha ?? 0) > t) k *= 1.25;
+  return k;
+}
+
 /**
  * Economía por hora con su desglose. `net` ya descuenta el mantenimiento de las
  * tropas en comida. Con hambruna, el resto de la producción cae a la mitad.
  */
-export function economy(state) {
+export function economy(state, t = state.lastUpdate) {
+  const bonus = productionBonus(state, t);
   const base = {};
   const buildings = {};
   const research = {};
@@ -176,13 +188,56 @@ export function economy(state) {
   }
   for (const res of RESOURCE_KEYS) {
     research[res] = (base[res] + buildings[res]) * researchBonus(state, res);
-    gross[res] = base[res] + buildings[res] + research[res] + colonies[res];
+    gross[res] = (base[res] + buildings[res] + research[res] + colonies[res]) * bonus;
   }
   const upkeep = upkeepPerHour(state);
   const net = { ...gross, comida: gross.comida - upkeep };
   const hungry = {};
   for (const res of RESOURCE_KEYS) hungry[res] = res === 'comida' ? net.comida : net[res] * 0.5;
-  return { base, buildings, research, colonies, gross, upkeep, net, hungry };
+  return { base, buildings, research, colonies, bonus, gross, upkeep, net, hungry };
+}
+
+/** Lo que el almacén esconde de cada recurso y los piratas no pueden robar. */
+export function protectedAmount(state) {
+  return 100 + 250 * lvl(state, 'almacen');
+}
+
+// ── Templo ───────────────────────────────────────────────────────────────────
+
+export function favorRate(state) {
+  return 6 * lvl(state, 'templo') * GAME_SPEED;
+}
+
+export function favorMax(state) {
+  const n = lvl(state, 'templo');
+  return n ? 100 + 60 * n : 0;
+}
+
+// ── Clasificación ────────────────────────────────────────────────────────────
+
+/** Un punto por cada 100 recursos invertidos, como en OGame (allí son 1000). */
+export function scoreOf(spent) {
+  return Math.floor(spent / 100);
+}
+
+export function rivalScore(rival, gameHours) {
+  return Math.floor(rival.base + rival.rate * Math.max(0, gameHours) ** 0.85);
+}
+
+/** Suma de todos los costes pagados por los edificios y las investigaciones actuales. */
+export function investedIn(state) {
+  let total = 0;
+  for (const [id, n] of Object.entries(state.buildings)) {
+    for (let l = (BUILDINGS[id].startLevel ?? 0) + 1; l <= n; l++) total += sum(costFor(id, l));
+  }
+  for (const [id, n] of Object.entries(state.research ?? {})) {
+    for (let l = 1; l <= n; l++) total += sum(researchCost(id, l));
+  }
+  return total;
+}
+
+export function sum(cost) {
+  return Object.values(cost).reduce((a, b) => a + b, 0);
 }
 
 export function storageCapacity(state) {

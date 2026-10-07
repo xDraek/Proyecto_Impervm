@@ -23,10 +23,16 @@ export function islandRadius(isl) {
   return isl.size * 1.8;
 }
 
+/** Radio de la línea de costa (donde la arena corta el agua), para la espuma. */
+export function shoreRadius(isl) {
+  return isl.type === 'brumas' ? 0 : islandRadius(isl) * 1.19;
+}
+
 export function createIslandBase(isl) {
   const R = islandRadius(isl);
   const seed = hashString(isl.id);
   const rand = rng(seed);
+  if (isl.type === 'brumas') return seaStacks(R, rand);
   const pal = PALETTES[isl.type] ?? PALETTES.default;
   const g = new THREE.Group();
 
@@ -71,6 +77,24 @@ export function createIslandBase(isl) {
   return g;
 }
 
+/** Mar abierto: solo farallones de roca y un pecio encallado. */
+function seaStacks(R, rand) {
+  const g = new THREE.Group();
+  for (let i = 0; i < 7; i++) {
+    const h = 3 + rand() * 6;
+    const rock = mesh(new THREE.ConeGeometry(1 + rand() * 1.4, h, 6), i % 2 ? '#5f5a52' : '#77706a');
+    rock.position.copy(polar(R * (0.4 + rand() * 1.4), rand() * 360, h / 2 - 1.4));
+    rock.rotation.z = (rand() - 0.5) * 0.3;
+    g.add(rock);
+  }
+  const wreck = createShip('mercante');
+  wreck.scale.setScalar(2.6);
+  wreck.position.set(R * 0.6, -1.0, -R * 0.4);
+  wreck.rotation.set(0.25, 1.2, 0.5);
+  g.add(wreck);
+  return g;
+}
+
 function tree(color, palm) {
   const t = new THREE.Group();
   if (palm) {
@@ -95,6 +119,7 @@ function tree(color, palm) {
 
 /** Estado visual de la isla según lo que sabe el jugador. */
 export function islandLook(view) {
+  if (view.type === 'brumas') return 'brumas';
   if (view.colonized) return 'colonia';
   if (!view.explored) return 'niebla';
   if (view.type === 'ruinas') return view.looted ? 'ruinas-saqueadas' : 'ruinas';
@@ -116,6 +141,7 @@ export function createIslandFeature(isl, look) {
     libre: () => specialty(g, isl, R, rand),
     colonia: () => colony(g, isl, R, rand),
     kraken: () => lair(g, R, rand),
+    brumas: () => fogBank(g, R, rand),
   };
   builders[look]?.();
   return g;
@@ -131,6 +157,21 @@ function mist(g, R, rand) {
   }
   cloud.userData.spin = { axis: 'y', speed: 0.08 };
   g.add(cloud);
+}
+
+function fogBank(g, R, rand) {
+  const material = new THREE.MeshStandardMaterial({ color: '#e9eef3', flatShading: true, roughness: 1, transparent: true, opacity: 0.75 });
+  for (let ring = 0; ring < 2; ring++) {
+    const bank = new THREE.Group();
+    for (let i = 0; i < 14; i++) {
+      const puff = new THREE.Mesh(new THREE.IcosahedronGeometry(2 + rand() * 2.5, 0), material);
+      puff.position.copy(polar(R * (1.2 + ring * 1.3 + rand() * 0.8), (i / 14) * 360 + rand() * 20, SEA + 0.8 + rand() * 1.5));
+      puff.scale.y = 0.55;
+      bank.add(puff);
+    }
+    bank.userData.spin = { axis: 'y', speed: ring ? -0.05 : 0.08 };
+    g.add(bank);
+  }
 }
 
 function camp(g, R, rand) {

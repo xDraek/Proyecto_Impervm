@@ -2,11 +2,25 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { CSS2DObject, CSS2DRenderer } from 'three/addons/renderers/CSS2DRenderer.js';
 import { BUILDINGS, BUILDING_KEYS, ISLANDS, ISLAND_TYPES, LAND_UNITS, SHIP_UNITS } from '../game/data.js';
-import { C, box, createBuilding, createScaffold, createShip, createSoldier, cyl, disposeTree, mat, wallHeight } from './models.js';
-import { createIslandBase, createIslandFeature, islandLook, islandRadius } from './islands.js';
+import {
+  C,
+  box,
+  createBuilding,
+  createGull,
+  createScaffold,
+  createShip,
+  createSoldier,
+  createVillager,
+  cyl,
+  disposeTree,
+  mat,
+  wallHeight,
+  windowMaterial,
+} from './models.js';
+import { createIslandBase, createIslandFeature, islandLook, islandRadius, shoreRadius } from './islands.js';
 import { mountainGeometry, paintByNormal, plateauGeometry, polar, rng } from './util.js';
+import { createWater } from './water.js';
 
-const SKY_TOP = '#4a9be0';
 const HORIZON = '#cfe8f7';
 const WATER_Y = -0.7;
 const ISLAND_R = 19;
@@ -16,24 +30,35 @@ const WALL_R = 11.7;
 const GATE_ANGLE = 15;
 const HARBOR_R = 30; // radio por el que las flotas rodean la isla al salir
 const RAID_FROM = 260;
+const HOME_SHORE = 21.7; // donde la playa de tu isla corta el agua
+
+// Ciclo de día y noche (un día dura 20 minutos reales)
+const DAY_MS = 20 * 60 * 1000;
+const SKIES = {
+  day: { top: '#4a9be0', horizon: '#cfe8f7', sun: '#fff3dc', sunI: 2.6, hemi: '#dff1ff', hemiI: 1.3 },
+  dusk: { top: '#3d5b9c', horizon: '#f4b27c', sun: '#ffb070', sunI: 1.5, hemi: '#f0c8a8', hemiI: 0.95 },
+  night: { top: '#0c1733', horizon: '#2b3d6b', sun: '#9fb6ff', sunI: 0.55, hemi: '#6b7fae', hemiI: 0.6 },
+};
 
 // Disposición de la isla. Ángulo 0 = hacia +Z (la cámara mira desde unos 36°).
 const LAYOUT = {
   ayuntamiento: { r: 0, angle: 0 },
   academia: { r: 7.8, angle: 60 },
-  almacen: { r: 7.8, angle: 150 },
-  cuartel: { r: 7.8, angle: 240 },
+  almacen: { r: 7.8, angle: 145 },
+  templo: { r: 7.8, angle: 195 },
+  cuartel: { r: 7.8, angle: 245 },
   mercado: { r: 7.8, angle: 330 },
   granja: { r: 15, angle: 72 },
   aserradero: { r: 15, angle: 125 },
   cantera: { r: 15, angle: 178 },
   mina: { r: 15, angle: 236 },
   fundicion: { r: 15, angle: 292 },
+  coloso: { r: 15, angle: 345, ring: 1.15 },
   muralla: { r: WALL_R, angle: GATE_ANGLE, hit: 1.8, ring: 0.7 },
   puerto: { r: 20.4, angle: GATE_ANGLE, y: BEACH_Y, hit: 3.2, hitZ: -2.6 },
 };
-const INNER = ['academia', 'almacen', 'cuartel', 'mercado'];
-const OUTER = ['granja', 'aserradero', 'cantera', 'mina', 'fundicion'];
+const INNER = ['academia', 'almacen', 'templo', 'cuartel', 'mercado'];
+const OUTER = ['granja', 'aserradero', 'cantera', 'mina', 'fundicion', 'coloso'];
 const MOUNTAINS = [
   { angle: 207, r: 18.6, radius: 3.4, height: 6.2 },
   { angle: 190, r: 20.2, radius: 2.2, height: 3.8 },
@@ -85,7 +110,9 @@ export class World {
     this.animated = [];
     this.clouds = [];
     this.view = 'isla';
-    this.waterTime = { value: 0 };
+    this.dayNight = true;
+    this.villagers = [];
+    this.gulls = [];
 
     this.#setupRenderer();
     this.#setupScene();
@@ -93,6 +120,7 @@ export class World {
     this.#buildSlots();
     this.#buildArchipelago();
     this.#buildClouds();
+    this.#buildLife();
     this.#setupInput();
     this.sync();
 
@@ -188,50 +216,77 @@ export class World {
     const canvas = document.createElement('canvas');
     canvas.width = 2;
     canvas.height = 256;
-    const ctx = canvas.getContext('2d');
-    const grad = ctx.createLinearGradient(0, 0, 0, 256);
-    grad.addColorStop(0, SKY_TOP);
-    grad.addColorStop(1, HORIZON);
-    ctx.fillStyle = grad;
-    ctx.fillRect(0, 0, 2, 256);
-    const sky = new THREE.CanvasTexture(canvas);
-    sky.colorSpace = THREE.SRGBColorSpace;
-    scene.background = sky;
+    this.skyCtx = canvas.getContext('2d');
+    this.sky = new THREE.CanvasTexture(canvas);
+    this.sky.colorSpace = THREE.SRGBColorSpace;
+    scene.background = this.sky;
     scene.fog = new THREE.Fog(HORIZON, 80, 260);
 
-    scene.add(new THREE.HemisphereLight('#dff1ff', '#5a7a3a', 1.3));
+    this.hemi = new THREE.HemisphereLight('#dff1ff', '#5a7a3a', 1.3);
+    scene.add(this.hemi);
     const sun = new THREE.DirectionalLight('#fff3dc', 2.6);
+    this.sun = sun;
     sun.position.set(26, 44, 20);
     sun.castShadow = true;
     sun.shadow.mapSize.set(2048, 2048);
     Object.assign(sun.shadow.camera, { left: -28, right: 28, top: 28, bottom: -28, near: 1, far: 120 });
     sun.shadow.bias = -0.0005;
     sun.shadow.normalBias = 0.03;
-    scene.add(sun);
+    scene.add(sun, sun.target);
+    this.skyKey = null;
+    this.#updateSky(Date.now());
 
-    // Mar con oleaje low-poly: los vértices se desplazan en la GPU
-    const waterGeo = new THREE.PlaneGeometry(1800, 1800, 330, 330);
-    waterGeo.rotateX(-Math.PI / 2);
-    const waterMat = new THREE.MeshStandardMaterial({
-      color: '#2f8fc4',
-      flatShading: true,
-      roughness: 0.35,
-      metalness: 0.05,
-      transparent: true,
-      opacity: 0.92,
-    });
-    waterMat.onBeforeCompile = (shader) => {
-      shader.uniforms.uTime = this.waterTime;
-      shader.vertexShader = `uniform float uTime;\n${shader.vertexShader}`.replace(
-        '#include <begin_vertex>',
-        `#include <begin_vertex>
-        transformed.y += sin(position.x * 0.18 + uTime * 1.1) * 0.16 + cos(position.z * 0.23 + uTime * 0.8) * 0.14;`,
-      );
-    };
-    this.water = new THREE.Mesh(waterGeo, waterMat);
-    this.water.position.y = WATER_Y;
-    this.water.receiveShadow = true;
+    // Mar estilizado: olas en la GPU, agua clara y espuma junto a cada orilla
+    const shores = [{ x: 0, z: 0, r: HOME_SHORE }];
+    for (const isl of ISLANDS) {
+      const p = polar(isl.dist, isl.angle);
+      shores.push({ x: p.x, z: p.z, r: shoreRadius(isl) });
+    }
+    this.water = createWater(shores, WATER_Y);
+    this.waterTime = this.water.userData.uniforms.uTime;
     scene.add(this.water);
+  }
+
+  /** Activa o desactiva el ciclo de día y noche (si no, siempre es de día). */
+  setDayNight(on) {
+    this.dayNight = on;
+    this.skyKey = null;
+  }
+
+  #updateSky(now) {
+    // s: altura del sol entre -1 (medianoche) y 1 (mediodía)
+    const phase = (now % DAY_MS) / DAY_MS;
+    const s = this.dayNight ? Math.sin(phase * Math.PI * 2) : 1;
+    const key = Math.round(s * 100);
+    if (key === this.skyKey) return;
+    this.skyKey = key;
+
+    const step = (a, b, x) => Math.min(1, Math.max(0, (x - a) / (b - a)));
+    const [from, to, k] = s >= 0 ? [SKIES.dusk, SKIES.day, step(0, 0.35, s)] : [SKIES.dusk, SKIES.night, step(0, 0.35, -s)];
+    const col = (name) => new THREE.Color(from[name]).lerp(new THREE.Color(to[name]), k);
+    const num = (name) => from[name] + (to[name] - from[name]) * k;
+
+    const top = col('top');
+    const horizon = col('horizon');
+    const ctx = this.skyCtx;
+    const grad = ctx.createLinearGradient(0, 0, 0, 256);
+    grad.addColorStop(0, `#${top.getHexString()}`);
+    grad.addColorStop(1, `#${horizon.getHexString()}`);
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, 2, 256);
+    this.sky.needsUpdate = true;
+    this.scene.fog.color.copy(horizon);
+
+    this.sun.color.copy(col('sun'));
+    this.sun.intensity = num('sunI');
+    this.hemi.color.copy(col('hemi'));
+    this.hemi.intensity = num('hemiI');
+    // De día el sol cruza el cielo; de noche la luna sale por el lado contrario
+    const a = phase * Math.PI * 2;
+    this.sun.position.set(Math.cos(a) * 34, 14 + Math.abs(s) * 32, 18 + Math.sin(a) * 10);
+    // Ventanas y faroles encendidos al anochecer
+    windowMaterial().emissiveIntensity = step(0.15, -0.25, s) * 1.4;
+    this.night = step(0.1, -0.3, s);
   }
 
   #buildIsland() {
@@ -461,6 +516,64 @@ export class World {
     }
   }
 
+  #buildLife() {
+    this.lifeGroup = new THREE.Group();
+    this.scene.add(this.lifeGroup);
+    const rand = rng(99);
+    for (let i = 0; i < 7; i++) {
+      const gull = createGull();
+      gull.userData.fly = { r: 9 + rand() * 18, h: 9 + rand() * 6, speed: (0.15 + rand() * 0.15) * (i % 2 ? 1 : -1), phase: rand() * Math.PI * 2 };
+      this.scene.add(gull);
+      this.gulls.push(gull);
+    }
+  }
+
+  /** Aldeanos paseando por la ronda y la avenida del puerto (más cuanto más grande es la ciudad). */
+  #syncVillagers() {
+    const n = Math.min(26, 4 + 2 * this.game.level('ayuntamiento'));
+    if (n === this.villagers.length) return;
+    for (const v of this.villagers) this.lifeGroup.remove(v);
+    this.villagers = [];
+    const rand = rng(1234);
+    for (let i = 0; i < n; i++) {
+      const v = createVillager(i);
+      const avenue = i % 3 === 0;
+      v.userData.walk = avenue
+        ? { avenue, s: 4 + rand() * 13, dir: rand() < 0.5 ? 1 : -1, speed: 0.5 + rand() * 0.4, lane: (rand() - 0.5) * 0.8 }
+        : { avenue, a: rand() * Math.PI * 2, dir: rand() < 0.5 ? 1 : -1, speed: 0.45 + rand() * 0.45, lane: rand() < 0.5 ? -0.22 : 0.22 };
+      this.lifeGroup.add(v);
+      this.villagers.push(v);
+    }
+  }
+
+  #updateLife(dt, t) {
+    const gate = THREE.MathUtils.degToRad(GATE_ANGLE);
+    this.villagers.forEach((v, i) => {
+      const w = v.userData.walk;
+      const bob = Math.abs(Math.sin(t * 9 + i)) * 0.04;
+      if (w.avenue) {
+        w.s += w.dir * w.speed * dt;
+        if (w.s > 17.4 || w.s < 3.8) w.dir *= -1;
+        v.position.set(Math.sin(gate) * w.s + Math.cos(gate) * w.lane, bob, Math.cos(gate) * w.s - Math.sin(gate) * w.lane);
+        v.rotation.y = gate + (w.dir > 0 ? 0 : Math.PI);
+      } else {
+        w.a += (w.dir * w.speed * dt) / ROAD_R;
+        const r = ROAD_R + w.lane;
+        v.position.set(Math.sin(w.a) * r, bob, Math.cos(w.a) * r);
+        v.rotation.y = w.a + (w.dir > 0 ? Math.PI / 2 : -Math.PI / 2);
+      }
+    });
+    for (const [i, gull] of this.gulls.entries()) {
+      const f = gull.userData.fly;
+      const a = f.phase + t * f.speed;
+      gull.position.set(Math.sin(a) * f.r, f.h + Math.sin(t * 0.7 + i) * 0.8, Math.cos(a) * f.r);
+      gull.rotation.set(0, a + (f.speed > 0 ? Math.PI / 2 : -Math.PI / 2), f.speed > 0 ? -0.25 : 0.25);
+      for (const wing of gull.children) {
+        if (wing.userData.side) wing.rotation.z = wing.userData.side * Math.sin(t * 7 + i) * 0.45;
+      }
+    }
+  }
+
   #setupInput() {
     const el = this.renderer.domElement;
     const raycaster = new THREE.Raycaster();
@@ -504,6 +617,7 @@ export class World {
   // ── Sincronización con la partida ──────────────────────────────────────────
 
   sync() {
+    this.#syncVillagers();
     this.#syncBuildings();
     this.#syncWall();
     this.#syncExtras();
@@ -791,6 +905,8 @@ export class World {
     this.homeLabel.visible = this.view === 'mapa';
 
     this.waterTime.value = t;
+    this.#updateSky(now);
+    this.#updateLife(dt, t);
 
     for (const cloud of this.clouds) {
       cloud.position.x += cloud.userData.speed * dt;
@@ -818,7 +934,7 @@ export class World {
     }
 
     // Flotas en el mar (más grandes en el mapa para que se distingan)
-    const shipScale = THREE.MathUtils.clamp(dist / 40, 2.6, 7);
+    const shipScale = THREE.MathUtils.clamp(dist / 60, 2.6, 4.5);
     const pos = new THREE.Vector3();
     const dir = new THREE.Vector3();
     for (const m of this.game.missions) {
@@ -830,7 +946,7 @@ export class World {
         u = (now - m.depart) / (m.arrive - m.depart);
       } else {
         back = true;
-        const turn = m.recalled ? (m.back + m.depart) / 2 : m.arrive;
+        const turn = m.turn ?? (m.recalled ? (m.back + m.depart) / 2 : m.arrive);
         const u0 = Math.min(1, (turn - m.depart) / (m.arrive - m.depart));
         u = u0 * THREE.MathUtils.clamp((m.back - now) / (m.back - turn), 0, 1);
       }

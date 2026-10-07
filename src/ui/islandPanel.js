@@ -12,6 +12,10 @@ function infoSection(game, view) {
     return `<p class="desc">Tus colonos trabajan la isla y mandan sus cosechas a la capital.</p>
       <div class="effect"><span>${r.icon} Producción de la colonia</span><b class="up">+${fmtNum(colonyYield(view))}/h</b></div>`;
   }
+  if (view.type === 'brumas') {
+    return `<p class="desc">Más allá de las islas conocidas, una niebla que nunca se levanta. Las expediciones vuelven con tesoros, barcos perdidos… o no vuelven.</p>
+      <p class="desc small">Hace falta Navegación 2. Cuantos más barcos y más bodega lleves, más botín puedes traer, pero también hay piratas y monstruos.</p>`;
+  }
   if (!view.explored) {
     return '<p class="desc">Nadie sabe qué hay en esta isla. Envía un bote explorador para descubrirlo… o ataca a ciegas.</p>';
   }
@@ -69,8 +73,9 @@ function fleetForm(game, view) {
     .join('');
 
   const types = [];
-  types.push('explorar');
-  if (!view.colonized && (!view.explored || ['barbaros', 'piratas', 'kraken'].includes(view.type))) types.push('atacar');
+  if (view.type === 'brumas') types.push('expedicion');
+  else types.push('explorar');
+  if (view.type !== 'brumas' && !view.colonized && (!view.explored || ['barbaros', 'piratas', 'kraken'].includes(view.type))) types.push('atacar');
   if (view.type === 'libre' && view.explored && !view.colonized) types.push('colonizar');
 
   const buttons = types

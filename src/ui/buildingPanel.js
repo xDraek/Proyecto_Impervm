@@ -1,17 +1,19 @@
-import { BUILDINGS, RESEARCH, RESEARCH_KEYS, RESOURCES, RESOURCE_KEYS, UNITS, UNIT_KEYS } from '../game/data.js';
-import { producerOutput, requirementName, storageCapacity, townSpeedup, wallBonus } from '../game/rules.js';
+import { BUILDINGS, POWERS, POWER_KEYS, RESEARCH, RESEARCH_KEYS, RESOURCES, RESOURCE_KEYS, UNITS, UNIT_KEYS } from '../game/data.js';
+import { favorMax, favorRate, producerOutput, protectedAmount, requirementName, storageCapacity, townSpeedup, wallBonus } from '../game/rules.js';
 import { costList, fmtDec, fmtNum, fmtTime, unitList } from './format.js';
 
 // Panel de detalle de un edificio. Devuelve el HTML y un `refresh` para las
 // partes que cambian sin que cambie la partida (vista previa del mercado).
 
+// Sin flecha cuando no cambia nada (edificio terminado)
 const effectRow = (label, now, next) =>
-  `<div class="effect"><span>${label}</span><b>${now}</b><span class="arrow">→</span><b class="up">${next}</b></div>`;
+  `<div class="effect"><span>${label}</span><b>${now}</b>${next === now ? '' : `<span class="arrow">→</span><b class="up">${next}</b>`}</div>`;
 
 const reqText = (missing) => missing.map((m) => `${requirementName(m)} ${m.level}`).join(', ');
 
-function capacityAt(game, almacen) {
-  return storageCapacity({ ...game.state, buildings: { ...game.state.buildings, almacen } });
+/** El estado con un edificio a otro nivel, para enseñar el efecto de mejorarlo. */
+function withLevel(game, id, level) {
+  return { ...game.state, buildings: { ...game.state.buildings, [id]: level } };
 }
 
 function effectFor(game, id, level, next) {
@@ -22,7 +24,17 @@ function effectFor(game, id, level, next) {
   }
   switch (id) {
     case 'almacen':
-      return effectRow('📦 Capacidad', fmtNum(capacityAt(game, level)), fmtNum(capacityAt(game, next)));
+      return (
+        effectRow('📦 Capacidad', fmtNum(storageCapacity(withLevel(game, id, level))), fmtNum(storageCapacity(withLevel(game, id, next)))) +
+        effectRow('🔒 A salvo de saqueos', fmtNum(protectedAmount(withLevel(game, id, level))), fmtNum(protectedAmount(withLevel(game, id, next))))
+      );
+    case 'templo':
+      return (
+        effectRow('🙏 Favor por hora', fmtDec(favorRate(withLevel(game, id, level))), fmtDec(favorRate(withLevel(game, id, next)))) +
+        effectRow('⛲ Favor máximo', favorMax(withLevel(game, id, level)), favorMax(withLevel(game, id, next)))
+      );
+    case 'coloso':
+      return effectRow('✨ Producción de todo', `+${level * 5} %`, `+${next * 5} %`);
     case 'ayuntamiento':
       return effectRow('⚒️ Velocidad de obra', `+${townSpeedup(level)} %`, `+${townSpeedup(next)} %`);
     case 'academia':
@@ -46,6 +58,9 @@ function upgradeSection(game, id) {
   const level = game.level(id);
   const next = game.nextUpgrade(id);
   const q = game.queue;
+  if (next.maxed) {
+    return `${effectFor(game, id, level, level)}<div class="hint ok big">✨ Terminado: no se puede mejorar más</div>`;
+  }
 
   let label = level === 0 ? 'Construir' : `Mejorar a nivel ${next.level}`;
   let blocked = false;
@@ -236,9 +251,51 @@ function wallSection(game) {
     <p class="desc small">Las tropas que están en casa (también los barcos) defienden la isla. La amenaza crece con el tamaño de tu ciudad.</p>`;
 }
 
+// ── Templo ───────────────────────────────────────────────────────────────────
+
+function powerCard(game, id) {
+  const p = POWERS[id];
+  const until = game.buffUntil(id);
+  let blocked = '';
+  if (id === 'inspiracion' && !game.queue && !game.researchQueue) blocked = 'No hay obras ni investigaciones';
+  if (id === 'viento' && !game.missions.length) blocked = 'No hay flotas en el mar';
+  if (id === 'rayo' && !game.raid) blocked = 'No hay piratas a la vista';
+  return `<div class="card${until ? ' active' : ''}">
+    <div class="card-head"><span class="card-icon">${p.icon}</span><div class="card-title"><b>${p.name}</b>
+      ${until ? '<span class="card-lvl">activo</span>' : ''}
+      <div class="card-sub">${p.description}</div></div></div>
+    ${until ? `<div class="hint ok">Quedan <span data-until="${until}"></span></div>` : ''}
+    <div class="card-row"><span class="muted small">${blocked}</span>
+      <button class="primary small auto" data-action="power" data-id="${id}" data-favor="${p.cost}" data-blocked="${blocked ? 1 : 0}">🙏 ${p.cost}</button></div>
+  </div>`;
+}
+
+function templeSection(game) {
+  if (game.level('templo') < 1) return '<h4>Poderes divinos</h4><p class="desc">Construye el templo para ganar el favor de los dioses.</p>';
+  const max = game.favorMax();
+  return `<h4>Favor de los dioses</h4>
+    <div class="favor-bar"><i data-favor-bar style="width:${Math.min(100, (game.favor / max) * 100)}%"></i><span data-favor-text></span></div>
+    <h4>Poderes divinos</h4><div class="cards">${POWER_KEYS.map((id) => powerCard(game, id)).join('')}</div>`;
+}
+
+function refreshTemple(game, root) {
+  const bar = root.querySelector('[data-favor-bar]');
+  if (!bar) return;
+  const max = game.favorMax();
+  bar.style.width = `${Math.min(100, (game.favor / max) * 100)}%`;
+  const text = `${fmtNum(game.favor)} / ${fmtNum(max)} · +${fmtDec(game.favorRate())}/h`;
+  const label = root.querySelector('[data-favor-text]');
+  if (label.textContent !== text) label.textContent = text;
+  for (const btn of root.querySelectorAll('[data-action="power"]')) {
+    btn.disabled = btn.dataset.blocked === '1' || game.favor < Number(btn.dataset.favor);
+  }
+}
+
 function townSection(game) {
   const eco = game.economy();
+  const rank = game.ranking().find((r) => r.player);
   return `<h4>Tu imperio</h4>
+    <div class="info-row"><span>🏆 Puntos</span><b>${fmtNum(rank.points)} · puesto ${rank.rank}</b></div>
     <div class="info-row"><span>🚩 Colonias</span><b>${game.colonies().length} / ${game.maxColonies()}</b></div>
     <div class="info-row"><span>🥖 Mantenimiento de tropas</span><b>${fmtNum(eco.upkeep)}/h</b></div>
     <div class="info-row"><span>🏴‍☠️ Amenaza pirata</span><b>${game.level('ayuntamiento') >= 3 ? `Nv ${game.raidTier()}` : 'Ninguna aún'}</b></div>`;
@@ -254,6 +311,7 @@ export function buildingPanel(hud, id) {
   else if (id === 'mercado') extra = marketSection(game);
   else if (id === 'muralla') extra = wallSection(game);
   else if (id === 'ayuntamiento') extra = townSection(game);
+  else if (id === 'templo') extra = templeSection(game);
 
   const html = `
     <div class="panel-head">
@@ -272,6 +330,7 @@ export function buildingPanel(hud, id) {
     html,
     refresh(root) {
       if (id === 'mercado') refreshMarket(game, root);
+      if (id === 'templo') refreshTemple(game, root);
     },
   };
 }
