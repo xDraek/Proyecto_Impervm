@@ -17,15 +17,79 @@ function sideTable(title, side) {
   }</div>`;
 }
 
+/** Cómo se llama cada bando del combate desde el punto de vista del jugador. */
+function sideTitles(r) {
+  // En los asaltos piratas (y emboscadas de expedición) los piratas atacan
+  const defending = r.kind === 'defensa' || r.defending;
+  const attTitle = defending ? (r.enemy ? escapeHtml(r.enemy) : 'Piratas') : 'Tu ejército';
+  const defTitle = defending ? (r.kind === 'defensa' ? 'Tus defensores' : 'Tu flota') : r.enemy ? escapeHtml(r.enemy) : 'Defensores';
+  return { attTitle, defTitle };
+}
+
+/**
+ * Repetición del combate: las dos fuerzas como barras que menguan asalto a
+ * asalto. Usa lo que quedaba de cada bando tras cada asalto (`battle.log`).
+ */
+export function playReplay(btn, r) {
+  const box = btn.nextElementSibling;
+  if (!box) return;
+  btn.disabled = true;
+  const b = r.battle;
+  const frames = [{ att: b.att.start, def: b.def.start }, ...b.log];
+  const { attTitle, defTitle } = sideTitles(r);
+  const sideHtml = (key, title) =>
+    `<div class="rp-side" data-side="${key}"><h5>${title}</h5>${Object.entries(b[key].start)
+      .map(([id, n]) => `<div class="rp-unit" data-u="${id}"><span class="rp-icon" title="${UNITS[id].name}">${UNITS[id].icon}</span><div class="rp-bar"><i style="width:100%"></i></div><b>${fmtNum(n)}</b></div>`)
+      .join('') || '<p class="muted small">Nadie</p>'}</div>`;
+  box.innerHTML = `<div class="rp-stage"><div class="rp-round">¡A las armas!</div><div class="rp-sides">${sideHtml('att', attTitle)}<div class="rp-vs">⚔️</div>${sideHtml('def', defTitle)}</div></div>`;
+  let i = 0;
+  const step = () => {
+    if (!box.isConnected) return;
+    i++;
+    const round = box.querySelector('.rp-round');
+    if (i >= frames.length) {
+      const verdict = { victoria: '🏆 Victoria', derrota: '💀 Derrota', empate: '🏳️ Nadie gana' }[r.outcome] ?? 'Fin del combate';
+      round.textContent = `${verdict} · ${b.rounds} ${b.rounds === 1 ? 'asalto' : 'asaltos'}`;
+      round.classList.add('done');
+      btn.disabled = false;
+      btn.textContent = '↻ Repetir';
+      return;
+    }
+    round.textContent = `Asalto ${i} de ${frames.length - 1}`;
+    for (const key of ['att', 'def']) {
+      const side = box.querySelector(`[data-side="${key}"]`);
+      side.classList.remove('hit');
+      void side.offsetWidth; // reinicia la animación del golpe
+      side.classList.add('hit');
+      for (const row of side.querySelectorAll('.rp-unit')) {
+        const id = row.dataset.u;
+        const start = b[key].start[id];
+        const now = frames[i][key][id] ?? 0;
+        const before = frames[i - 1][key][id] ?? 0;
+        row.querySelector('i').style.width = `${start ? (now / start) * 100 : 0}%`;
+        row.querySelector('b').textContent = fmtNum(now);
+        row.classList.toggle('dead', now === 0);
+        if (before > now) {
+          const pop = document.createElement('span');
+          pop.className = 'rp-pop';
+          pop.textContent = `−${fmtNum(before - now)}`;
+          row.appendChild(pop);
+          setTimeout(() => pop.remove(), 1000);
+        }
+      }
+    }
+    setTimeout(step, 1200);
+  };
+  setTimeout(step, 600);
+}
+
 function reportBody(r) {
   const parts = [];
   if (r.text) parts.push(`<p>${escapeHtml(r.text)}</p>`);
   if (r.battle) {
-    // En los asaltos piratas (y emboscadas de expedición) los piratas atacan
-    const defending = r.kind === 'defensa' || r.defending;
-    const attTitle = defending ? (r.enemy ? escapeHtml(r.enemy) : 'Piratas') : 'Tu ejército';
-    const defTitle = defending ? (r.kind === 'defensa' ? 'Tus defensores' : 'Tu flota') : r.enemy ? escapeHtml(r.enemy) : 'Defensores';
+    const { attTitle, defTitle } = sideTitles(r);
     parts.push(`<div class="battle">${sideTable(attTitle, r.battle.att)}${sideTable(defTitle, r.battle.def)}</div>`);
+    if (r.battle.log?.length) parts.push(`<button class="ghost small replay-btn" data-action="replay" data-t="${r.t}">▶ Ver el combate</button><div class="replay"></div>`);
     const notes = [`${r.battle.rounds} ${r.battle.rounds === 1 ? 'asalto' : 'asaltos'}`];
     if (r.towers) notes.push(`las torres dispararon ${fmtNum(r.towers)} por asalto`);
     if (r.wall) notes.push(`fortificación enemiga +${Math.round(r.wall * 100)} %`);

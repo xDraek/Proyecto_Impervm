@@ -9,6 +9,7 @@ import {
   HERO,
   HERO_SKILLS,
   ISLAND_TYPES,
+  JOINT_MAX,
   LAND_UNITS,
   PLAYER_UNITS,
   POWERS,
@@ -717,12 +718,25 @@ export class Game extends EventTarget {
     }
     const withHero = !!opts.hero;
     const heroSpeed = withHero ? 1 + this.heroBonus('velocidad') : 1;
-    const seconds = Number.isFinite(speed) ? travelSeconds(s, this.distanceTo(target), speed, heroSpeed) : 0;
+    const travel = Number.isFinite(speed) ? travelSeconds(s, this.distanceTo(target), speed, heroSpeed) : 0;
+    // Unirse al ataque de un aliado: la flota acompasa la marcha para llegar a la vez
+    const joint = opts.join ? (this.world.jointAttack?.(opts.join) ?? null) : null;
+    const seconds = joint ? Math.max(1, Math.ceil((joint.arrive - this.now()) / 1000)) : travel;
     const slots = fleetSlots(s);
     const pendingColonies = s.missions.filter((m) => m.type === 'colonizar').length;
     let cost = null;
 
     if (target === s.home) reason ||= 'Es tu propia isla.';
+    if (opts.join) {
+      if (type !== 'atacar') reason ||= 'Solo te puedes unir a un ataque.';
+      else if (!joint || joint.target !== target) reason ||= 'Ese ataque ya no está en camino.';
+      else if (joint.leaderId === this.userId) reason ||= 'Es tu propio ataque.';
+      else if (!this.world.sameAlliance?.(this.userId, joint.leaderId)) reason ||= 'Solo puedes unirte a ataques de tu alianza.';
+      else if (s.missions.some((m) => m.joint === opts.join)) reason ||= 'Ya te has unido a ese ataque.';
+      else if (joint.allies >= JOINT_MAX) reason ||= `Ya van ${JOINT_MAX} aliados con ese ataque.`;
+      else if (travel > seconds) reason ||= 'Tu flota no llega a tiempo: el ataque llegará antes.';
+      if (withHero) reason ||= 'Tu almirante solo va en tus propios ataques.';
+    }
     if (withHero && this.heroStatus() !== 'casa') reason ||= this.state.hero ? 'Tu almirante no está en casa o está herido.' : 'No tienes almirante.';
     if (withHero) cargo = Math.floor(cargo * (1 + this.heroBonus('botin')));
     if (slots < 1) reason ||= 'Necesitas un puerto para zarpar.';
@@ -784,7 +798,7 @@ export class Game extends EventTarget {
     } else {
       reason ||= 'Misión desconocida.';
     }
-    return { ok: !reason, reason, units: sent, seconds, capacity, used, cargo, ships, cost, load };
+    return { ok: !reason, reason, units: sent, seconds, travel, capacity, used, cargo, ships, cost, load, joint };
   }
 
   sendMission(type, target, units, payload, opts = {}, now = this.now()) {
@@ -802,10 +816,11 @@ export class Game extends EventTarget {
       units: plan.units,
       cargo: { ...(plan.cost ?? plan.load ?? {}) },
       depart: now,
-      arrive: now + plan.seconds * 1000,
+      arrive: plan.joint ? plan.joint.arrive : now + plan.seconds * 1000,
       back: null,
       phase: 'ida',
       hero: !!opts.hero,
+      ...(plan.joint ? { joint: opts.join, leader: plan.joint.leader, trip: plan.travel * 1000 } : {}),
     });
     if (opts.hero) this.state.hero.mission = this.state.missions.at(-1).id;
     return this.#done();
@@ -817,7 +832,7 @@ export class Game extends EventTarget {
     const m = this.state.missions.find((x) => x.id === id);
     if (!m || (m.phase !== 'ida' && m.phase !== 'estacionada')) return this.#fail('Esa flota ya no puede volver.');
     // De ida: deshace lo andado. Estacionada: el viaje completo de vuelta.
-    m.back = m.phase === 'ida' ? now + (now - m.depart) : now + (m.arrive - m.depart);
+    m.back = m.phase === 'ida' ? now + Math.min(now - m.depart, m.trip ?? Infinity) : now + (m.arrive - m.depart);
     m.recalled = m.phase === 'ida';
     m.phase = 'vuelta';
     m.turn = now;
@@ -949,7 +964,7 @@ export class Game extends EventTarget {
    * Otro jugador ataca tu isla en el instante `t`. Defienden tus tropas en casa
    * y la muralla; si ganan los atacantes se llevan recursos (salvo lo protegido).
    */
-  receiveAttack({ attackerName, units, atkMul, hpMul, cargoMul = 1, islandName }, t) {
+  receiveAttack({ attackerName, units, atkMul, hpMul, cargoMul = 1, islandName, joint = false }, t) {
     const s = this.state;
     const { result, wall } = this.#defend({ units, atkMul, hpMul }, t, attackerName);
 
@@ -967,8 +982,8 @@ export class Game extends EventTarget {
     }
     const title = {
       victoria: `Has rechazado el ataque de ${attackerName}`,
-      empate: `${attackerName} se retira de tu isla`,
-      derrota: `${attackerName} ha saqueado tu isla`,
+      empate: joint ? `${attackerName} se retiran de tu isla` : `${attackerName} se retira de tu isla`,
+      derrota: joint ? `${attackerName} han saqueado tu isla` : `${attackerName} ha saqueado tu isla`,
     }[outcome];
     this.#report({ t, kind: 'defensa', outcome, title, islandName, battle: pick(result), loot: stolen, towers: wall.towers, enemy: attackerName });
     this.#note(`⚔️ ${title}`, outcome === 'derrota' ? 'error' : 'success');
@@ -1120,7 +1135,8 @@ export class Game extends EventTarget {
       if (head) consider(head.start + (head.done + 1) * head.each, (t) => this.#trainOne(b, t));
     }
     for (const m of s.missions) {
-      if (m.phase === 'estacionada') continue;
+      // Las estacionadas no tienen fecha; las de un ataque conjunto las resuelve quien lo dirige
+      if (m.phase === 'estacionada' || (m.joint && m.phase === 'ida')) continue;
       consider(m.phase === 'ida' ? m.arrive : m.back, (t) => this.#missionEvent(m, t));
     }
     if (s.raid) consider(s.raid.arrival, (t) => this.#resolveRaid(t));
@@ -1335,31 +1351,111 @@ export class Game extends EventTarget {
     const hero = m.hero ? { atk: this.heroBonus('ataque'), cargo: 1 + this.heroBonus('botin') } : { atk: 0, cargo: 1 };
     const war = this.world.relation?.(this.userId, isl.owner) === 'guerra';
     const cargoMul = hero.cargo * (war ? 1 + DIPLOMACY.warLoot : 1);
+    // Los aliados que se han unido a este ataque combaten como un solo ejército
+    const allies = this.world.jointFleets?.(`${this.userId}-${m.id}`, t) ?? [];
+    const groups = [
+      { units: { ...m.units }, atkMul: atkMul + hero.atk, hpMul },
+      ...allies.map((a) => ({ units: { ...a.mission.units }, atkMul: a.combat.atkMul, hpMul: a.combat.hpMul, ally: a })),
+    ];
+    const combined = {};
+    let size = 0;
+    let atkSum = 0;
+    let hpSum = 0;
+    for (const g of groups) {
+      const n = count(g.units);
+      size += n;
+      atkSum += g.atkMul * n;
+      hpSum += g.hpMul * n;
+      for (const [id, k] of Object.entries(g.units)) combined[id] = (combined[id] ?? 0) + k;
+    }
+    const names = allies.map((a) => a.name);
     const res = this.world.attackPlayer?.(
       isl.owner,
-      { attackerId: this.userId, attackerName: this.state.name, units: m.units, atkMul: atkMul + hero.atk, hpMul, cargoMul, islandName: this.homeIsland?.name },
+      { attackerId: this.userId, attackerName: names.length ? `${[this.state.name, ...names].slice(0, -1).join(', ')} y ${names.at(-1)}` : this.state.name, joint: names.length > 0, units: combined, atkMul: atkSum / size, hpMul: hpSum / size, cargoMul, islandName: this.homeIsland?.name },
       t,
     );
     if (!res) {
-      this.#report({ t, kind: 'ataque', island: isl.id, islandName: isl.name, title: `No hay nadie en ${isl.name}`, text: 'La ciudad está vacía. Tu flota vuelve a casa.' });
+      const empty = { t, kind: 'ataque', island: isl.id, islandName: isl.name, title: `No hay nadie en ${isl.name}`, text: 'La ciudad está vacía. La flota vuelve a casa.' };
+      this.#report(empty);
+      for (const a of allies) a.settle({ left: a.mission.units, loot: {}, kills: 0, won: false, report: empty });
       return;
     }
     const { result, stolen } = res;
-    m.units = result.att.left;
-    for (const [r, n] of Object.entries(stolen)) m.cargo[r] = (m.cargo[r] ?? 0) + n;
-    if (m.hero) this.#heroXp(result.def.lost, t);
-    this.state.stats.kills += count(result.def.lost);
-    this.state.stats.loot += count(stolen);
+    const lefts = shareSurvivors(groups.map((g) => g.units), result.att.left);
+    const loots = splitBag(stolen, lefts.map(cargoOf));
+    const killed = count(result.def.lost);
     const outcome = result.winner === 'att' ? 'victoria' : result.winner === 'def' ? 'derrota' : 'empate';
+    const enemy = this.world.playerInfo(isl.owner)?.name ?? isl.name;
+    const battleLog = pick(result);
+    const warText = war ? `Guerra entre alianzas: los barcos cargan un ${Math.round(DIPLOMACY.warLoot * 100)} % más de botín.` : '';
+
+    m.units = lefts[0];
+    for (const [r, n] of Object.entries(loots[0])) m.cargo[r] = (m.cargo[r] ?? 0) + n;
+    if (m.hero) this.#heroXp(result.def.lost, t);
+    this.state.stats.kills += Math.round((killed * count(groups[0].units)) / size);
+    this.state.stats.loot += count(loots[0]);
     if (outcome === 'victoria') {
       this.state.stats.victories++;
       this.state.stats.pvpWins++;
     }
-    const enemy = this.world.playerInfo(isl.owner)?.name ?? isl.name;
     const title = { victoria: `Has saqueado ${isl.name}`, derrota: `Derrota en ${isl.name}`, empate: `Retirada de ${isl.name}` }[outcome];
-    const text = war ? `Guerra entre alianzas: tus barcos cargan un ${Math.round(DIPLOMACY.warLoot * 100)} % más de botín.` : undefined;
-    this.#report({ t, kind: 'ataque', island: isl.id, islandName: isl.name, outcome, title, text, battle: pick(result), loot: stolen, enemy, pvp: true });
-    this.#note(`⚔️ ${title}${fmtBag(stolen) ? ` · botín ${fmtBag(stolen)}` : ''}`, outcome === 'victoria' ? 'success' : 'error');
+    const text = [names.length ? `🤝 Ataque conjunto con ${names.join(', ')}. El botín se reparte según la bodega de cada uno.` : '', warText].filter(Boolean).join(' ') || undefined;
+    this.#report({ t, kind: 'ataque', island: isl.id, islandName: isl.name, outcome, title, text, battle: battleLog, loot: loots[0], enemy, pvp: true });
+    this.#note(`⚔️ ${title}${fmtBag(loots[0]) ? ` · botín ${fmtBag(loots[0])}` : ''}`, outcome === 'victoria' ? 'success' : 'error');
+
+    allies.forEach((a, i) => {
+      const g = groups[i + 1];
+      const allyTitle = { victoria: `Ataque conjunto: saqueo de ${isl.name}`, derrota: `Ataque conjunto: derrota en ${isl.name}`, empate: `Ataque conjunto: retirada de ${isl.name}` }[outcome];
+      a.settle({
+        left: lefts[i + 1],
+        loot: loots[i + 1],
+        kills: Math.round((killed * count(g.units)) / size),
+        won: outcome === 'victoria',
+        report: {
+          t,
+          kind: 'ataque',
+          island: isl.id,
+          islandName: isl.name,
+          outcome,
+          title: allyTitle,
+          text: [`🤝 Al mando, ${this.state.name}. Tus tropas: ${count(g.units)} de las ${size} del ataque.`, warText].filter(Boolean).join(' '),
+          battle: battleLog,
+          loot: loots[i + 1],
+          enemy,
+          pvp: true,
+        },
+      });
+    });
+  }
+
+  /** Resultado del ataque conjunto al que se unió esta flota (lo resuelve quien lo dirige). */
+  settleJoint(m, { left, loot, kills, won, report }, t) {
+    m.units = Object.fromEntries(Object.entries(left).filter(([, n]) => n > 0));
+    for (const [r, n] of Object.entries(loot)) m.cargo[r] = (m.cargo[r] ?? 0) + n;
+    this.state.stats.kills += kills;
+    this.state.stats.loot += count(loot);
+    if (won) {
+      this.state.stats.victories++;
+      this.state.stats.pvpWins++;
+    }
+    if (count(m.units) > 0) {
+      m.phase = 'vuelta';
+      m.turn = t;
+      m.back = t + (m.trip ?? m.arrive - m.depart);
+    } else {
+      this.state.missions = this.state.missions.filter((x) => x !== m);
+    }
+    this.receiveNews(report, `⚔️ ${report.title}${fmtBag(loot) ? ` · botín ${fmtBag(loot)}` : ''}`, won ? 'success' : 'error');
+  }
+
+  /** El ataque al que te uniste ya no existe (lo han retirado): tu flota vuelve. */
+  releaseJoint(m, now) {
+    m.phase = 'vuelta';
+    m.turn = now;
+    m.recalled = true;
+    m.back = now + Math.min(Math.max(0, now - m.depart), m.trip ?? Infinity);
+    this.#note(`🤝 El ataque conjunto contra ${m.targetName} se ha cancelado: tu flota vuelve a casa`, 'error');
+    this.#flush(true);
   }
 
   #arriveAttack(m, isl, t) {
@@ -1740,7 +1836,52 @@ function pick(result) {
     rounds: result.rounds,
     att: { start: result.att.start, lost: result.att.lost },
     def: { start: result.def.start, lost: result.def.lost },
+    log: result.log,
   };
+}
+
+/**
+ * Reparte los supervivientes de un bando formado por varios grupos: cada uno
+ * conserva la misma fracción de cada tipo; lo que sobra por redondeo, para el primero que lo tenga.
+ */
+function shareSurvivors(groups, left) {
+  const start = {};
+  for (const g of groups) for (const [id, n] of Object.entries(g)) start[id] = (start[id] ?? 0) + n;
+  const out = groups.map(() => ({}));
+  for (const [id, total] of Object.entries(start)) {
+    const frac = (left[id] ?? 0) / total;
+    let given = 0;
+    groups.forEach((g, i) => {
+      const n = Math.floor((g[id] ?? 0) * frac);
+      out[i][id] = n;
+      given += n;
+    });
+    const owner = groups.findIndex((g) => (g[id] ?? 0) > 0);
+    out[owner][id] += (left[id] ?? 0) - given;
+  }
+  return out.map((o) => Object.fromEntries(Object.entries(o).filter(([, n]) => n > 0)));
+}
+
+/** Reparte un botín según unos pesos (la bodega que le queda a cada uno). */
+function splitBag(bagIn, weights) {
+  const total = weights.reduce((a, b) => a + b, 0);
+  const out = weights.map(() => ({}));
+  if (!total) return out;
+  for (const [res, n] of Object.entries(bagIn ?? {})) {
+    let given = 0;
+    weights.forEach((w, i) => {
+      const k = Math.floor((n * w) / total);
+      if (k) out[i][res] = k;
+      given += k;
+    });
+    const first = weights.findIndex((w) => w > 0);
+    if (n - given > 0) out[first][res] = (out[first][res] ?? 0) + n - given;
+  }
+  return out;
+}
+
+function cargoOf(units) {
+  return Object.entries(units).reduce((s, [id, n]) => s + n * (UNITS[id].cargo ?? 0), 0);
 }
 
 function fmtBag(bag) {

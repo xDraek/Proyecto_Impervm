@@ -16,17 +16,19 @@ export function battle(attacker, defender, rand = Math.random) {
   const att = prepare(attacker);
   const def = prepare(defender);
   let rounds = 0;
+  const log = []; // lo que queda de cada bando tras cada asalto (para las repeticiones)
   while (rounds < MAX_ROUNDS && count(att.left) > 0 && (count(def.left) > 0 || def.extraAtk > 0)) {
     rounds++;
     const toDef = damage(att, rand);
     const toAtt = damage(def, rand);
     hit(def, toDef, rand);
     hit(att, toAtt, rand);
+    log.push({ att: { ...att.left }, def: { ...def.left } });
   }
   let winner = 'draw';
   if (!hasCombat(att.left)) winner = 'def';
   else if (count(def.left) === 0) winner = 'att';
-  return { winner, rounds, att: summary(att), def: summary(def) };
+  return { winner, rounds, att: summary(att), def: summary(def), log };
 }
 
 function prepare(side) {

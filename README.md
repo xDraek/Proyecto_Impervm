@@ -58,6 +58,8 @@ El servidor guarda el mundo en memoria y lo vuelca a la base de datos cada 10 se
 - **Almirante** 🎖️: un héroe que contratas en el ayuntamiento. Acompaña a una flota (más ataque, carga o velocidad) o defiende la isla; sube de nivel con los combates y repartes sus puntos. Si su flota cae, vuelve herido.
 - **Contraespionaje**: la muralla puede descubrir y hundir los botes espía (8 % por nivel).
 - **Todo en vivo**: el servidor empuja por WebSocket los ataques que se acercan, los cambios de tu ciudad y los mensajes del chat al momento.
+- **Ataques conjuntos** 🤝: cuando un aliado ataca otra ciudad, puedes sumar tu flota (si llega a tiempo) para que combatáis como un solo ejército. Hasta 5 flotas; las bajas y el botín se reparten entre todos.
+- **Repeticiones de combate** ▶: en los informes puedes ver la batalla asalto a asalto.
 - **Apoyo** 🛡️: manda tropas a defender la ciudad de un aliado. Se quedan allí y combaten junto a él hasta que las retires (y vuelven solas si dejáis de ser aliados).
 - **Correo** ✉️: mensajes privados entre jugadores.
 - **Perfiles y logros** 👤: cada jugador tiene un perfil con su puesto, su ciudad, su alianza y 15 logros que se ganan jugando.

@@ -83,7 +83,9 @@ const ACTIONS = {
   cancelTraining: (g, [b, i]) => ((b === 'cuartel' || b === 'puerto') && int(i) >= 0 ? g.cancelTraining(b, int(i)) : bad()),
   trade: (g, [from, to, n]) => (own(RESOURCES, from) && own(RESOURCES, to) ? g.trade(from, to, int(n)) : bad()),
   sendMission: (g, [type, target, u, load, opts]) =>
-    own(MISSION_TYPES, type) && typeof target === 'string' ? g.sendMission(type, target, units(u), resources(load), { hero: opts?.hero === true }) : bad(),
+    own(MISSION_TYPES, type) && typeof target === 'string'
+      ? g.sendMission(type, target, units(u), resources(load), { hero: opts?.hero === true, join: typeof opts?.join === 'string' && opts.join.length < 40 ? opts.join : undefined })
+      : bad(),
   hireHero: (g, [name]) => g.hireHero(typeof name === 'string' ? name : ''),
   heroSkill: (g, [skill]) => (own(HERO_SKILLS, skill) ? g.heroSkill(skill) : bad()),
   recall: (g, [id]) => g.recall(int(id)),
@@ -185,6 +187,10 @@ async function api(req, res, url) {
       if (action === 'sendMission' && result?.ok) {
         const owner = world.island(String(args[1]))?.owner;
         if (owner != null) world.pendingPush.add(owner);
+        // Quien dirige un ataque se entera de que un aliado se une, y la alianza ve el ataque al momento
+        const joined = args[4]?.join ? world.jointAttack(args[4].join) : null;
+        if (joined) world.hostNews(joined.leaderId, `🤝 ${game.name} se une a tu ataque contra ${joined.targetName}`);
+        for (const member of world.allianceOf(uid)?.members ?? []) world.pendingPush.add(member);
       }
       const snapshot = world.snapshot(uid);
       world.pendingPush.delete(uid); // ya lo recibe en la respuesta

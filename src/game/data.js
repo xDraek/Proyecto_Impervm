@@ -469,6 +469,9 @@ export const COLONY = {
   timeFactor: 1.45,
 };
 
+/** Cuántos aliados pueden unirse a un mismo ataque conjunto. */
+export const JOINT_MAX = 4;
+
 export const MISSION_TYPES = {
   explorar: { name: 'Explorar', icon: '🔭' },
   atacar: { name: 'Atacar', icon: '⚔️' },

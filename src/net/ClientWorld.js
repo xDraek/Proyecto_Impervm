@@ -6,6 +6,7 @@ export class ClientWorld {
     this.islandMap = new Map();
     this.states = {};
     this.players = {};
+    this.joints = [];
     this.version = 0;
   }
 
@@ -35,6 +36,11 @@ export class ClientWorld {
   /** Relación con otro jugador tal como la calcula el servidor ('aliado', 'pacto', 'guerra' o null). */
   relation(_me, other) {
     return this.players[other]?.rel ?? null;
+  }
+
+  /** Un ataque de tu alianza al que te puedes unir (lo manda el servidor en cada estado). */
+  jointAttack(key) {
+    return this.joints.find((j) => j.key === key) ?? null;
   }
 
   sameAlliance(me, other) {

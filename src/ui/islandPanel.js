@@ -159,6 +159,7 @@ function fleetForm(game, view) {
     <h4>Enviar flota <span class="muted small">(${game.missions.length}/${game.fleetSlots()} en el mar)</span></h4>
     <div class="fleet">${rows}</div>
     ${game.heroStatus() === 'casa' ? `<label class="hero-toggle"><input type="checkbox" name="with-hero" /> 🎖️ Que vaya ${escapeHtml(game.hero.name)} (Nv ${game.hero.level})</label>` : ''}
+    ${jointSelect(game, view)}
     <div class="fleet-summary" data-fleet-summary></div>
     ${cargoForm}
     ${colony}
@@ -166,6 +167,23 @@ function fleetForm(game, view) {
     ${hostile ? '<button class="ghost wide sim-btn" data-action="simulate">🎲 Simular el combate</button>' : ''}
     <div class="hint warn" data-fleet-reason></div>
   </div>`;
+}
+
+/** Ataques de tu alianza hacia esta ciudad a los que puedes sumar tu flota. */
+function jointSelect(game, view) {
+  if (view.type !== 'jugador') return '';
+  const joints = (game.world.joints ?? []).filter((j) => j.target === view.id && j.leaderId !== game.userId);
+  if (!joints.length) return '';
+  const left = (t) => fmtTime(Math.max(0, (t - game.now()) / 1000));
+  return `<label class="joint-pick">🤝 <select name="join">
+      <option value="">Ataque propio</option>
+      ${joints.map((j) => `<option value="${escapeHtml(j.key)}">Unirse al ataque de ${escapeHtml(j.leader)} (llega en ${left(j.arrive)}${j.allies ? `, con ${j.allies} más` : ''})</option>`).join('')}
+    </select></label>`;
+}
+
+/** Opciones de la flota: almirante y ataque conjunto. */
+export function readOpts(root) {
+  return { hero: !!root.querySelector('[name="with-hero"]')?.checked, join: root.querySelector('[name="join"]')?.value || undefined };
 }
 
 /** Unidades elegidas en el formulario de flota. */
@@ -208,7 +226,7 @@ function refreshFleet(game, id, root) {
   if (!summary) return;
   const units = readFleet(root);
   const any = Object.keys(units).length > 0;
-  const base = game.planMission('atacar', id, units, null, { hero: !!root.querySelector('[name="with-hero"]')?.checked });
+  const base = game.planMission('atacar', id, units, null, readOpts(root));
   const text = any
     ? `👥 ${base.used}/${base.capacity} plazas · 📦 ${fmtNum(base.cargo)} de carga${base.seconds ? ` · ⏱ ${fmtTime(base.seconds)} de ida` : ''}`
     : 'Elige cuántas unidades mandas.';
@@ -218,7 +236,7 @@ function refreshFleet(game, id, root) {
   let anyOk = false;
   let lastReason = '';
   const payload = readPayload(root);
-  const opts = { hero: !!root.querySelector('[name="with-hero"]')?.checked };
+  const opts = readOpts(root);
   for (const btn of root.querySelectorAll('[data-action="mission"]')) {
     const plan = game.planMission(btn.dataset.type, id, fleetFor(game, btn.dataset.type, units, payload), payload, opts);
     btn.disabled = !plan.ok;

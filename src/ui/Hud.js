@@ -5,10 +5,10 @@ import { HOUR_MS, canAfford, multiplyCost, upcomingWorldEvents } from '../game/r
 import { api } from '../net/api.js';
 import { buildingPanel } from './buildingPanel.js';
 import { bag, costItems, escapeHtml, fmtNum, fmtTime, unitList } from './format.js';
-import { fleetFor, islandPanel, readFleet, readPayload } from './islandPanel.js';
+import { fleetFor, islandPanel, readFleet, readPayload, readOpts } from './islandPanel.js';
 import { questsHtml, rankingHtml } from './modals.js';
 import { WorldMap } from './worldMap.js';
-import { reportsHtml } from './reports.js';
+import { reportsHtml, playReplay } from './reports.js';
 import { Social } from './social.js';
 
 const $ = (sel) => document.querySelector(sel);
@@ -86,6 +86,12 @@ export class Hud {
       if (e.target === this.modal || e.target.closest('[data-action="close-modal"]')) return this.closeModal();
       const claim = e.target.closest('[data-action="claim"]');
       if (claim && !claim.disabled) return this.#run(claim, () => game.claimQuest(claim.dataset.id), null, 'coins');
+      const replay = e.target.closest('[data-action="replay"]');
+      if (replay) {
+        const report = this.game.reports.find((r) => r.t === Number(replay.dataset.t) && r.battle?.log);
+        if (report) playReplay(replay, report);
+        return;
+      }
       const tab = e.target.closest('[data-action="rank-tab"]');
       if (tab) {
         this.rankTab = tab.dataset.tab;
@@ -624,8 +630,8 @@ export class Hud {
         const payload = readPayload(root);
         const units = fleetFor(game, type, readFleet(root), payload);
         const name = game.world.island(target)?.name ?? 'la isla';
-        const opts = { hero: !!root.querySelector('[name="with-hero"]')?.checked };
-        const res = await this.#run(btn, () => game.sendMission(type, target, units, payload, opts), `${MISSION_TYPES[type].icon} La flota zarpa hacia ${name}`, 'sail');
+        const opts = readOpts(root);
+        const res = await this.#run(btn, () => game.sendMission(type, target, units, payload, opts), opts.join ? `🤝 Tu flota se une al ataque contra ${name}` : `${MISSION_TYPES[type].icon} La flota zarpa hacia ${name}`, 'sail');
         if (res?.ok) for (const input of this.panel.querySelectorAll('input[name^="f-"], input[name^="p-"]')) input.value = '';
         break;
       }
@@ -680,6 +686,13 @@ export class Hud {
         ${buttons}
       </div>`;
 
+    // Ataques conjuntos: a cuál te has unido, o cuántos aliados van con el tuyo
+    const jointTag = (m) => {
+      if (m.phase !== 'ida') return '';
+      if (m.joint) return ` 🤝 con ${escapeHtml(m.leader ?? '')}`;
+      const j = game.world.jointAttack?.(`${game.userId}-${m.id}`);
+      return j?.allies ? ` 🤝 +${j.allies}` : '';
+    };
     const q = game.queue;
     if (q) {
       const b = BUILDINGS[q.id];
@@ -718,7 +731,7 @@ export class Hud {
       rows.push(
         row({
           icon: going ? t.icon : '⚓',
-          title: `${going ? t.name : 'Vuelta de'} ${escapeHtml(m.targetName ?? game.world.island(m.target)?.name ?? '')}${m.hero ? ' 🎖️' : ''}`,
+          title: `${going ? t.name : 'Vuelta de'} ${escapeHtml(m.targetName ?? game.world.island(m.target)?.name ?? '')}${m.hero ? ' 🎖️' : ''}${jointTag(m)}`,
           start,
           end,
           select: m.target,

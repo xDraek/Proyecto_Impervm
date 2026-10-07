@@ -33,6 +33,7 @@ export class ClientGame extends Game {
     const islandsChanged = this.world.apply(snap.world);
     this.state = snap.state;
     this.incoming = snap.incoming ?? [];
+    this.world.joints = snap.joint ?? [];
     this.support = snap.support ?? [];
     this.due = false;
     this.lastSync = Date.now();

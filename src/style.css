@@ -2478,3 +2478,142 @@ input[type='text'] {
   border: 1px solid rgba(242, 201, 76, 0.5);
   background: rgba(242, 201, 76, 0.1);
 }
+
+/* ── Ataques conjuntos y repeticiones ───────────────────────────────────── */
+
+.joint-pick {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0;
+}
+
+.joint-pick select {
+  flex: 1;
+  min-width: 0;
+}
+
+.replay-btn {
+  margin: 8px 0 4px;
+}
+
+.rp-stage {
+  margin: 6px 0 10px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.25);
+  border: 1px solid var(--panel-border);
+}
+
+.rp-round {
+  text-align: center;
+  font-family: var(--font-title);
+  color: var(--gold);
+  margin-bottom: 8px;
+}
+
+.rp-round.done {
+  font-size: 16px;
+}
+
+.rp-sides {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  gap: 10px;
+  align-items: start;
+}
+
+.rp-vs {
+  align-self: center;
+  font-size: 20px;
+}
+
+.rp-side h5 {
+  margin: 0 0 6px;
+}
+
+.rp-side.hit {
+  animation: rp-shake 0.35s ease-out;
+}
+
+.rp-unit {
+  position: relative;
+  display: grid;
+  grid-template-columns: 22px 1fr 44px;
+  gap: 6px;
+  align-items: center;
+  margin: 4px 0;
+  transition: opacity 0.4s;
+}
+
+.rp-unit.dead {
+  opacity: 0.35;
+}
+
+.rp-unit b {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.rp-bar {
+  height: 8px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+}
+
+.rp-bar i {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, #8fd18a, #f2c94c);
+  transition: width 0.9s ease-in-out;
+}
+
+.rp-side[data-side='def'] .rp-bar i {
+  background: linear-gradient(90deg, #ff7a6b, #f2c94c);
+}
+
+.rp-pop {
+  position: absolute;
+  right: 0;
+  top: -10px;
+  color: var(--bad);
+  font-weight: 700;
+  font-size: 12px;
+  animation: rp-pop 1s ease-out forwards;
+  pointer-events: none;
+}
+
+@keyframes rp-pop {
+  from {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(-14px);
+  }
+}
+
+@keyframes rp-shake {
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+  25% {
+    transform: translateX(-3px);
+  }
+  75% {
+    transform: translateX(3px);
+  }
+}
+
+@media (max-width: 800px) {
+  .rp-sides {
+    grid-template-columns: 1fr;
+  }
+
+  .rp-vs {
+    display: none;
+  }
+}

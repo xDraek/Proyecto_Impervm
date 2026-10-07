@@ -2,7 +2,7 @@ import { clock, universe } from '../src/config.js';
 import { RESOURCES } from '../src/game/data.js';
 import { count } from '../src/game/combat.js';
 import { Game, newState } from '../src/game/Game.js';
-import { worldEventAt } from '../src/game/rules.js';
+import { playerCombat, worldEventAt } from '../src/game/rules.js';
 import { freshIslandState, generateSector, homeIsland } from '../src/game/world.js';
 import { hashPassword, newSecret, verifyPassword } from './auth.js';
 
@@ -305,6 +305,57 @@ export class WorldServer {
     return res;
   }
 
+  // ── Ataques conjuntos ──────────────────────────────────────────────────────
+
+  /** Un ataque contra otra ciudad al que pueden unirse los aliados de quien lo lanza (clave «jugador-flota»). */
+  jointAttack(key) {
+    const [uid, mid] = String(key ?? '').split('-').map(Number);
+    const game = this.games.get(uid);
+    const m = game?.state.missions.find((x) => x.id === mid);
+    if (!m || m.type !== 'atacar' || m.phase !== 'ida' || m.joint) return null;
+    if (this.islands.get(m.target)?.type !== 'jugador') return null;
+    const allies = this.#jointMissions(key);
+    return { key, leaderId: uid, leader: game.name, target: m.target, targetName: m.targetName, arrive: m.arrive, allies: allies.length, names: allies.map((x) => x.game.name) };
+  }
+
+  #jointMissions(key) {
+    const out = [];
+    for (const game of this.games.values()) {
+      for (const mission of game.state.missions) if (mission.joint === key && mission.phase === 'ida') out.push({ game, mission });
+    }
+    return out;
+  }
+
+  /** Las flotas unidas a un ataque, listas para combatir junto a quien lo dirige. */
+  jointFleets(key, t) {
+    return this.#jointMissions(key).map(({ game, mission }) => {
+      game.update(t);
+      return {
+        name: game.name,
+        mission,
+        combat: playerCombat(game.state),
+        settle: (data) => {
+          game.settleJoint(mission, data, t);
+          game.dirty = true;
+        },
+      };
+    });
+  }
+
+  /** Ataques de tu alianza (y tuyos) a los que se puede uno unir, para el navegador. */
+  #jointList(userId) {
+    const a = this.allianceOf(userId);
+    const out = [];
+    for (const uid of a ? a.members : [userId]) {
+      for (const m of this.games.get(uid)?.state.missions ?? []) {
+        if (m.type !== 'atacar' || m.phase !== 'ida' || m.joint) continue;
+        const info = this.jointAttack(`${uid}-${m.id}`);
+        if (info) out.push(info);
+      }
+    }
+    return out;
+  }
+
   announce(text, channel = 'global') {
     this.#pushChat({ name: null, text, system: true, channel });
   }
@@ -335,6 +386,14 @@ export class WorldServer {
   tick() {
     const now = clock.now();
     for (const game of this.games.values()) game.update(now);
+    // Flotas que esperaban a un ataque conjunto que ya no va (lo han retirado o se ha perdido)
+    for (const game of this.games.values()) {
+      for (const m of game.state.missions) {
+        if (!m.joint || m.phase !== 'ida') continue;
+        if (this.jointAttack(m.joint) && now <= m.arrive + 60_000) continue;
+        game.releaseJoint(m, now);
+      }
+    }
     // Cuando empieza una temporada del archipiélago, se anuncia una sola vez
     const ev = worldEventAt(now);
     if (this.meta.eventAnnounced !== ev.start) {
@@ -403,6 +462,7 @@ export class WorldServer {
       state,
       world: { islands, states, players },
       incoming: this.incoming(game.state.home),
+      joint: this.#jointList(userId),
       support: this.supportersAt(game.state.home, userId).map(({ game: g, mission }) => ({ from: g.name, units: mission.units })),
     };
   }
