@@ -807,13 +807,17 @@ export class World {
       }
       const t = ISLAND_TYPES[entry.isl.type];
       let status = !view.explored ? '❔ Inexplorada' : `${t.icon} ${t.name}`;
-      if (view.type === 'jugador') status = `🏰 ${view.ownerName} · ${view.score} pts${view.protected ? ' · 🛡️' : ''}`;
-      else if (view.colonized) status = '🚩 Tu colonia';
+      const ally = view.alliance && view.alliance.id === this.game.alliance?.id;
+      if (view.type === 'jugador') {
+        const tag = view.alliance ? `[${view.alliance.tag}] ` : '';
+        status = `🏰 ${tag}${view.ownerName} · ${view.score} pts${view.protected ? ' · 🛡️' : ''}`;
+      } else if (view.colonized) status = '🚩 Tu colonia';
       else if (view.colonizedBy != null) status = `🚩 Colonia de ${view.colonistName}`;
       else if (view.explored && view.tier) status += ` · Nv ${view.tier}`;
       if (view.inbound.length) status += ' · ⛵';
       entry.el.querySelector('.label-lvl').textContent = status;
       entry.el.classList.toggle('colony', !!view.colonized);
+      entry.el.classList.toggle('ally', !!ally);
       entry.el.classList.toggle('player', view.type === 'jugador');
       entry.el.classList.toggle('unknown', !view.explored);
     }

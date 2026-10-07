@@ -23,6 +23,8 @@ export class ClientGame extends Game {
     clock.offset = snap.serverTime - Date.now();
     universe.speed = snap.speed ?? universe.speed;
     this.username = snap.username;
+    this.alliance = snap.alliance ?? null;
+    this.mailUnread = snap.mailUnread ?? 0;
     const islandsChanged = this.world.apply(snap.world);
     this.state = snap.state;
     this.incoming = snap.incoming ?? [];
@@ -128,8 +130,8 @@ export class ClientGame extends Game {
     return this.#act('trade', from, to, n);
   }
 
-  sendMission(type, target, units) {
-    return this.#act('sendMission', type, target, units);
+  sendMission(type, target, units, payload) {
+    return this.#act('sendMission', type, target, units, payload);
   }
 
   recall(id) {

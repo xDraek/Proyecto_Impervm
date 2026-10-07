@@ -420,7 +420,14 @@ export class Game extends EventTarget {
     };
     if (isl.type === 'jugador') {
       const p = this.world.playerInfo(isl.owner);
-      Object.assign(view, { ownerName: p?.name ?? '¿?', score: p?.score ?? 0, protected: !!p?.protected, townLevel: p?.townLevel ?? 1 });
+      Object.assign(view, {
+        ownerName: p?.name ?? '¿?',
+        score: p?.score ?? 0,
+        protected: !!p?.protected,
+        townLevel: p?.townLevel ?? 1,
+        alliance: p?.alliance ?? null,
+        online: !!p?.online,
+      });
       return view;
     }
     const colonizedBy = rt?.colonizedBy ?? null;
@@ -539,8 +546,18 @@ export class Game extends EventTarget {
     return { ok: true, paid: Math.min(n, pay), got: get };
   }
 
-  /** Comprueba una misión sin enviarla. */
-  planMission(type, target, units) {
+  /** Recursos que se pueden cargar: solo enteros positivos de recursos conocidos. */
+  #cleanPayload(payload) {
+    const out = {};
+    for (const res of RESOURCE_KEYS) {
+      const n = Math.max(0, Math.floor(Number(payload?.[res]) || 0));
+      if (n) out[res] = n;
+    }
+    return out;
+  }
+
+  /** Comprueba una misión sin enviarla. `payload`: recursos que lleva un transporte. */
+  planMission(type, target, units, payload) {
     const s = this.state;
     const isl = this.world.island(target);
     const sent = {};
@@ -582,11 +599,20 @@ export class Game extends EventTarget {
     else if (!ships) reason ||= 'Hace falta al menos un barco para cruzar el mar.';
     else if (used > capacity) reason ||= `Faltan plazas en los barcos: ${used}/${capacity}.`;
 
+    let load = null;
     if (isl.type === 'jugador') {
       if (type === 'explorar') {
         if (Object.keys(sent).some((id) => !UNITS[id].explorer)) reason ||= 'Para espiar envía solo botes exploradores.';
+      } else if (type === 'transporte') {
+        load = this.#cleanPayload(payload);
+        const total = sum(load);
+        if (Object.keys(sent).some((id) => UNITS[id].kind !== 'barco')) reason ||= 'Los transportes solo llevan barcos.';
+        if (!total) reason ||= 'Elige qué recursos envías.';
+        else if (total > cargo) reason ||= `No cabe: llevas ${total} y los barcos cargan ${cargo}.`;
+        else if (!canAfford(s.resources, load)) reason ||= 'No tienes tantos recursos.';
       } else if (type === 'atacar') {
-        if (view.protected) reason ||= `${view.ownerName} está bajo protección de novato (menos de ${NEWBIE_POINTS} puntos).`;
+        if (this.world.sameAlliance?.(this.userId, isl.owner)) reason ||= `${view.ownerName} es de tu alianza.`;
+        else if (view.protected) reason ||= `${view.ownerName} está bajo protección de novato (menos de ${NEWBIE_POINTS} puntos).`;
         else if (this.isProtected()) reason ||= `Mientras tengas menos de ${NEWBIE_POINTS} puntos no puedes atacar a otros jugadores.`;
         if (!hasCombat(sent)) reason ||= 'Envía al menos una unidad de combate.';
       } else {
@@ -619,22 +645,23 @@ export class Game extends EventTarget {
     } else {
       reason ||= 'Misión desconocida.';
     }
-    return { ok: !reason, reason, units: sent, seconds, capacity, used, cargo, ships, cost };
+    return { ok: !reason, reason, units: sent, seconds, capacity, used, cargo, ships, cost, load };
   }
 
-  sendMission(type, target, units, now = this.now()) {
+  sendMission(type, target, units, payload, now = this.now()) {
     this.#advance(now);
-    const plan = this.planMission(type, target, units);
+    const plan = this.planMission(type, target, units, payload);
     if (!plan.ok) return this.#fail(plan.reason);
     for (const [id, n] of Object.entries(plan.units)) this.state.units[id] -= n;
     if (plan.cost) this.#pay(plan.cost);
+    if (plan.load) this.#pay(plan.load, false);
     this.state.missions.push({
       id: this.state.seq++,
       type,
       target,
       targetName: this.world.island(target).name,
       units: plan.units,
-      cargo: plan.cost ? { ...plan.cost } : {},
+      cargo: { ...(plan.cost ?? plan.load ?? {}) },
       depart: now,
       arrive: now + plan.seconds * 1000,
       back: null,
@@ -773,6 +800,30 @@ export class Game extends EventTarget {
     this.#note(`⚔️ ${title}`, outcome === 'derrota' ? 'error' : 'success');
     this.#dirty = true;
     return { result, stolen: stolen ?? {} };
+  }
+
+  /** Llega a tu isla un transporte de otro jugador. */
+  receiveTransport({ fromName, cargo, islandName }, t) {
+    this.#gain(cargo);
+    this.#report({ t, kind: 'transporte', islandName, title: `${fromName} te envía recursos`, loot: { ...cargo }, enemy: fromName });
+    this.#note(`📦 ${fromName} te ha enviado recursos`, 'success');
+    this.#dirty = true;
+  }
+
+  /** Aparta recursos (oferta del mercado del archipiélago). Devuelve si había bastantes. */
+  takeResources(bag, now = this.now()) {
+    this.#advance(now);
+    if (!canAfford(this.state.resources, bag)) return false;
+    this.#pay(bag, false);
+    this.#flush(true);
+    return true;
+  }
+
+  /** Entrega recursos que vienen de otro jugador o del mercado. */
+  giveResources(bag, note) {
+    this.#gain(bag);
+    if (note) this.#note(note, 'success');
+    this.#flush(true);
   }
 
   // ── Internos ───────────────────────────────────────────────────────────────
@@ -960,6 +1011,7 @@ export class Game extends EventTarget {
       // La isla ha desaparecido del mundo: la flota vuelve sin más
     } else if (isl.type === 'jugador') {
       if (m.type === 'explorar') this.#arriveSpy(m, isl, t);
+      else if (m.type === 'transporte') this.#arriveTransport(m, isl, t);
       else this.#arrivePlayerAttack(m, isl, t);
     } else if (m.type === 'explorar') this.#arriveExplore(m, isl, t);
     else if (m.type === 'atacar') this.#arriveAttack(m, isl, t);
@@ -1027,6 +1079,18 @@ export class Game extends EventTarget {
       intel,
     });
     this.#note(`🔭 Tus espías vuelven de ${isl.name}`, 'success');
+  }
+
+  #arriveTransport(m, isl, t) {
+    const delivered = this.world.deliver?.(isl.owner, { fromName: this.state.name, cargo: m.cargo, islandName: this.homeIsland?.name }, t);
+    const owner = this.world.playerInfo(isl.owner)?.name ?? isl.name;
+    if (!delivered) {
+      this.#report({ t, kind: 'transporte', island: isl.id, islandName: isl.name, title: `Nadie recoge la carga en ${isl.name}`, text: 'Los barcos vuelven con todo.' });
+      return;
+    }
+    this.#report({ t, kind: 'transporte', island: isl.id, islandName: isl.name, title: `Carga entregada a ${owner}`, loot: { ...m.cargo }, enemy: owner });
+    this.#note(`📦 Carga entregada en ${isl.name}`, 'success');
+    m.cargo = {};
   }
 
   #arrivePlayerAttack(m, isl, t) {

@@ -1684,3 +1684,207 @@ body.landing-mode #chat {
     height: 55vh;
   }
 }
+
+/* ── Alianzas, correo y mercado entre jugadores ─────────────────────────── */
+
+.tag {
+  color: var(--gold);
+  font-size: 0.85em;
+  font-weight: 600;
+}
+
+.label.ally {
+  border-color: rgba(143, 209, 138, 0.8);
+}
+
+.small-tabs {
+  margin: 12px 0;
+  grid-template-columns: none;
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
+}
+
+.small-tabs button {
+  position: relative;
+  padding: 6px;
+  font-size: 13px;
+}
+
+.small-tabs .badge {
+  top: -4px;
+  right: 4px;
+}
+
+.chat-tabs {
+  margin: 0;
+}
+
+.modal-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 12px;
+}
+
+.inline-form {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.inline-form input {
+  flex: 1;
+  min-width: 140px;
+}
+
+.inline-form input.short {
+  flex: 0 0 90px;
+  min-width: 0;
+}
+
+.stack {
+  display: grid;
+  gap: 8px;
+}
+
+.inline-form input,
+.stack input,
+.stack textarea {
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: rgba(0, 0, 0, 0.3);
+  color: var(--text);
+  font: inherit;
+  resize: vertical;
+}
+
+.row-actions {
+  display: flex;
+  gap: 4px;
+  justify-content: flex-end;
+}
+
+.row-actions .ghost {
+  padding: 3px 7px;
+}
+
+.dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-right: 6px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.2);
+}
+
+.dot.on {
+  background: var(--ok);
+}
+
+.mail-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.mail-list li {
+  display: grid;
+  grid-template-columns: 110px 1fr auto;
+  gap: 10px;
+  padding: 9px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+  align-items: baseline;
+}
+
+.mail-list li:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.mail-list li.unread {
+  font-weight: 600;
+}
+
+.mail-list li.unread .who::before {
+  content: '● ';
+  color: var(--gold);
+}
+
+.mail-list .who,
+.mail-list .subject {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.letter h4 {
+  margin: 8px 0;
+  font-family: var(--font-title);
+  color: var(--gold);
+}
+
+.letter p {
+  line-height: 1.5;
+  white-space: normal;
+}
+
+.offer-form {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.offer-form label {
+  display: grid;
+  grid-template-columns: 44px 1fr 90px;
+  gap: 6px;
+  align-items: center;
+  color: var(--muted);
+}
+
+.offers {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.offer {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.04);
+  border-left: 3px solid rgba(255, 255, 255, 0.15);
+  font-size: 13px;
+}
+
+.offer.good {
+  border-left-color: var(--ok);
+}
+
+.offer.bad {
+  border-left-color: var(--bad);
+}
+
+.payload {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+}
+
+.payload label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.payload input {
+  width: 100%;
+}

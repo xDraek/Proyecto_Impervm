@@ -58,6 +58,15 @@ function units(raw) {
   }
   return out;
 }
+function resources(raw) {
+  const out = {};
+  if (!raw || typeof raw !== 'object') return out;
+  for (const res of Object.keys(RESOURCES)) {
+    const n = int(raw[res]);
+    if (n > 0) out[res] = n;
+  }
+  return out;
+}
 const bad = () => ({ ok: false, reason: 'Petición no válida.' });
 
 const ACTIONS = {
@@ -68,7 +77,8 @@ const ACTIONS = {
   train: (g, [id, n]) => (own(UNITS, id) ? g.train(id, int(n)) : bad()),
   cancelTraining: (g, [b, i]) => ((b === 'cuartel' || b === 'puerto') && int(i) >= 0 ? g.cancelTraining(b, int(i)) : bad()),
   trade: (g, [from, to, n]) => (own(RESOURCES, from) && own(RESOURCES, to) ? g.trade(from, to, int(n)) : bad()),
-  sendMission: (g, [type, target, u]) => (own(MISSION_TYPES, type) && typeof target === 'string' ? g.sendMission(type, target, units(u)) : bad()),
+  sendMission: (g, [type, target, u, load]) =>
+    own(MISSION_TYPES, type) && typeof target === 'string' ? g.sendMission(type, target, units(u), resources(load)) : bad(),
   recall: (g, [id]) => g.recall(int(id)),
   claimQuest: (g, [id]) => (typeof id === 'string' ? g.claimQuest(id) : bad()),
   castPower: (g, [id]) => (own(POWERS, id) ? g.castPower(id) : bad()),
@@ -158,11 +168,55 @@ async function api(req, res, url) {
 
     if (route === 'GET /api/ranking') return send(res, 200, world.ranking(uid));
 
-    if (route === 'GET /api/chat') return send(res, 200, { messages: world.chatSince(int(url.searchParams.get('after')) || 0) });
+    if (route === 'GET /api/chat') return send(res, 200, { messages: world.chatSince(uid, int(url.searchParams.get('after')) || 0) });
     if (route === 'POST /api/chat') {
       if (limited(`chat:${uid}`, 5, 10_000)) return send(res, 429, { error: 'Espera un poco antes de escribir otra vez.' });
-      const { text } = await readJson(req);
-      return send(res, 200, { message: world.addChat(uid, text) });
+      const { text, channel } = await readJson(req);
+      return send(res, 200, { message: world.addChat(uid, text, channel) });
+    }
+
+    // Alianzas
+    if (route === 'GET /api/alliances') return send(res, 200, { alliances: world.allianceList() });
+    if (route === 'GET /api/alliance') return send(res, 200, { alliance: world.allianceDetail(uid) });
+    if (req.method === 'POST' && url.pathname.startsWith('/api/alliance')) {
+      if (limited(`social:${uid}`, 20, 10_000)) return send(res, 429, { error: 'Vas demasiado rápido.' });
+      const body = await readJson(req);
+      const sub = url.pathname.slice('/api/alliance'.length);
+      if (sub === '') world.createAlliance(uid, body.name, body.tag);
+      else if (sub === '/join') world.joinAlliance(uid, int(body.id));
+      else if (sub === '/leave') world.leaveAlliance(uid);
+      else if (sub === '/kick') world.kickMember(uid, int(body.userId));
+      else if (sub === '/description') world.describeAlliance(uid, body.text);
+      else return send(res, 404, { error: 'No existe.' });
+      return send(res, 200, { alliance: world.allianceDetail(uid), snapshot: world.snapshot(uid) });
+    }
+
+    // Correo
+    if (route === 'GET /api/mail') return send(res, 200, { mail: world.mailbox(uid) });
+    if (route === 'POST /api/mail') {
+      if (limited(`mail:${uid}`, 5, 60_000)) return send(res, 429, { error: 'Has mandado muchos mensajes seguidos. Espera un minuto.' });
+      const { to, subject, text } = await readJson(req);
+      world.sendMail(uid, to, subject, text);
+      return send(res, 200, { mail: world.mailbox(uid) });
+    }
+    if (route === 'POST /api/mail/read' || route === 'POST /api/mail/delete') {
+      const { id } = await readJson(req);
+      if (route.endsWith('read')) world.readMail(uid, id === 'all' ? 'all' : int(id));
+      else world.deleteMail(uid, int(id));
+      return send(res, 200, { mail: world.mailbox(uid) });
+    }
+
+    // Mercado del archipiélago
+    if (route === 'GET /api/market') return send(res, 200, { offers: world.listOffers(uid) });
+    if (req.method === 'POST' && url.pathname.startsWith('/api/market')) {
+      if (limited(`social:${uid}`, 20, 10_000)) return send(res, 429, { error: 'Vas demasiado rápido.' });
+      const body = await readJson(req);
+      const sub = url.pathname.slice('/api/market'.length);
+      if (sub === '') world.postOffer(uid, body.give, body.want);
+      else if (sub === '/accept') world.acceptOffer(uid, int(body.id));
+      else if (sub === '/cancel') world.cancelOffer(uid, int(body.id));
+      else return send(res, 404, { error: 'No existe.' });
+      return send(res, 200, { offers: world.listOffers(uid), snapshot: world.snapshot(uid) });
     }
 
     return send(res, 404, { error: 'No existe.' });

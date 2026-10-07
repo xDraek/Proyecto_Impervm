@@ -1,4 +1,4 @@
-import { ISLAND_TYPES, MISSION_TYPES, PLAYER_UNITS, RESOURCES, UNITS } from '../game/data.js';
+import { ISLAND_TYPES, MISSION_TYPES, PLAYER_UNITS, RESOURCES, RESOURCE_KEYS, UNITS } from '../game/data.js';
 import { colonyYield } from '../game/rules.js';
 import { NEWBIE_POINTS } from '../game/Game.js';
 import { bag, costList, escapeHtml, fmtAgo, fmtNum, fmtTime, unitList } from './format.js';
@@ -7,8 +7,10 @@ import { bag, costList, escapeHtml, fmtAgo, fmtNum, fmtTime, unitList } from './
 // para mandar una flota (explorar, atacar o colonizar).
 
 function playerSection(game, view) {
+  const ally = view.alliance && game.alliance && view.alliance.id === game.alliance.id;
   const lines = [
     `<div class="info-row"><span>⚜ Gobernante</span><b>${escapeHtml(view.ownerName)}</b></div>`,
+    `<div class="info-row"><span>🤝 Alianza</span><b>${view.alliance ? `${escapeHtml(view.alliance.name)} [${escapeHtml(view.alliance.tag)}]${ally ? ' · aliado' : ''}` : 'Ninguna'}</b></div>`,
     `<div class="info-row"><span>🏆 Puntos</span><b>${fmtNum(view.score)}</b></div>`,
     `<div class="info-row"><span>🏛️ Ayuntamiento</span><b>Nivel ${view.townLevel}</b></div>`,
   ];
@@ -20,7 +22,12 @@ function playerSection(game, view) {
       <div class="info-row"><span>Recursos</span><span>${bag(intel.stock)}</span></div>
       <div class="info-row"><span>🏰 Muralla</span><b>Nivel ${intel.wall ?? 0}</b></div>`
     : '<p class="desc small">Manda un bote explorador para espiar sus tropas y sus recursos antes de atacar.</p>';
-  return `<p class="desc">La ciudad de otro jugador. Si la atacas y ganas, te llevas lo que quepa en tus barcos (salvo lo que esconde su almacén).</p>${lines.join('')}${spy}`;
+  const intro = ally
+    ? 'Una ciudad aliada: no podéis atacaros, pero puedes mandarle recursos.'
+    : 'La ciudad de otro jugador. Si la atacas y ganas, te llevas lo que quepa en tus barcos (salvo lo que esconde su almacén).';
+  return `<p class="desc">${intro}</p>
+    ${lines.join('')}${spy}
+    <button class="ghost wide" data-action="mail-to" data-name="${escapeHtml(view.ownerName)}">✉️ Mandar un mensaje a ${escapeHtml(view.ownerName)}</button>`;
 }
 
 function infoSection(game, view) {
@@ -100,6 +107,7 @@ function fleetForm(game, view) {
   else types.push('explorar');
   const hostile = ['barbaros', 'piratas', 'kraken', 'jugador'].includes(view.type);
   if (view.type !== 'brumas' && view.colonizedBy == null && (!view.explored || hostile)) types.push('atacar');
+  if (view.type === 'jugador') types.push('transporte');
   if (view.type === 'libre' && view.explored && view.colonizedBy == null) types.push('colonizar');
 
   const buttons = types
@@ -108,6 +116,11 @@ function fleetForm(game, view) {
       return `<button class="${t === 'atacar' ? 'danger' : 'primary'} small" data-action="mission" data-type="${t}">${MISSION_TYPES[t].icon} ${label}</button>`;
     })
     .join('');
+  const cargoForm = types.includes('transporte')
+    ? `<h4>Recursos para transportar</h4><div class="payload">${RESOURCE_KEYS.map(
+        (r) => `<label title="${RESOURCES[r].name}">${RESOURCES[r].icon}<input type="number" name="p-${r}" min="0" placeholder="0" inputmode="numeric" /></label>`,
+      ).join('')}</div><p class="hint">Si no eliges barcos, salen los mercantes que hagan falta.</p>`
+    : '';
   const colony = types.includes('colonizar')
     ? `<div class="hint">Los colonos viajan en un mercante y se quedan con él. Llevan:</div>${costList(game.planMission('colonizar', view.id, { mercante: 1 }).cost ?? {}, game.resources)}`
     : '';
@@ -115,6 +128,7 @@ function fleetForm(game, view) {
     <h4>Enviar flota <span class="muted small">(${game.missions.length}/${game.fleetSlots()} en el mar)</span></h4>
     <div class="fleet">${rows}</div>
     <div class="fleet-summary" data-fleet-summary></div>
+    ${cargoForm}
     ${colony}
     <div class="mission-buttons">${buttons}</div>
     <div class="hint warn" data-fleet-reason></div>
@@ -131,9 +145,28 @@ export function readFleet(root) {
   return units;
 }
 
-/** El botón de explorar, sin nada elegido, manda un bote. */
-export function fleetFor(game, type, units) {
-  if (type === 'explorar' && !Object.keys(units).length && game.units.bote > 0) return { bote: 1 };
+/** Recursos elegidos para un transporte. */
+export function readPayload(root) {
+  const out = {};
+  for (const input of root.querySelectorAll('input[name^="p-"]')) {
+    const n = Math.floor(Number(input.value) || 0);
+    if (n > 0) out[input.name.slice(2)] = n;
+  }
+  return out;
+}
+
+/**
+ * Atajos cuando no eliges unidades: explorar manda un bote y un transporte,
+ * los mercantes que hagan falta para la carga.
+ */
+export function fleetFor(game, type, units, payload = {}) {
+  if (Object.keys(units).length) return units;
+  if (type === 'explorar' && game.units.bote > 0) return { bote: 1 };
+  if (type === 'transporte' && game.units.mercante > 0) {
+    const total = Object.values(payload).reduce((a, b) => a + b, 0);
+    const need = Math.max(1, Math.ceil(total / UNITS.mercante.cargo));
+    return { mercante: Math.min(need, game.units.mercante) };
+  }
   return units;
 }
 
@@ -151,8 +184,9 @@ function refreshFleet(game, id, root) {
   // Si ninguna misión es posible, explicar por qué la última (la más "seria") no lo es
   let anyOk = false;
   let lastReason = '';
+  const payload = readPayload(root);
   for (const btn of root.querySelectorAll('[data-action="mission"]')) {
-    const plan = game.planMission(btn.dataset.type, id, fleetFor(game, btn.dataset.type, units));
+    const plan = game.planMission(btn.dataset.type, id, fleetFor(game, btn.dataset.type, units, payload), payload);
     btn.disabled = !plan.ok;
     btn.title = plan.ok ? `Llegada en ${fmtTime(plan.seconds)}` : plan.reason;
     anyOk ||= plan.ok;

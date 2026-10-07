@@ -46,14 +46,18 @@ El servidor guarda el mundo en memoria y lo vuelca a la base de datos cada 10 se
 - **Academia** con 13 investigaciones, **cuartel y puerto** con 5 tropas y 4 barcos. Las tropas comen: sin comida hay hambruna.
 - **Mapa compartido** (🗺️ o tecla `M`): campamentos bárbaros y fortalezas piratas que se rearman, ruinas con un tesoro para el primero que llegue, islas libres para **colonizar** (la primera flota que llega se la queda), el Kraken y el Mar de las Brumas para las **expediciones**.
 - **Otros jugadores**: espía sus ciudades con botes exploradores y atácalas para llevarte sus recursos (salvo lo que esconde su almacén). Si alguien viene a por ti, lo verás llegar. Con menos de 100 puntos tienes **protección de novato**: nadie te ataca y tú no atacas a otros jugadores.
-- **Piratas** de vez en cuando, **visitantes**, **poderes divinos**, **misiones** con recompensa, **chat** 💬 de todo el archipiélago y **clasificación** 🏆.
+- **Alianzas** 🤝: fúndalas o únete a una (hasta 20 miembros). Los aliados no pueden atacarse, tienen su propio chat y una clasificación de alianzas.
+- **Correo** ✉️: mensajes privados entre jugadores.
+- **Transportes** 📦: manda recursos en barcos mercantes a la ciudad de cualquier jugador.
+- **Mercado del archipiélago** ⚖️: publica ofertas («doy 500 de madera por 200 de cristal») y acepta las de otros. Lo ofrecido queda apartado hasta que alguien acepta o pasan 3 días.
+- **Piratas** de vez en cuando, **visitantes**, **poderes divinos**, **misiones** con recompensa, **chat** 💬 (global y de alianza) y **clasificación** 🏆 de jugadores y alianzas.
 
 ## Estructura
 
 ```
 server/
   index.js             servidor HTTP: API, límites de peticiones, archivos del juego
-  WorldServer.js       el mundo en memoria: jugadores, islas, ataques, chat, clasificación
+  WorldServer.js       el mundo en memoria: jugadores, islas, ataques, alianzas, correo, mercado, chat
   store.js             guardado en Postgres (DATABASE_URL) o en un archivo local
   auth.js              contraseñas (scrypt) y sesiones firmadas
 src/
@@ -65,13 +69,13 @@ src/
   game/Game.js         la partida de un jugador (árbitro en el servidor, espejo en el navegador)
   net/                 conexión con el servidor (ClientGame, ClientWorld, api)
   scene/               escena 3D: tu isla, el archipiélago, mar, barcos
-  ui/                  pantalla principal, interfaz, paneles, informes, chat
+  ui/                  pantalla principal, interfaz, paneles, informes, chat, alianza/correo/mercado (social.js)
 ```
 
 En la consola del navegador, ya dentro de la partida, está `window.__IMPERIUM__` (`game`, `world`, `hud`, `select`, `setView`).
 
 ## Próximos pasos posibles
 
-- Alianzas, mensajes privados y comercio entre jugadores.
+- Diplomacia entre alianzas (pactos y guerras) y foro de alianza.
 - Varias ciudades por jugador (las colonias como ciudades completas).
 - Recuperar la contraseña por correo.

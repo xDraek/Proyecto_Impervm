@@ -5,12 +5,13 @@ import { HOUR_MS, canAfford, multiplyCost } from '../game/rules.js';
 import { api } from '../net/api.js';
 import { buildingPanel } from './buildingPanel.js';
 import { bag, costItems, escapeHtml, fmtNum, fmtTime, unitList } from './format.js';
-import { fleetFor, islandPanel, readFleet } from './islandPanel.js';
+import { fleetFor, islandPanel, readFleet, readPayload } from './islandPanel.js';
 import { questsHtml, rankingHtml } from './modals.js';
 import { reportsHtml } from './reports.js';
+import { Social } from './social.js';
 
 const $ = (sel) => document.querySelector(sel);
-const CHAT_KEY = 'imperium.chatRead';
+const CHAT_KEY = 'imperium.chatRead2';
 
 /**
  * Interfaz HTML sobre la escena 3D. Cada parte se regenera solo cuando cambia
@@ -36,6 +37,8 @@ export class Hud {
     this.cache = {};
     this.chatMessages = [];
     this.chatLast = 0;
+    this.chatChannel = 'global';
+    this.rankTab = 'players';
 
     this.panel = $('#panel');
     this.sidebar = $('#sidebar');
@@ -50,6 +53,8 @@ export class Hud {
     this.favorEl = $('#favor');
     this.visitorEl = $('#visitor');
     this.menu = $('#menu');
+    this.mailBtn = $('#mail-btn');
+    this.social = new Social(this);
 
     this.#buildResources();
 
@@ -71,10 +76,24 @@ export class Hud {
     $('#rank-btn').addEventListener('click', () => this.openModal('ranking'));
     this.favorEl.addEventListener('click', () => this.onSelect('templo'));
     this.modal.addEventListener('click', async (e) => {
-      if (e.target === this.modal || e.target.closest('[data-action="close-modal"]')) this.closeModal();
+      if (e.target === this.modal || e.target.closest('[data-action="close-modal"]')) return this.closeModal();
       const claim = e.target.closest('[data-action="claim"]');
-      if (claim && !claim.disabled) await this.#run(claim, () => game.claimQuest(claim.dataset.id), null, 'coins');
+      if (claim && !claim.disabled) return this.#run(claim, () => game.claimQuest(claim.dataset.id), null, 'coins');
+      const tab = e.target.closest('[data-action="rank-tab"]');
+      if (tab) {
+        this.rankTab = tab.dataset.tab;
+        return this.#renderModal();
+      }
+      const go = e.target.closest('[data-action="goto"]');
+      if (go && this.modalKind === 'ranking') {
+        this.closeModal();
+        return this.onSelect(go.dataset.island);
+      }
+      if (this.modalKind === 'alliance' || this.modalKind === 'mail') await this.social.onModalClick(e);
     });
+    this.modal.addEventListener('submit', (e) => this.social.onModalSubmit(e));
+    $('#alliance-btn').addEventListener('click', () => this.social.openAlliance());
+    this.mailBtn.addEventListener('click', () => this.social.openMailbox('in'));
     this.visitorEl.addEventListener('click', async (e) => {
       const btn = e.target.closest('[data-action]');
       if (!btn || btn.disabled) return;
@@ -86,10 +105,14 @@ export class Hud {
     this.chatBtn.addEventListener('click', () => this.toggleChat());
     this.chatEl.querySelector('[data-action="close-chat"]').addEventListener('click', () => this.toggleChat(false));
     this.chatEl.querySelector('.chat-form').addEventListener('submit', (e) => this.#sendChat(e));
+    this.chatEl.querySelector('.chat-tabs').addEventListener('click', (e) => {
+      const b = e.target.closest('[data-channel]');
+      if (b) this.toggleChat(true, b.dataset.channel);
+    });
     try {
-      this.chatRead = Number(localStorage.getItem(CHAT_KEY)) || 0;
+      this.chatRead = { global: 0, alianza: 0, ...JSON.parse(localStorage.getItem(CHAT_KEY) ?? '{}') };
     } catch {
-      this.chatRead = 0;
+      this.chatRead = { global: 0, alianza: 0 };
     }
     this.#pollChat();
 
@@ -155,6 +178,13 @@ export class Hud {
     this.game.markReportsRead();
   }
 
+  /** Abre (o actualiza) una ventana con el HTML dado. */
+  showModal(kind, html) {
+    this.modalKind = kind;
+    this.modal.hidden = false;
+    if (html) this.#setHtml(this.modal, 'modal', html);
+  }
+
   async openModal(kind) {
     this.modalKind = kind;
     this.cache.modal = '';
@@ -180,7 +210,7 @@ export class Hud {
 
   #renderModal() {
     if (this.modalKind === 'quests') this.#setHtml(this.modal, 'modal', questsHtml(this.game));
-    else if (this.modalKind === 'ranking' && this.ranking) this.#setHtml(this.modal, 'modal', rankingHtml(this.ranking));
+    else if (this.modalKind === 'ranking' && this.ranking) this.#setHtml(this.modal, 'modal', rankingHtml(this.ranking, this.rankTab));
   }
 
   /** Regenera lo que dependa de la partida (solo si su HTML cambia). */
@@ -195,6 +225,13 @@ export class Hud {
     const badge = this.reportsBtn.querySelector('.badge');
     badge.hidden = !unread;
     badge.textContent = unread;
+    const mail = this.game.mailUnread ?? 0;
+    const mBadge = this.mailBtn.querySelector('.badge');
+    mBadge.hidden = !mail;
+    mBadge.textContent = mail;
+    // El título de la pestaña avisa aunque estés en otra
+    const attack = this.game.raid || this.game.incoming?.length;
+    document.title = `${attack ? '⚔️ ' : ''}${unread + mail ? `(${unread + mail}) ` : ''}Imperium`;
 
     // Avisar cuando una misión queda lista para reclamar
     const claimable = this.game.claimableQuests();
@@ -502,12 +539,21 @@ export class Hud {
       case 'mission': {
         const type = btn.dataset.type;
         const target = this.selected;
-        const units = fleetFor(game, type, readFleet(root));
+        const payload = readPayload(root);
+        const units = fleetFor(game, type, readFleet(root), payload);
         const name = game.world.island(target)?.name ?? 'la isla';
-        const res = await this.#run(btn, () => game.sendMission(type, target, units), `${MISSION_TYPES[type].icon} La flota zarpa hacia ${name}`, 'sail');
-        if (res?.ok) for (const input of this.panel.querySelectorAll('input[name^="f-"]')) input.value = '';
+        const res = await this.#run(btn, () => game.sendMission(type, target, units, payload), `${MISSION_TYPES[type].icon} La flota zarpa hacia ${name}`, 'sail');
+        if (res?.ok) for (const input of this.panel.querySelectorAll('input[name^="f-"], input[name^="p-"]')) input.value = '';
         break;
       }
+      case 'mail-to':
+        this.social.compose(btn.dataset.name);
+        break;
+      case 'offer-post':
+      case 'offer-accept':
+      case 'offer-cancel':
+        await this.social.onPanelAction(action, btn, root);
+        break;
       case 'power': {
         const p = POWERS[btn.dataset.id];
         const res = await this.#run(btn, () => game.castPower(btn.dataset.id), null, 'magic');
@@ -637,13 +683,12 @@ export class Hud {
 
   // ── Chat ──────────────────────────────────────────────────────────────────
 
-  toggleChat(open = this.chatEl.hidden) {
+  toggleChat(open = this.chatEl.hidden, channel = this.chatChannel) {
     this.chatEl.hidden = !open;
-    if (open) {
-      this.#markChatRead();
-      this.chatEl.querySelector('input').focus();
-      this.#renderChat(true);
-    }
+    if (!open) return;
+    this.chatChannel = channel === 'alianza' && !this.game.alliance ? 'global' : channel;
+    this.#renderChat(true);
+    this.chatEl.querySelector('input').focus();
   }
 
   async #pollChat() {
@@ -656,7 +701,7 @@ export class Hud {
       const { messages } = await api('GET', `/api/chat?after=${this.chatLast}`);
       if (messages.length) {
         this.chatMessages.push(...messages);
-        if (this.chatMessages.length > 100) this.chatMessages.splice(0, this.chatMessages.length - 100);
+        if (this.chatMessages.length > 200) this.chatMessages.splice(0, this.chatMessages.length - 200);
         this.chatLast = messages.at(-1).id;
         this.#renderChat(scroll);
       }
@@ -666,9 +711,18 @@ export class Hud {
   }
 
   #renderChat(scroll = false) {
+    const ch = this.chatChannel;
+    const hasAlliance = !!this.game.alliance;
+    for (const b of this.chatEl.querySelectorAll('[data-channel]')) {
+      b.classList.toggle('active', b.dataset.channel === ch);
+      if (b.dataset.channel === 'alianza') b.hidden = !hasAlliance;
+    }
+    this.chatEl.querySelector('.chat-sub').textContent =
+      ch === 'alianza' ? `Solo para ${this.game.alliance?.name ?? 'tu alianza'}` : 'Todo el archipiélago lo lee';
     const log = this.chatEl.querySelector('.chat-log');
     const atBottom = log.scrollTop + log.clientHeight >= log.scrollHeight - 30;
     log.innerHTML = this.chatMessages
+      .filter((m) => (m.channel ?? 'global') === ch)
       .map((m) => {
         const time = new Date(m.t).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
         return m.system
@@ -677,21 +731,32 @@ export class Hud {
       })
       .join('');
     if (scroll || atBottom) log.scrollTop = log.scrollHeight;
-    if (!this.chatEl.hidden) this.#markChatRead();
-    const unread = this.chatMessages.filter((m) => m.id > this.chatRead && !m.system && m.name !== this.game.username).length;
+    if (!this.chatEl.hidden) this.#markChatRead(ch);
+
+    // Mensajes sin leer de otros jugadores, por canal y en total
+    let total = 0;
+    for (const channel of ['global', 'alianza']) {
+      const n = this.chatMessages.filter((m) => (m.channel ?? 'global') === channel && m.id > this.chatRead[channel] && !m.system && m.name !== this.game.username).length;
+      const tabBadge = this.chatEl.querySelector(`[data-channel="${channel}"] .badge`);
+      tabBadge.hidden = !n;
+      tabBadge.textContent = n > 9 ? '9+' : n;
+      total += n;
+    }
     const badge = this.chatBtn.querySelector('.badge');
-    badge.hidden = !unread;
-    badge.textContent = unread > 9 ? '9+' : unread;
+    badge.hidden = !total;
+    badge.textContent = total > 9 ? '9+' : total;
   }
 
-  #markChatRead() {
-    this.chatRead = this.chatLast;
+  #markChatRead(channel) {
+    const last = this.chatMessages.filter((m) => (m.channel ?? 'global') === channel).at(-1)?.id ?? 0;
+    if (last <= this.chatRead[channel]) return;
+    this.chatRead[channel] = last;
     try {
-      localStorage.setItem(CHAT_KEY, String(this.chatRead));
+      localStorage.setItem(CHAT_KEY, JSON.stringify(this.chatRead));
     } catch {
       // sin almacenamiento
     }
-    this.chatBtn.querySelector('.badge').hidden = true;
+    queueMicrotask(() => this.#renderChat());
   }
 
   async #sendChat(e) {
@@ -701,7 +766,7 @@ export class Hud {
     if (!text) return;
     input.value = '';
     try {
-      await api('POST', '/api/chat', { text });
+      await api('POST', '/api/chat', { text, channel: this.chatChannel });
       await this.#fetchChat(true);
     } catch (err) {
       input.value = text;

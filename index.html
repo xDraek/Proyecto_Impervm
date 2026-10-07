@@ -52,6 +52,8 @@
           <button id="view-btn" class="tab-btn" title="Cambiar entre tu isla y el archipiélago (M)">🗺️ <span>Mapa</span></button>
           <button id="quests-btn" class="icon-btn" title="Misiones">📋<span class="badge" hidden></span></button>
           <button id="chat-btn" class="icon-btn" title="Chat del archipiélago">💬<span class="badge" hidden></span></button>
+          <button id="mail-btn" class="icon-btn" title="Correo">✉️<span class="badge" hidden></span></button>
+          <button id="alliance-btn" class="icon-btn" title="Alianza">🤝</button>
           <button id="rank-btn" class="icon-btn" title="Clasificación">🏆</button>
           <button id="reports-btn" class="icon-btn" title="Informes">📜<span class="badge" hidden></span></button>
           <button id="menu-btn" class="icon-btn" title="Opciones">⚙</button>
@@ -71,8 +73,12 @@
       <aside id="sidebar"></aside>
       <section id="panel" hidden></section>
       <section id="chat" hidden>
-        <div class="panel-head"><span class="panel-icon">💬</span><div><h3>Chat</h3><div class="panel-lvl">Todo el archipiélago lo lee</div></div>
+        <div class="panel-head"><span class="panel-icon">💬</span><div><h3>Chat</h3><div class="panel-lvl chat-sub">Todo el archipiélago lo lee</div></div>
           <button class="icon-btn" data-action="close-chat" title="Cerrar">✕</button></div>
+        <div class="tabs small-tabs chat-tabs">
+          <button type="button" data-channel="global" class="active">Archipiélago<span class="badge" hidden></span></button>
+          <button type="button" data-channel="alianza">Alianza<span class="badge" hidden></span></button>
+        </div>
         <div class="chat-log"></div>
         <form class="chat-form"><input name="text" maxlength="300" placeholder="Escribe un mensaje…" autocomplete="off" /><button class="primary small auto">Enviar</button></form>
       </section>

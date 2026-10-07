@@ -307,7 +307,7 @@ export function buildingPanel(hud, id) {
   let extra = '';
   if (id === 'academia') extra = academiaSection(game);
   else if (id === 'cuartel' || id === 'puerto') extra = recruitSection(game, id);
-  else if (id === 'mercado') extra = marketSection(game);
+  else if (id === 'mercado') extra = marketSection(game) + (game.level('mercado') > 0 ? hud.social.marketHtml() : '');
   else if (id === 'muralla') extra = wallSection(game);
   else if (id === 'ayuntamiento') extra = townSection(game);
   else if (id === 'templo') extra = templeSection(game);
@@ -328,7 +328,10 @@ export function buildingPanel(hud, id) {
   return {
     html,
     refresh(root) {
-      if (id === 'mercado') refreshMarket(game, root);
+      if (id === 'mercado') {
+        refreshMarket(game, root);
+        if (game.level('mercado') > 0) hud.social.refreshOffers();
+      }
       if (id === 'templo') refreshTemple(game, root);
     },
   };
