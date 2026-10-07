@@ -1932,7 +1932,7 @@ body.landing-mode #chat {
 
 .stat-grid {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(3, 1fr);
   gap: 8px;
   margin: 14px 0;
   text-align: center;
@@ -2195,4 +2195,157 @@ input[type='text'] {
   border-radius: 8px;
   border: 1px solid rgba(255, 255, 255, 0.18);
   background: rgba(0, 0, 0, 0.25);
+}
+
+/* ── Diplomacia y mapa del mundo ────────────────────────────────────────── */
+
+.label.pact {
+  border-color: rgba(111, 182, 255, 0.85);
+}
+
+.label.war {
+  border-color: rgba(255, 107, 91, 0.9);
+  box-shadow: 0 0 12px rgba(255, 107, 91, 0.35);
+}
+
+.rel {
+  font-weight: 600;
+}
+
+.rel.war {
+  color: var(--bad);
+}
+
+.rel.pact {
+  color: #6fb6ff;
+}
+
+.diplo-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  margin: 6px 0;
+  border: 1px solid var(--panel-border);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.diplo-row .row-actions {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.war-score {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  margin-top: 4px;
+  color: var(--muted);
+}
+
+.war-score b {
+  color: var(--text);
+}
+
+.inline-form select {
+  flex: 1;
+  min-width: 0;
+}
+
+.worldmap .wm-tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 10px 0;
+}
+
+.wm-search {
+  display: flex;
+  flex: 1;
+  min-width: 200px;
+  gap: 6px;
+}
+
+.wm-search input {
+  flex: 1;
+  min-width: 0;
+}
+
+.wm-wrap {
+  position: relative;
+  height: min(58vh, 520px);
+  border: 1px solid var(--panel-border);
+  border-radius: 10px;
+  overflow: hidden;
+  touch-action: none;
+}
+
+.wm-wrap canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  cursor: grab;
+}
+
+.wm-wrap canvas:active {
+  cursor: grabbing;
+}
+
+.wm-tip {
+  position: absolute;
+  pointer-events: none;
+  padding: 4px 8px;
+  border-radius: 6px;
+  background: rgba(10, 8, 6, 0.88);
+  border: 1px solid var(--panel-border);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.wm-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  margin: 8px 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.wm-legend i {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  margin-right: 5px;
+  border-radius: 50%;
+  vertical-align: -1px;
+}
+
+.wm-legend i.ring {
+  border: 1.5px dashed rgba(242, 201, 76, 0.8);
+}
+
+.wm-card {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.rel-chip {
+  display: inline-block;
+  padding: 1px 8px;
+  margin-left: 4px;
+  border-radius: 999px;
+  font-size: 11px;
+  color: #1a140e;
+  background: var(--rel);
+}
+
+@media (max-width: 800px) {
+  .wm-wrap {
+    height: 52vh;
+  }
 }

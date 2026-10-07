@@ -32,6 +32,15 @@ export class ClientWorld {
     return this.players[userId] ?? null;
   }
 
+  /** Relación con otro jugador tal como la calcula el servidor ('aliado', 'pacto', 'guerra' o null). */
+  relation(_me, other) {
+    return this.players[other]?.rel ?? null;
+  }
+
+  sameAlliance(me, other) {
+    return this.relation(me, other) === 'aliado';
+  }
+
   islands() {
     return [...this.islandMap.values()];
   }

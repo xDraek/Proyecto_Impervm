@@ -810,7 +810,7 @@ export class World {
       const ally = view.alliance && view.alliance.id === this.game.alliance?.id;
       if (view.type === 'jugador') {
         const tag = view.alliance ? `[${view.alliance.tag}] ` : '';
-        status = `🏰 ${tag}${view.ownerName} · ${view.score} pts${view.protected ? ' · 🛡️' : ''}`;
+        status = `🏰 ${tag}${view.ownerName} · ${view.score} pts${view.protected ? ' · 🛡️' : ''}${view.relation === 'guerra' ? ' · ⚔️' : view.relation === 'pacto' ? ' · 🕊️' : ''}`;
       } else if (view.colonized) status = '🚩 Tu colonia';
       else if (view.colonizedBy != null) status = `🚩 Colonia de ${view.colonistName}`;
       else if (view.explored && view.tier) status += ` · Nv ${view.tier}`;
@@ -818,6 +818,8 @@ export class World {
       entry.el.querySelector('.label-lvl').textContent = status;
       entry.el.classList.toggle('colony', !!view.colonized);
       entry.el.classList.toggle('ally', !!ally);
+      entry.el.classList.toggle('pact', view.relation === 'pacto');
+      entry.el.classList.toggle('war', view.relation === 'guerra');
       entry.el.classList.toggle('player', view.type === 'jugador');
       entry.el.classList.toggle('unknown', !view.explored);
     }

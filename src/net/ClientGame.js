@@ -180,4 +180,8 @@ export class ClientGame extends Game {
   fetchRanking() {
     return api('GET', '/api/ranking');
   }
+
+  fetchMap() {
+    return api('GET', '/api/map');
+  }
 }

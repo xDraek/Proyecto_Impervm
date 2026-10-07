@@ -47,7 +47,9 @@ El servidor guarda el mundo en memoria y lo vuelca a la base de datos cada 10 se
 - **Academia** con 13 investigaciones, **cuartel y puerto** con 5 tropas y 4 barcos. Las tropas comen: sin comida hay hambruna.
 - **Mapa compartido** (🗺️ o tecla `M`): campamentos bárbaros y fortalezas piratas que se rearman, ruinas con un tesoro para el primero que llegue, islas libres para **colonizar** (la primera flota que llega se la queda), el Kraken y el Mar de las Brumas para las **expediciones**.
 - **Otros jugadores**: espía sus ciudades con botes exploradores y atácalas para llevarte sus recursos (salvo lo que esconde su almacén). Si alguien viene a por ti, lo verás llegar. Con menos de 100 puntos tienes **protección de novato**: nadie te ataca y tú no atacas a otros jugadores.
-- **Alianzas** 🤝: fúndalas o únete a una (hasta 20 miembros). Los aliados no pueden atacarse, tienen su propio chat y una clasificación de alianzas.
+- **Alianzas** 🤝: fúndalas o únete a una (hasta 20 miembros). Los aliados no pueden atacarse, tienen su propio chat, circulares para todos los miembros y una clasificación de alianzas.
+- **Diplomacia** 🕊️⚔️: quien lidera una alianza puede proponer **pactos de no agresión** (mientras duren, no os podéis atacar) o **declarar la guerra**. En guerra los barcos cargan un 20 % más de botín al saquear al enemigo y se lleva el marcador de bajas y botín de cada bando hasta que se firma la paz.
+- **Mapa del mundo** 🌍: todo el archipiélago en un mapa que se arrastra y se acerca, con las ciudades coloreadas según vuestra relación (aliados, pactos, enemigos), buscador de jugadores y distancia en tiempo de viaje.
 - **Almirante** 🎖️: un héroe que contratas en el ayuntamiento. Acompaña a una flota (más ataque, carga o velocidad) o defiende la isla; sube de nivel con los combates y repartes sus puntos. Si su flota cae, vuelve herido.
 - **Contraespionaje**: la muralla puede descubrir y hundir los botes espía (8 % por nivel).
 - **Todo en vivo**: el servidor empuja por WebSocket los ataques que se acercan, los cambios de tu ciudad y los mensajes del chat al momento.
@@ -59,7 +61,7 @@ El servidor guarda el mundo en memoria y lo vuelca a la base de datos cada 10 se
 - **Transportes** 📦: manda recursos en barcos mercantes a la ciudad de cualquier jugador.
 - **Mercado del archipiélago** ⚖️: publica ofertas («doy 500 de madera por 200 de cristal») y acepta las de otros. Lo ofrecido queda apartado hasta que alguien acepta o pasan 3 días.
 - Avisos del navegador (opcional) cuando te atacan con la pestaña en segundo plano, y cambio de contraseña desde ⚙.
-- **Piratas** de vez en cuando, **visitantes**, **poderes divinos**, **misiones** con recompensa, **chat** 💬 (global y de alianza) y **clasificación** 🏆 de jugadores y alianzas.
+- **Piratas** de vez en cuando, **visitantes**, **poderes divinos**, **misiones** con recompensa, **chat** 💬 (global y de alianza) y **clasificación** 🏆 de imperios, militar (bajas enemigas), saqueo y alianzas.
 
 ## Estructura
 
@@ -78,13 +80,14 @@ src/
   game/Game.js         la partida de un jugador (árbitro en el servidor, espejo en el navegador)
   net/                 conexión con el servidor (ClientGame, ClientWorld, api)
   scene/               escena 3D: tu isla, el archipiélago, mar, barcos
-  ui/                  pantalla principal, interfaz, paneles, informes, chat, alianza/correo/mercado (social.js)
+  ui/                  pantalla principal, interfaz, paneles, informes, chat, alianza/correo/mercado (social.js), mapa del mundo (worldMap.js)
 ```
 
 En la consola del navegador, ya dentro de la partida, está `window.__IMPERIUM__` (`game`, `world`, `hud`, `select`, `setView`).
 
 ## Próximos pasos posibles
 
-- Diplomacia entre alianzas (pactos y guerras) y foro de alianza.
+- Foro de alianza con hilos.
+- Modo vacaciones (no te pueden atacar mientras no juegas).
 - Varias ciudades por jugador (las colonias como ciudades completas).
 - Recuperar la contraseña por correo.

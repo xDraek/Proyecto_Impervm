@@ -1,5 +1,6 @@
 import { clock, universe } from '../src/config.js';
 import { RESOURCES } from '../src/game/data.js';
+import { count } from '../src/game/combat.js';
 import { Game, newState } from '../src/game/Game.js';
 import { freshIslandState, generateSector, homeIsland } from '../src/game/world.js';
 import { hashPassword, newSecret, verifyPassword } from './auth.js';
@@ -14,6 +15,8 @@ const MAX_MAIL = 60;
 const MAX_MEMBERS = 20;
 const MAX_OFFERS = 5;
 const OFFER_DAYS = 3;
+const RANK_SIZE = 50; // filas de las clasificaciones por categoría
+const MAP_CACHE_MS = 30_000;
 export const NAME_RE = /^[\p{L}\p{N}_ .-]{3,20}$/u;
 const ALLIANCE_RE = /^[\p{L}\p{N}_ .'-]{3,30}$/u;
 const TAG_RE = /^[\p{L}\p{N}]{2,5}$/u;
@@ -59,6 +62,7 @@ export class WorldServer {
     const deleted = new Set(this.meta.chatDeleted);
     this.chat = data.chat.filter((m) => !deleted.has(m.id)).slice(-MAX_CHAT);
     this.meta.alliances ??= {};
+    this.meta.diplomacy ??= {};
     this.meta.offers ??= [];
     this.memberOf = new Map();
     for (const a of Object.values(this.meta.alliances)) for (const uid of a.members) this.memberOf.set(uid, a.id);
@@ -160,6 +164,15 @@ export class WorldServer {
     return x != null && x === this.memberOf.get(b);
   }
 
+  /** Qué relación hay entre dos jugadores: 'aliado', 'pacto', 'guerra' o null. */
+  relation(a, b) {
+    const x = this.memberOf.get(a);
+    const y = this.memberOf.get(b);
+    if (x == null || y == null) return null;
+    if (x === y) return 'aliado';
+    return this.meta.diplomacy[pairKey(x, y)]?.type ?? null;
+  }
+
   /**
    * Tropas de apoyo de otros jugadores estacionadas en la isla `homeId`.
    * `apply(left)` deja a cada una con sus supervivientes tras un combate.
@@ -251,6 +264,16 @@ export class WorldServer {
     target.update(t);
     const res = target.receiveAttack(payload, t);
     target.dirty = true;
+    // En guerra entre alianzas se lleva la cuenta de bajas y botín de cada bando
+    if (res && payload.attackerId != null && this.relation(payload.attackerId, ownerId) === 'guerra') {
+      const x = this.memberOf.get(payload.attackerId);
+      const y = this.memberOf.get(ownerId);
+      const war = this.meta.diplomacy[pairKey(x, y)];
+      war.kills[x] = (war.kills[x] ?? 0) + count(res.result.def.lost);
+      war.kills[y] = (war.kills[y] ?? 0) + count(res.result.att.lost);
+      war.loot[x] = (war.loot[x] ?? 0) + count(res.stolen);
+      war.battles = (war.battles ?? 0) + 1;
+    }
     return res;
   }
 
@@ -326,8 +349,9 @@ export class WorldServer {
     for (const isl of islands) {
       const rt = this.islandStates.get(isl.id);
       if (rt) states[isl.id] = rt;
-      if (isl.owner != null) players[isl.owner] = this.playerInfo(isl.owner);
-      if (rt?.colonizedBy != null) players[rt.colonizedBy] = this.playerInfo(rt.colonizedBy);
+      for (const uid of [isl.owner, rt?.colonizedBy]) {
+        if (uid != null && !players[uid]) players[uid] = { ...this.playerInfo(uid), rel: this.relation(userId, uid) };
+      }
     }
     const a = this.allianceOf(userId);
     // El correo va aparte (puede ser largo): aquí solo cuántos sin leer
@@ -371,17 +395,29 @@ export class WorldServer {
         points: g.score(),
         colonies: g.state.colonies.length,
         coloso: g.level('coloso'),
+        kills: g.state.stats.kills ?? 0,
+        loot: g.state.stats.loot ?? 0,
         tag: this.allianceOf(id)?.tag ?? null,
       }));
       rows.sort((a, b) => b.points - a.points);
       rows.forEach((r, i) => (r.rank = i + 1));
-      this.rankingCache = { at: Date.now(), rows, alliances: this.allianceList() };
+      // Clasificaciones por categoría: solo quien tenga algo que contar
+      const by = (key) =>
+        rows
+          .filter((r) => r[key] > 0)
+          .sort((a, b) => b[key] - a[key])
+          .slice(0, RANK_SIZE)
+          .map((r, i) => ({ ...r, rank: i + 1 }));
+      this.rankingCache = { at: Date.now(), rows, military: by('kills'), raiders: by('loot'), alliances: this.allianceList() };
     }
-    const rows = this.rankingCache.rows;
-    const me = rows.find((r) => r.id === userId) ?? null;
+    const { rows, military, raiders } = this.rankingCache;
+    const mark = ({ id, ...r }) => ({ ...r, me: id === userId });
+    const { id: _, ...me } = rows.find((r) => r.id === userId) ?? {};
     return {
-      top: rows.slice(0, 100).map(({ id, ...r }) => ({ ...r, me: id === userId })),
-      me,
+      top: rows.slice(0, 100).map(mark),
+      military: military.map(mark),
+      raiders: raiders.map(mark),
+      me: userId != null && me.name ? me : null,
       total: rows.length,
       alliances: this.rankingCache.alliances,
     };
@@ -443,7 +479,17 @@ export class WorldServer {
         return { id: uid, name: info?.name, city: this.islands.get(this.games.get(uid)?.state.home)?.name, island: this.games.get(uid)?.state.home, points: info?.score ?? 0, online: info?.online, founder: uid === a.founder };
       })
       .sort((x, y) => y.points - x.points);
-    return { id: a.id, name: a.name, tag: a.tag, description: a.description, founder: a.founder, isFounder: a.founder === userId, points: this.#alliancePoints(a), members };
+    return {
+      id: a.id,
+      name: a.name,
+      tag: a.tag,
+      description: a.description,
+      founder: a.founder,
+      isFounder: a.founder === userId,
+      points: this.#alliancePoints(a),
+      members,
+      diplomacy: this.#diplomacyOf(a.id),
+    };
   }
 
   createAlliance(userId, name, tag) {
@@ -484,6 +530,7 @@ export class WorldServer {
     const name = this.users.get(userId).username;
     if (!a.members.length) {
       delete this.meta.alliances[a.id];
+      for (const key of Object.keys(this.meta.diplomacy)) if (key.split('-').includes(String(a.id))) delete this.meta.diplomacy[key];
     } else {
       if (a.founder === userId) a.founder = a.members[0];
       this.announce(kickedBy ? `🤝 ${name} ha sido expulsado de la alianza` : `🤝 ${name} deja la alianza`, `a:${a.id}`);
@@ -500,11 +547,162 @@ export class WorldServer {
     return this.allianceDetail(userId);
   }
 
+  /** Carta para todos los miembros de tu alianza. */
+  allianceCircular(userId, subject, text) {
+    const a = this.allianceOf(userId);
+    if (!a) throw new UserError('No estás en ninguna alianza.');
+    const to = a.members.filter((uid) => uid !== userId);
+    if (!to.length) throw new UserError('Eres el único miembro de la alianza.');
+    this.#deliverMail(userId, to, `[${a.tag}] Circular`, subject, text);
+  }
+
+  // ── Diplomacia entre alianzas ──────────────────────────────────────────────
+
+  /** Pactos, guerras y propuestas de una alianza, vistos desde ella. */
+  #diplomacyOf(allianceId) {
+    const out = [];
+    for (const [key, rec] of Object.entries(this.meta.diplomacy)) {
+      const [x, y] = key.split('-').map(Number);
+      if (x !== allianceId && y !== allianceId) continue;
+      const other = this.meta.alliances[x === allianceId ? y : x];
+      if (!other) continue;
+      out.push({
+        id: other.id,
+        name: other.name,
+        tag: other.tag,
+        type: rec.type,
+        since: rec.since,
+        proposal: rec.proposal ? { kind: rec.proposal.kind, mine: rec.proposal.from === allianceId } : null,
+        war:
+          rec.type === 'guerra'
+            ? { kills: rec.kills[allianceId] ?? 0, losses: rec.kills[other.id] ?? 0, loot: rec.loot[allianceId] ?? 0, lootLost: rec.loot[other.id] ?? 0, battles: rec.battles ?? 0, declaredByUs: rec.by === allianceId }
+            : null,
+      });
+    }
+    const order = { guerra: 0, pacto: 1 };
+    return out.sort((p, q) => (order[p.type] ?? 2) - (order[q.type] ?? 2) || p.name.localeCompare(q.name));
+  }
+
+  /**
+   * Lo que hace quien lidera una alianza con otra: proponer un pacto, aceptar
+   * o rechazar una propuesta, romper un pacto, declarar la guerra o pedir la paz.
+   */
+  diplomacy(userId, otherId, op) {
+    const a = this.allianceOf(userId);
+    if (!a || a.founder !== userId) throw new UserError('Solo quien lidera la alianza lleva la diplomacia.');
+    const b = this.meta.alliances[Number(otherId)];
+    if (!b || b.id === a.id) throw new UserError('Esa alianza no existe.');
+    const key = pairKey(a.id, b.id);
+    const rec = this.meta.diplomacy[key];
+    const now = Date.now();
+    const us = `${a.name} [${a.tag}]`;
+    const them = `${b.name} [${b.tag}]`;
+    const both = (text) => {
+      this.announce(text, `a:${a.id}`);
+      this.announce(text, `a:${b.id}`);
+    };
+    switch (op) {
+      case 'pacto':
+        if (rec?.type === 'pacto') throw new UserError('Ya tenéis un pacto de no agresión.');
+        if (rec?.type === 'guerra') throw new UserError('Estáis en guerra: primero hay que firmar la paz.');
+        if (rec?.proposal) throw new UserError('Ya hay una propuesta pendiente entre vosotros.');
+        this.meta.diplomacy[key] = { type: null, since: now, proposal: { kind: 'pacto', from: a.id, t: now } };
+        both(`🕊️ ${us} propone un pacto de no agresión a ${them}`);
+        break;
+      case 'paz':
+        if (rec?.type !== 'guerra') throw new UserError('No estáis en guerra.');
+        if (rec.proposal) throw new UserError('Ya hay una propuesta de paz pendiente.');
+        rec.proposal = { kind: 'paz', from: a.id, t: now };
+        both(`🕊️ ${us} ofrece la paz a ${them}`);
+        break;
+      case 'aceptar': {
+        if (!rec?.proposal || rec.proposal.from === a.id) throw new UserError('No hay ninguna propuesta que aceptar.');
+        if (rec.proposal.kind === 'pacto') {
+          this.meta.diplomacy[key] = { type: 'pacto', since: now, proposal: null };
+          this.announce(`🕊️ ${us} y ${them} firman un pacto de no agresión`);
+        } else {
+          delete this.meta.diplomacy[key];
+          const n = rec.battles ?? 0;
+          this.announce(`🕊️ ${us} y ${them} firman la paz${n ? ` tras ${n} ${n === 1 ? 'batalla' : 'batallas'}` : ''}`);
+        }
+        break;
+      }
+      case 'rechazar':
+        if (!rec?.proposal) throw new UserError('No hay ninguna propuesta.');
+        both(rec.proposal.from === a.id ? `📜 ${us} retira su propuesta a ${them}` : `📜 ${us} rechaza la propuesta de ${them}`);
+        if (rec.type) rec.proposal = null;
+        else delete this.meta.diplomacy[key];
+        break;
+      case 'romper':
+        if (rec?.type !== 'pacto') throw new UserError('No tenéis ningún pacto.');
+        delete this.meta.diplomacy[key];
+        both(`📜 ${us} rompe el pacto de no agresión con ${them}`);
+        break;
+      case 'guerra':
+        if (rec?.type === 'guerra') throw new UserError('Ya estáis en guerra.');
+        this.meta.diplomacy[key] = { type: 'guerra', since: now, by: a.id, proposal: null, kills: {}, loot: {}, battles: 0 };
+        this.announce(`⚔️ ${us} declara la guerra a ${them}${rec?.type === 'pacto' ? ' rompiendo su pacto' : ''}`);
+        break;
+      default:
+        throw new UserError('Esa acción no existe.');
+    }
+    // Las relaciones cambian lo que ve cada miembro de las dos alianzas
+    for (const uid of [...a.members, ...b.members]) this.pendingPush.add(uid);
+    this.mapCache = null;
+  }
+
   describeAlliance(userId, text) {
     const a = this.allianceOf(userId);
     if (!a || a.founder !== userId) throw new UserError('Solo quien lidera la alianza puede cambiar la descripción.');
     a.description = String(text ?? '').trim().slice(0, 500);
     return this.allianceDetail(userId);
+  }
+
+  // ── Mapa del mundo ─────────────────────────────────────────────────────────
+
+  /**
+   * Todo el archipiélago en pocas cifras: las ciudades de los jugadores y el
+   * resto de islas como [x, z, tipo, colono]. Se recalcula cada medio minuto.
+   */
+  worldMap(userId) {
+    if (!this.mapCache || Date.now() - this.mapCache.at > MAP_CACHE_MS || this.mapCache.size !== this.islands.size) {
+      const cities = [];
+      const islands = [];
+      for (const isl of this.islands.values()) {
+        if (isl.type === 'jugador') {
+          const g = this.games.get(isl.owner);
+          if (!g) continue;
+          const a = this.allianceOf(isl.owner);
+          cities.push({
+            id: isl.id,
+            x: Math.round(isl.x),
+            z: Math.round(isl.z),
+            city: isl.name,
+            uid: isl.owner,
+            name: g.name,
+            points: g.score(),
+            protected: g.isProtected(),
+            aid: a?.id ?? null,
+            tag: a?.tag ?? null,
+          });
+        } else {
+          islands.push([Math.round(isl.x), Math.round(isl.z), isl.type, this.islandStates.get(isl.id)?.colonizedBy ?? 0]);
+        }
+      }
+      this.mapCache = { at: Date.now(), size: this.islands.size, cities, islands };
+    }
+    // Lo que depende de quién mira: con quién tiene pacto o guerra su alianza
+    const mine = this.memberOf.get(userId);
+    const relations = {};
+    if (mine != null) {
+      relations[mine] = 'aliado';
+      for (const [key, rec] of Object.entries(this.meta.diplomacy)) {
+        const [x, y] = key.split('-').map(Number);
+        if (rec.type && (x === mine || y === mine)) relations[x === mine ? y : x] = rec.type;
+      }
+    }
+    const { cities, islands } = this.mapCache;
+    return { cities, islands, relations, viewRadius: VIEW_RADIUS };
   }
 
   // ── Conexiones en vivo (WebSocket) ─────────────────────────────────────────
@@ -604,6 +802,8 @@ export class WorldServer {
       colonies: game.state.colonies.map((c) => c.name),
       coloso: game.level('coloso'),
       victories: game.stats.victories,
+      kills: game.stats.kills ?? 0,
+      loot: game.stats.loot ?? 0,
       achievements: game.achievements(),
       hero: game.state.hero ? { name: game.state.hero.name, level: game.state.hero.level } : null,
       muted: (this.meta.mod[id]?.mutedUntil ?? 0) > Date.now(),
@@ -624,13 +824,17 @@ export class WorldServer {
   sendMail(userId, toName, subject, text) {
     const toId = this.byName.get(String(toName ?? '').trim().toLowerCase());
     if (toId == null) throw new UserError('No hay ningún jugador con ese nombre.');
+    this.#deliverMail(userId, [toId], this.users.get(toId).username, subject, text);
+  }
+
+  /** Deja una carta en el buzón de cada destinatario y una copia en los enviados. */
+  #deliverMail(userId, recipients, toLabel, subject, text) {
     subject = String(subject ?? '').replace(/\s+/g, ' ').trim().slice(0, 80) || '(sin asunto)';
     text = String(text ?? '').trim().slice(0, 2000);
     if (!text) throw new UserError('Escribe el mensaje.');
     const from = this.users.get(userId).username;
-    const to = this.users.get(toId).username;
     const id = (this.meta.mailSeq = (this.meta.mailSeq ?? 0) + 1);
-    const base = { id, t: Date.now(), from, to, subject, text };
+    const base = { id, t: Date.now(), from, to: toLabel, subject, text };
     const put = (uid, box) => {
       const game = this.games.get(uid);
       game.state.mail ??= [];
@@ -638,8 +842,11 @@ export class WorldServer {
       if (game.state.mail.length > MAX_MAIL) game.state.mail.length = MAX_MAIL;
       game.dirty = true;
     };
-    put(toId, 'in');
-    if (toId !== userId) put(userId, 'out');
+    for (const uid of recipients) {
+      put(uid, 'in');
+      this.pendingPush.add(uid); // que vea el sobre al momento
+    }
+    if (!recipients.includes(userId)) put(userId, 'out');
   }
 
   mailbox(userId) {
@@ -712,3 +919,8 @@ export class WorldServer {
 
 /** Error que se puede enseñar tal cual al jugador. */
 export class UserError extends Error {}
+
+/** Clave de la relación entre dos alianzas (la misma en los dos sentidos). */
+function pairKey(x, y) {
+  return x < y ? `${x}-${y}` : `${y}-${x}`;
+}

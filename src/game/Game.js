@@ -4,6 +4,7 @@ import {
   BUILDINGS,
   BUILDING_KEYS,
   DAILY_REWARDS,
+  DIPLOMACY,
   HERO,
   HERO_SKILLS,
   ISLAND_TYPES,
@@ -97,7 +98,7 @@ export function newState({ now = clock.now(), home, name }) {
     notes: [],
     favor: 0,
     buffs: {},
-    stats: { spent: 0, victories: 0, raidsRepelled: 0, expeditions: 0, powers: 0, treasures: 0, kraken: 0, pvpWins: 0, trades: 0, transports: 0 },
+    stats: { spent: 0, victories: 0, raidsRepelled: 0, expeditions: 0, powers: 0, treasures: 0, kraken: 0, pvpWins: 0, trades: 0, transports: 0, kills: 0, loot: 0 },
     daily: { last: null, streak: 0, best: 0 },
     hero: null,
     quests: { claimed: [] },
@@ -474,6 +475,7 @@ export class Game extends EventTarget {
         townLevel: p?.townLevel ?? 1,
         alliance: p?.alliance ?? null,
         online: !!p?.online,
+        relation: this.world.relation?.(this.userId, isl.owner) ?? null,
       });
       return view;
     }
@@ -667,6 +669,7 @@ export class Game extends EventTarget {
         if (s.missions.some((m) => m.type === 'apoyo' && m.target === target && m.phase !== 'vuelta')) reason ||= 'Ya tienes tropas de apoyo en esa ciudad: retíralas antes de mandar más.';
       } else if (type === 'atacar') {
         if (this.world.sameAlliance?.(this.userId, isl.owner)) reason ||= `${view.ownerName} es de tu alianza.`;
+        else if (view.relation === 'pacto') reason ||= `Tu alianza tiene un pacto de no agresión con la de ${view.ownerName}.`;
         else if (view.protected) reason ||= `${view.ownerName} está bajo protección de novato (menos de ${NEWBIE_POINTS} puntos).`;
         else if (this.isProtected()) reason ||= `Mientras tengas menos de ${NEWBIE_POINTS} puntos no puedes atacar a otros jugadores.`;
         if (!hasCombat(sent)) reason ||= 'Envía al menos una unidad de combate.';
@@ -1246,9 +1249,11 @@ export class Game extends EventTarget {
   #arrivePlayerAttack(m, isl, t) {
     const { atkMul, hpMul } = playerCombat(this.state);
     const hero = m.hero ? { atk: this.heroBonus('ataque'), cargo: 1 + this.heroBonus('botin') } : { atk: 0, cargo: 1 };
+    const war = this.world.relation?.(this.userId, isl.owner) === 'guerra';
+    const cargoMul = hero.cargo * (war ? 1 + DIPLOMACY.warLoot : 1);
     const res = this.world.attackPlayer?.(
       isl.owner,
-      { attackerName: this.state.name, units: m.units, atkMul: atkMul + hero.atk, hpMul, cargoMul: hero.cargo, islandName: this.homeIsland?.name },
+      { attackerId: this.userId, attackerName: this.state.name, units: m.units, atkMul: atkMul + hero.atk, hpMul, cargoMul, islandName: this.homeIsland?.name },
       t,
     );
     if (!res) {
@@ -1259,6 +1264,8 @@ export class Game extends EventTarget {
     m.units = result.att.left;
     for (const [r, n] of Object.entries(stolen)) m.cargo[r] = (m.cargo[r] ?? 0) + n;
     if (m.hero) this.#heroXp(result.def.lost, t);
+    this.state.stats.kills += count(result.def.lost);
+    this.state.stats.loot += count(stolen);
     const outcome = result.winner === 'att' ? 'victoria' : result.winner === 'def' ? 'derrota' : 'empate';
     if (outcome === 'victoria') {
       this.state.stats.victories++;
@@ -1266,7 +1273,8 @@ export class Game extends EventTarget {
     }
     const enemy = this.world.playerInfo(isl.owner)?.name ?? isl.name;
     const title = { victoria: `Has saqueado ${isl.name}`, derrota: `Derrota en ${isl.name}`, empate: `Retirada de ${isl.name}` }[outcome];
-    this.#report({ t, kind: 'ataque', island: isl.id, islandName: isl.name, outcome, title, battle: pick(result), loot: stolen, enemy, pvp: true });
+    const text = war ? `Guerra entre alianzas: tus barcos cargan un ${Math.round(DIPLOMACY.warLoot * 100)} % más de botín.` : undefined;
+    this.#report({ t, kind: 'ataque', island: isl.id, islandName: isl.name, outcome, title, text, battle: pick(result), loot: stolen, enemy, pvp: true });
     this.#note(`⚔️ ${title}${fmtBag(stolen) ? ` · botín ${fmtBag(stolen)}` : ''}`, outcome === 'victoria' ? 'success' : 'error');
   }
 
@@ -1285,6 +1293,7 @@ export class Game extends EventTarget {
     const heroAtk = m.hero ? this.heroBonus('ataque') : 0;
     const result = battle({ units: m.units, atkMul: atkMul + heroAtk, hpMul }, { units: garrison, hpMul: 1 + wall });
     if (m.hero) this.#heroXp(result.def.lost, t);
+    this.state.stats.kills += count(result.def.lost);
 
     rt.garrison = result.def.left;
     rt.garrisonAt = t;
@@ -1319,6 +1328,7 @@ export class Game extends EventTarget {
       outcome === 'victoria' ? 'success' : 'error',
     );
     if (outcome === 'victoria') this.state.stats.victories++;
+    if (loot) this.state.stats.loot += count(loot);
     if (isl.type === 'kraken' && outcome === 'victoria') {
       this.state.stats.kraken++;
       this.#note('🐙 ¡Has derrotado al Kraken! Los mares son tuyos.', 'success');
@@ -1386,6 +1396,7 @@ export class Game extends EventTarget {
       const army = { pirata, corsario: Math.floor(pirata / 12) };
       const { atkMul, hpMul } = playerCombat(s);
       const result = battle({ units: army }, { units: m.units, atkMul, hpMul });
+      s.stats.kills += count(result.att.lost);
       m.units = result.def.left;
       const won = result.winner !== 'att';
       const loot = won ? { oro: 15 * pirata } : null;
@@ -1468,6 +1479,7 @@ export class Game extends EventTarget {
     const heroHome = this.heroStatus(t) === 'casa';
     const heroDef = heroHome ? this.heroBonus('defensa') : 0;
     const result = battle(attacker, { units: combined, atkMul: mine.atkMul, hpMul: mine.hpMul + wall.hp + aegis + heroDef, extraAtk: wall.towers });
+    s.stats.kills += count(result.att.lost);
     if (heroHome) {
       this.#heroXp(result.att.lost, t);
       if (result.winner === 'att') this.#heroWounded(t);

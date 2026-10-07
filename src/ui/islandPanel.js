@@ -10,7 +10,7 @@ function playerSection(game, view) {
   const ally = view.alliance && game.alliance && view.alliance.id === game.alliance.id;
   const lines = [
     `<div class="info-row"><span>⚜ Gobernante</span><b>${escapeHtml(view.ownerName)}</b></div>`,
-    `<div class="info-row"><span>🤝 Alianza</span><b>${view.alliance ? `${escapeHtml(view.alliance.name)} [${escapeHtml(view.alliance.tag)}]${ally ? ' · aliado' : ''}` : 'Ninguna'}</b></div>`,
+    `<div class="info-row"><span>🤝 Alianza</span><b>${view.alliance ? `${escapeHtml(view.alliance.name)} [${escapeHtml(view.alliance.tag)}]${ally ? ' · aliado' : view.relation === 'pacto' ? ' · 🕊️ pacto' : view.relation === 'guerra' ? ' · ⚔️ en guerra' : ''}` : 'Ninguna'}</b></div>`,
     `<div class="info-row"><span>🏆 Puntos</span><b>${fmtNum(view.score)}</b></div>`,
     `<div class="info-row"><span>🏛️ Ayuntamiento</span><b>Nivel ${view.townLevel}</b></div>`,
   ];
@@ -24,7 +24,11 @@ function playerSection(game, view) {
     : '<p class="desc small">Manda un bote explorador para espiar sus tropas y sus recursos antes de atacar.</p>';
   const intro = ally
     ? 'Una ciudad aliada: no podéis atacaros, pero puedes mandarle recursos.'
-    : 'La ciudad de otro jugador. Si la atacas y ganas, te llevas lo que quepa en tus barcos (salvo lo que esconde su almacén).';
+    : view.relation === 'pacto'
+      ? 'Vuestras alianzas tienen un pacto de no agresión: no podéis atacaros mientras dure.'
+      : view.relation === 'guerra'
+        ? '⚔️ Vuestras alianzas están en guerra. Si la saqueas, tus barcos cargan un 20 % más de botín.'
+        : 'La ciudad de otro jugador. Si la atacas y ganas, te llevas lo que quepa en tus barcos (salvo lo que esconde su almacén).';
   return `<p class="desc">${intro}</p>
     ${lines.join('')}${spy}
     <div class="modal-actions">

@@ -182,6 +182,7 @@ async function api(req, res, url) {
     }
 
     if (route === 'GET /api/ranking') return send(res, 200, world.ranking(uid));
+    if (route === 'GET /api/map') return send(res, 200, world.worldMap(uid));
 
     if (route === 'GET /api/chat') return send(res, 200, { messages: world.chatSince(uid, int(url.searchParams.get('after')) || 0) });
     if (route === 'POST /api/chat') {
@@ -224,6 +225,11 @@ async function api(req, res, url) {
       else if (sub === '/leave') world.leaveAlliance(uid);
       else if (sub === '/kick') world.kickMember(uid, int(body.userId));
       else if (sub === '/description') world.describeAlliance(uid, body.text);
+      else if (sub === '/diplomacy') world.diplomacy(uid, int(body.id), String(body.op ?? ''));
+      else if (sub === '/circular') {
+        if (limited(`mail:${uid}`, 5, 60_000)) return send(res, 429, { error: 'Has mandado muchos mensajes seguidos. Espera un minuto.' });
+        world.allianceCircular(uid, body.subject, body.text);
+      }
       else return send(res, 404, { error: 'No existe.' });
       return send(res, 200, { alliance: world.allianceDetail(uid), snapshot: world.snapshot(uid) });
     }

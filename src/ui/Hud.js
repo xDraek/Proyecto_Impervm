@@ -7,6 +7,7 @@ import { buildingPanel } from './buildingPanel.js';
 import { bag, costItems, escapeHtml, fmtNum, fmtTime, unitList } from './format.js';
 import { fleetFor, islandPanel, readFleet, readPayload } from './islandPanel.js';
 import { questsHtml, rankingHtml } from './modals.js';
+import { WorldMap } from './worldMap.js';
 import { reportsHtml } from './reports.js';
 import { Social } from './social.js';
 
@@ -55,6 +56,7 @@ export class Hud {
     this.menu = $('#menu');
     this.mailBtn = $('#mail-btn');
     this.social = new Social(this);
+    this.worldMap = new WorldMap(this);
 
     this.#buildResources();
 
@@ -74,6 +76,7 @@ export class Hud {
     this.reportsBtn.addEventListener('click', () => this.openReports());
     this.questsBtn.addEventListener('click', () => this.openModal('quests'));
     $('#rank-btn').addEventListener('click', () => this.openModal('ranking'));
+    $('#map-btn').addEventListener('click', () => this.worldMap.open());
     this.favorEl.addEventListener('click', () => this.onSelect('templo'));
     this.modal.addEventListener('click', async (e) => {
       if (e.target === this.modal || e.target.closest('[data-action="close-modal"]')) return this.closeModal();

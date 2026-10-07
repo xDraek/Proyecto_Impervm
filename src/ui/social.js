@@ -84,9 +84,53 @@ export class Social {
       <p class="muted small">Los miembros de una alianza no pueden atacarse entre sí. Usa el transporte para ayudarles con recursos.</p>
       <div class="modal-actions">
         <button class="primary small auto" data-action="alliance-chat">💬 Chat de la alianza</button>
+        ${a.members.length > 1 ? '<button class="ghost small" data-action="circular">📜 Circular</button>' : ''}
         <button class="ghost small" data-action="leave">Dejar la alianza</button>
       </div>
+      ${this.#diplomacyHtml(a)}
     </div>`;
+  }
+
+  #diplomacyHtml(a) {
+    const since = (t) => new Date(t).toLocaleDateString('es-ES', { day: 'numeric', month: 'short' });
+    const btn = (op, id, text, cls = 'ghost') => (a.isFounder ? `<button class="${cls} small" data-action="diplo" data-op="${op}" data-id="${id}">${text}</button>` : '');
+    const rows = a.diplomacy
+      .map((d) => {
+        const name = `${escapeHtml(d.name)} <span class="tag">[${escapeHtml(d.tag)}]</span>`;
+        let status;
+        let actions = '';
+        if (d.type === 'guerra') {
+          const w = d.war;
+          status = `<span class="rel war">⚔️ En guerra</span> desde el ${since(d.since)}${w.declaredByUs ? ' (la declarasteis vosotros)' : ''}
+            <div class="war-score"><span>🗡️ Abatidos <b>${fmtNum(w.kills)}</b></span><span>💀 Perdidos <b>${fmtNum(w.losses)}</b></span><span>💰 Saqueado <b>${fmtNum(w.loot)}</b></span><span>🏚️ Os han robado <b>${fmtNum(w.lootLost)}</b></span></div>`;
+          if (d.proposal?.mine) actions = `<span class="muted small">Habéis ofrecido la paz</span>${btn('rechazar', d.id, 'Retirar')}`;
+          else if (d.proposal) actions = `<span class="muted small">Os ofrecen la paz</span>${btn('aceptar', d.id, '🕊️ Firmar la paz', 'primary')}${btn('rechazar', d.id, 'Rechazar')}`;
+          else actions = btn('paz', d.id, '🕊️ Ofrecer la paz');
+        } else if (d.type === 'pacto') {
+          status = `<span class="rel pact">🕊️ Pacto de no agresión</span> desde el ${since(d.since)}`;
+          actions = `${btn('romper', d.id, 'Romper el pacto')}${btn('guerra', d.id, '⚔️ Declarar la guerra')}`;
+        } else {
+          status = d.proposal?.mine ? '📜 Les habéis propuesto un pacto' : '📜 Os proponen un pacto de no agresión';
+          actions = d.proposal?.mine ? btn('rechazar', d.id, 'Retirar') : `${btn('aceptar', d.id, '🕊️ Aceptar', 'primary')}${btn('rechazar', d.id, 'Rechazar')}`;
+        }
+        return `<div class="diplo-row"><div><b>${name}</b><div class="small">${status}</div></div><div class="row-actions">${actions}</div></div>`;
+      })
+      .join('');
+    const busy = new Set(a.diplomacy.map((d) => d.id));
+    const others = this.alliances.filter((x) => x.id !== a.id && !busy.has(x.id));
+    const form =
+      a.isFounder && others.length
+        ? `<form class="inline-form" data-form="diplo">
+            <select name="id">${others.map((x) => `<option value="${x.id}">${escapeHtml(x.name)} [${escapeHtml(x.tag)}] · ${fmtNum(x.points)} pts</option>`).join('')}</select>
+            <button class="ghost small" name="op" value="pacto">🕊️ Proponer pacto</button>
+            <button class="ghost small danger" name="op" value="guerra">⚔️ Declarar la guerra</button>
+          </form>`
+        : '';
+    if (!rows && !form) return '';
+    return `<h4>Diplomacia</h4>
+      ${rows || '<p class="muted small">Sin pactos ni guerras.</p>'}
+      ${form}
+      <p class="muted small">Con un pacto de no agresión no podéis atacaros. En guerra, vuestros barcos cargan un 20 % más de botín cuando saqueáis al enemigo, y se lleva la cuenta de cada batalla. ${a.isFounder ? '' : 'La diplomacia la lleva quien lidera la alianza.'}</p>`;
   }
 
   #noAllianceHtml() {
@@ -120,9 +164,9 @@ export class Social {
     this.renderMail();
   }
 
-  compose(to = '', subject = '') {
+  compose(to = '', subject = '', circular = false) {
     this.mailTab = 'write';
-    this.draft = { to, subject };
+    this.draft = { to, subject, circular };
     this.openMail = null;
     this.hud.showModal('mail', '');
     this.renderMail();
@@ -140,7 +184,9 @@ export class Social {
     if (this.mailTab === 'write') {
       const d = this.draft ?? {};
       body = `<form class="stack" data-form="mail">
-        <input name="to" maxlength="20" placeholder="Para (nombre del jugador)" value="${escapeHtml(d.to ?? '')}" required />
+        ${d.circular
+          ? `<input value="📜 Para toda la alianza${this.game.alliance ? ` [${escapeHtml(this.game.alliance.tag)}]` : ''}" disabled />`
+          : `<input name="to" maxlength="20" placeholder="Para (nombre del jugador)" value="${escapeHtml(d.to ?? '')}" required />`}
         <input name="subject" maxlength="80" placeholder="Asunto" value="${escapeHtml(d.subject ?? '')}" />
         <textarea name="text" maxlength="2000" rows="7" placeholder="Escribe tu mensaje…" required></textarea>
         <button class="primary">Enviar</button>
@@ -194,6 +240,8 @@ export class Social {
           <div><b>${fmtNum(p.points)}</b><span>puntos</span></div>
           <div><b>${p.townLevel}</b><span>ayuntamiento</span></div>
           <div><b>${fmtNum(p.victories)}</b><span>victorias</span></div>
+          <div><b>${fmtNum(p.kills ?? 0)}</b><span>bajas enemigas</span></div>
+          <div><b>${fmtNum(p.loot ?? 0)}</b><span>botín</span></div>
         </div>
         <div class="info-row"><span>🏰 Ciudad</span><b>${escapeHtml(p.city ?? '')}</b></div>
         <div class="info-row"><span>🤝 Alianza</span><b>${p.alliance ? escapeHtml(p.alliance.name) : 'Ninguna'}</b></div>
@@ -345,11 +393,30 @@ export class Social {
         }
         return true;
       }
+      case 'diplo': {
+        const { op, id } = btn.dataset;
+        if (op === 'guerra' && !confirm('¿Declarar la guerra? Se anunciará a todo el archipiélago.')) return true;
+        if (op === 'romper' && !confirm('¿Romper el pacto de no agresión?')) return true;
+        const data = await this.#call('POST', '/api/alliance/diplomacy', { id: Number(id), op });
+        if (data) {
+          this.alliance = data.alliance;
+          this.renderAlliance();
+        }
+        return true;
+      }
+      case 'circular':
+        this.compose('', '', true);
+        return true;
       case 'alliance-chat':
         this.hud.closeModal();
         this.hud.toggleChat(true, 'alianza');
         return true;
       case 'goto':
+        // Una isla lejana que no está en tu parte del mapa: se busca en el mapa del mundo
+        if (!this.game.world.island(btn.dataset.island)) {
+          this.hud.worldMap.open(btn.dataset.island);
+          return true;
+        }
         this.hud.closeModal();
         this.hud.onSelect(btn.dataset.island);
         return true;
@@ -390,7 +457,7 @@ export class Social {
       case 'mail-tab':
         this.mailTab = btn.dataset.tab;
         this.openMail = null;
-        if (this.mailTab === 'write') this.draft = this.draft ?? {};
+        if (this.mailTab === 'write') this.draft = this.draft?.circular ? {} : (this.draft ?? {});
         this.renderMail();
         return true;
       case 'mail-open': {
@@ -439,6 +506,14 @@ export class Social {
           this.alliance = res.alliance;
           this.renderAlliance();
         }
+      } else if (form.dataset.form === 'diplo') {
+        const op = e.submitter?.value;
+        if (op === 'guerra' && !confirm('¿Declarar la guerra? Se anunciará a todo el archipiélago.')) return;
+        const res = await this.#call('POST', '/api/alliance/diplomacy', { id: Number(data.id), op });
+        if (res) {
+          this.alliance = res.alliance;
+          this.renderAlliance();
+        }
       } else if (form.dataset.form === 'description') {
         const res = await this.#call('POST', '/api/alliance/description', { text: data.text }, 'Descripción guardada');
         if (res) this.alliance = res.alliance;
@@ -452,7 +527,14 @@ export class Social {
         const res = await this.#call('POST', '/api/password', { current: data.current, next: data.next }, '🔑 Contraseña cambiada');
         if (res) this.hud.closeModal();
       } else if (form.dataset.form === 'mail') {
-        const res = await this.#call('POST', '/api/mail', { to: data.to, subject: data.subject, text: data.text }, '✉️ Mensaje enviado');
+        const res = this.draft?.circular
+          ? await this.#call('POST', '/api/alliance/circular', { subject: data.subject, text: data.text }, '📜 Circular enviada a toda la alianza')
+          : await this.#call('POST', '/api/mail', { to: data.to, subject: data.subject, text: data.text }, '✉️ Mensaje enviado');
+        if (res && this.draft?.circular) {
+          this.draft = null;
+          await this.openMailbox('out');
+          return;
+        }
         if (res) {
           this.mail = res.mail;
           this.draft = null;

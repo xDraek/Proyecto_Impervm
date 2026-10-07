@@ -607,6 +607,13 @@ export const HERO_SKILLS = {
   velocidad: { name: 'Navegación', icon: '💨', text: (n) => `Su flota navega un ${n * 4} % más rápido`, per: 0.04 },
 };
 
+// ── Diplomacia entre alianzas ───────────────────────────────────────────────
+// Un pacto de no agresión impide atacarse; en guerra los barcos cargan más botín.
+
+export const DIPLOMACY = {
+  warLoot: 0.2,
+};
+
 export const VISITORS = {
   mercader: { name: 'Mercader ambulante', icon: '🧳' },
   mercenarios: { name: 'Mercenarios', icon: '🗡️' },
