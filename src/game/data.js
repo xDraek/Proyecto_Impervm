@@ -614,6 +614,15 @@ export const DIPLOMACY = {
   warLoot: 0.2,
 };
 
+// ── Modo vacaciones ─────────────────────────────────────────────────────────
+// Tu isla descansa: no produce, no come, no llegan piratas ni visitantes y
+// nadie te puede atacar ni espiar. Dura al menos `minHours`.
+
+export const VACATION = {
+  minHours: 48,
+  cooldownHours: 24,
+};
+
 export const VISITORS = {
   mercader: { name: 'Mercader ambulante', icon: '🧳' },
   mercenarios: { name: 'Mercenarios', icon: '🗡️' },

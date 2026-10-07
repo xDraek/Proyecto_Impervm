@@ -55,6 +55,8 @@ export class Hud {
     this.visitorEl = $('#visitor');
     this.menu = $('#menu');
     this.mailBtn = $('#mail-btn');
+    this.allianceBtn = $('#alliance-btn');
+    this.vacationEl = $('#vacation');
     this.social = new Social(this);
     this.worldMap = new WorldMap(this);
 
@@ -141,6 +143,13 @@ export class Hud {
       if (e.target.name === 'sound') settings.setSound(e.target.checked);
       if (e.target.name === 'daynight') settings.setDayNight(e.target.checked);
       if (e.target.name === 'notify') settings.setNotify(e.target.checked).then((on) => (e.target.checked = on));
+    });
+    this.menu.querySelector('[data-action="vacation"]').addEventListener('click', () => {
+      this.menu.hidden = true;
+      this.social.openVacation();
+    });
+    this.vacationEl.addEventListener('click', (e) => {
+      if (e.target.closest('[data-action]')) this.social.openVacation();
     });
     this.menu.querySelector('[data-action="password"]').addEventListener('click', () => {
       this.menu.hidden = true;
@@ -239,7 +248,12 @@ export class Hud {
     this.#renderDock();
     this.#renderAlert();
     this.#renderVisitor();
+    this.#renderVacation();
     this.#renderModal();
+    const forum = this.game.forumUnread ?? 0;
+    const fBadge = this.allianceBtn.querySelector('.badge');
+    fBadge.hidden = !forum;
+    fBadge.textContent = forum;
     const unread = this.game.unreadReports;
     const badge = this.reportsBtn.querySelector('.badge');
     badge.hidden = !unread;
@@ -274,6 +288,7 @@ export class Hud {
     this.#refreshLive(this.dock);
     this.#refreshLive(this.alert);
     this.#refreshLive(this.visitorEl);
+    this.#refreshLive(this.vacationEl);
     this.panelView?.refresh?.(this.panel);
   }
 
@@ -336,10 +351,12 @@ export class Hud {
       const els = this.resEls[key];
       const amount = game.resources[key];
       const full = amount >= cap;
-      const rate = prod[key];
+      const paused = !!game.state.vacation;
+      const rate = paused ? 0 : prod[key];
       els.amount.textContent = fmtNum(amount);
       let rateText = `${rate < 0 ? '−' : '+'}${fmtNum(Math.abs(rate))}/h`;
-      if (key === 'comida' && starving) rateText = '¡Hambruna!';
+      if (paused) rateText = '⏸️ vacaciones';
+      else if (key === 'comida' && starving) rateText = '¡Hambruna!';
       else if (full && rate > 0) rateText = 'Lleno';
       els.rate.textContent = rateText;
       els.bar.style.width = `${Math.min(100, (amount / cap) * 100)}%`;
@@ -732,6 +749,20 @@ export class Hud {
       <button class="primary small auto" data-action="accept" data-need='${JSON.stringify(v.give)}' data-blocked="0">Aceptar</button>
       <button class="ghost small" data-action="dismiss">No</button>`;
     this.#setHtml(this.visitorEl, 'visitor', html);
+  }
+
+  #renderVacation() {
+    const v = this.game.state.vacation;
+    this.vacationEl.hidden = !v;
+    if (!v) {
+      this.cache.vacation = '';
+      return;
+    }
+    const html = `<span class="alert-icon">🏖️</span>
+      <div class="visitor-body"><b>Modo vacaciones</b>
+        <div class="small">Tu isla descansa: no produce y nadie puede atacarla.${v.until > this.game.now() ? ` Puedes volver en <span data-until="${v.until}"></span>.` : ''}</div></div>
+      <button class="primary small auto" data-action="vacation">Volver al juego</button>`;
+    this.#setHtml(this.vacationEl, 'vacation', html);
   }
 
   // ── Chat ──────────────────────────────────────────────────────────────────

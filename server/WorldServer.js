@@ -17,6 +17,9 @@ const MAX_OFFERS = 5;
 const OFFER_DAYS = 3;
 const RANK_SIZE = 50; // filas de las clasificaciones por categoría
 const MAP_CACHE_MS = 30_000;
+const INACTIVE_MS = 7 * 86_400_000; // una semana sin entrar: inactivo
+const MAX_THREADS = 40;
+const MAX_POSTS = 200;
 export const NAME_RE = /^[\p{L}\p{N}_ .-]{3,20}$/u;
 const ALLIANCE_RE = /^[\p{L}\p{N}_ .'-]{3,30}$/u;
 const TAG_RE = /^[\p{L}\p{N}]{2,5}$/u;
@@ -63,6 +66,7 @@ export class WorldServer {
     this.chat = data.chat.filter((m) => !deleted.has(m.id)).slice(-MAX_CHAT);
     this.meta.alliances ??= {};
     this.meta.diplomacy ??= {};
+    this.meta.forums ??= {};
     this.meta.offers ??= [];
     this.memberOf = new Map();
     for (const a of Object.values(this.meta.alliances)) for (const uid of a.members) this.memberOf.set(uid, a.id);
@@ -128,6 +132,18 @@ export class WorldServer {
   seen(userId) {
     const u = this.users.get(userId);
     if (u) u.lastSeen = Date.now();
+    // La última visita también se guarda (con un minuto de margen) para saber quién está inactivo
+    const g = this.games.get(userId);
+    if (g && Date.now() - (g.state.lastSeen ?? 0) > 60_000) {
+      g.state.lastSeen = Date.now();
+      g.dirty = true;
+    }
+  }
+
+  isInactive(userId) {
+    const g = this.games.get(userId);
+    const last = g?.state.lastSeen ?? this.users.get(userId)?.created ?? 0;
+    return Date.now() - last > INACTIVE_MS;
   }
 
   // ── Interfaz `world` para Game ─────────────────────────────────────────────
@@ -155,8 +171,16 @@ export class WorldServer {
       protected: game.isProtected(),
       townLevel: game.level('ayuntamiento'),
       online: Date.now() - user.lastSeen < ONLINE_MS,
+      vacation: !!game.state.vacation,
+      inactive: this.isInactive(userId),
       alliance: a ? { id: a.id, tag: a.tag, name: a.name } : null,
     };
+  }
+
+  /** Si viene alguna flota enemiga hacia la ciudad de este jugador. */
+  underAttack(userId) {
+    const game = this.games.get(userId);
+    return !!game && this.incoming(game.state.home).length > 0;
   }
 
   sameAlliance(a, b) {
@@ -252,14 +276,14 @@ export class WorldServer {
 
   spyPlayer(ownerId, t) {
     const target = this.games.get(ownerId);
-    if (!target) return null;
+    if (!target || target.state.vacation) return null;
     target.update(t);
     return { name: target.name, ...target.spyReport() };
   }
 
   attackPlayer(ownerId, payload, t) {
     const target = this.games.get(ownerId);
-    if (!target) return null;
+    if (!target || target.state.vacation) return null;
     // Que el defensor llegue al momento del ataque (si no está ya ocupado)
     target.update(t);
     const res = target.receiveAttack(payload, t);
@@ -364,6 +388,7 @@ export class WorldServer {
       alliance: a ? { id: a.id, tag: a.tag, name: a.name } : null,
       admin: this.isAdmin(userId),
       mailUnread: (mail ?? []).filter((m) => m.box === 'in' && !m.read).length,
+      forumUnread: this.#forumUnread(userId),
       state,
       world: { islands, states, players },
       incoming: this.incoming(game.state.home),
@@ -530,6 +555,7 @@ export class WorldServer {
     const name = this.users.get(userId).username;
     if (!a.members.length) {
       delete this.meta.alliances[a.id];
+      delete this.meta.forums[a.id];
       for (const key of Object.keys(this.meta.diplomacy)) if (key.split('-').includes(String(a.id))) delete this.meta.diplomacy[key];
     } else {
       if (a.founder === userId) a.founder = a.members[0];
@@ -554,6 +580,110 @@ export class WorldServer {
     const to = a.members.filter((uid) => uid !== userId);
     if (!to.length) throw new UserError('Eres el único miembro de la alianza.');
     this.#deliverMail(userId, to, `[${a.tag}] Circular`, subject, text);
+  }
+
+  // ── Foro de la alianza ─────────────────────────────────────────────────────
+
+  #forum(userId) {
+    const a = this.allianceOf(userId);
+    if (!a) throw new UserError('No estás en ninguna alianza.');
+    this.meta.forums[a.id] ??= [];
+    return { a, threads: this.meta.forums[a.id] };
+  }
+
+  #forumUnread(userId) {
+    const a = this.allianceOf(userId);
+    const threads = a ? (this.meta.forums[a.id] ?? []) : [];
+    const seen = this.games.get(userId)?.state.forumSeen ?? {};
+    const me = this.users.get(userId)?.username;
+    return threads.filter((th) => th.lastBy !== me && th.last > (seen[th.id] ?? 0)).length;
+  }
+
+  /** Los temas del foro, los fijados primero y luego por la última respuesta. */
+  forumList(userId) {
+    const { a, threads } = this.#forum(userId);
+    const seen = this.games.get(userId).state.forumSeen ?? {};
+    const me = this.users.get(userId).username;
+    return {
+      canModerate: a.founder === userId,
+      threads: threads
+        .map((th) => ({
+          id: th.id,
+          title: th.title,
+          author: th.author,
+          t: th.t,
+          last: th.last,
+          lastBy: th.lastBy,
+          count: th.posts.length,
+          pinned: !!th.pinned,
+          unread: th.lastBy !== me && th.last > (seen[th.id] ?? 0),
+        }))
+        .sort((x, y) => Number(y.pinned) - Number(x.pinned) || y.last - x.last),
+    };
+  }
+
+  /** Un tema entero; al leerlo queda marcado como leído. */
+  forumThread(userId, id) {
+    const { a, threads } = this.#forum(userId);
+    const th = threads.find((x) => x.id === id);
+    if (!th) throw new UserError('Ese tema ya no existe.');
+    const game = this.games.get(userId);
+    game.state.forumSeen ??= {};
+    game.state.forumSeen[th.id] = th.last;
+    // Olvidar lo leído de temas que ya no existen
+    for (const key of Object.keys(game.state.forumSeen)) if (!threads.some((x) => x.id === Number(key))) delete game.state.forumSeen[key];
+    game.dirty = true;
+    const me = this.users.get(userId).username;
+    return { ...th, canModerate: a.founder === userId, mine: th.author === me };
+  }
+
+  forumPost(userId, threadId, title, text) {
+    const { a, threads } = this.#forum(userId);
+    text = String(text ?? '').trim().slice(0, 3000);
+    if (!text) throw new UserError('Escribe el mensaje.');
+    const author = this.users.get(userId).username;
+    const now = Date.now();
+    const post = { id: (this.meta.postSeq = (this.meta.postSeq ?? 0) + 1), author, t: now, text };
+    let th;
+    if (threadId == null) {
+      title = String(title ?? '').replace(/\s+/g, ' ').trim().slice(0, 80);
+      if (title.length < 3) throw new UserError('El título debe tener al menos 3 letras.');
+      th = { id: (this.meta.threadSeq = (this.meta.threadSeq ?? 0) + 1), title, author, t: now, last: now, lastBy: author, pinned: false, posts: [post] };
+      threads.push(th);
+      // Si hay demasiados, se va el más viejo sin fijar
+      if (threads.length > MAX_THREADS) {
+        const old = threads.filter((x) => !x.pinned).sort((x, y) => x.last - y.last)[0];
+        if (old) threads.splice(threads.indexOf(old), 1);
+      }
+      this.announce(`🗂️ ${author} abre un tema en el foro: «${title}»`, `a:${a.id}`);
+    } else {
+      th = threads.find((x) => x.id === threadId);
+      if (!th) throw new UserError('Ese tema ya no existe.');
+      th.posts.push(post);
+      if (th.posts.length > MAX_POSTS) th.posts.splice(1, th.posts.length - MAX_POSTS);
+      th.last = now;
+      th.lastBy = author;
+    }
+    for (const uid of a.members) this.pendingPush.add(uid);
+    return this.forumThread(userId, th.id);
+  }
+
+  /** Fijar o borrar un tema: quien lidera (o quien lo abrió, para borrarlo). */
+  forumModerate(userId, threadId, op) {
+    const { a, threads } = this.#forum(userId);
+    const th = threads.find((x) => x.id === threadId);
+    if (!th) throw new UserError('Ese tema ya no existe.');
+    const leader = a.founder === userId;
+    if (op === 'pin') {
+      if (!leader) throw new UserError('Solo quien lidera la alianza puede fijar temas.');
+      th.pinned = !th.pinned;
+    } else if (op === 'delete') {
+      if (!leader && th.author !== this.users.get(userId).username) throw new UserError('Solo puedes borrar los temas que has abierto tú.');
+      threads.splice(threads.indexOf(th), 1);
+    } else {
+      throw new UserError('Esa acción no existe.');
+    }
+    for (const uid of a.members) this.pendingPush.add(uid);
   }
 
   // ── Diplomacia entre alianzas ──────────────────────────────────────────────
@@ -682,6 +812,8 @@ export class WorldServer {
             name: g.name,
             points: g.score(),
             protected: g.isProtected(),
+            vacation: !!g.state.vacation,
+            inactive: this.isInactive(isl.owner),
             aid: a?.id ?? null,
             tag: a?.tag ?? null,
           });

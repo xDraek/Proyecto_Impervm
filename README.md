@@ -49,6 +49,9 @@ El servidor guarda el mundo en memoria y lo vuelca a la base de datos cada 10 se
 - **Otros jugadores**: espía sus ciudades con botes exploradores y atácalas para llevarte sus recursos (salvo lo que esconde su almacén). Si alguien viene a por ti, lo verás llegar. Con menos de 100 puntos tienes **protección de novato**: nadie te ataca y tú no atacas a otros jugadores.
 - **Alianzas** 🤝: fúndalas o únete a una (hasta 20 miembros). Los aliados no pueden atacarse, tienen su propio chat, circulares para todos los miembros y una clasificación de alianzas.
 - **Diplomacia** 🕊️⚔️: quien lidera una alianza puede proponer **pactos de no agresión** (mientras duren, no os podéis atacar) o **declarar la guerra**. En guerra los barcos cargan un 20 % más de botín al saquear al enemigo y se lleva el marcador de bajas y botín de cada bando hasta que se firma la paz.
+- **Foro de la alianza** 🗂️: temas con respuestas para organizarse; quien lidera puede fijarlos y el botón de la alianza avisa de lo que no has leído.
+- **Modo vacaciones** 🏖️ (desde ⚙): mientras estás fuera nadie te ataca ni te espía y no llegan piratas, pero tu isla tampoco produce ni puedes jugar. Dura al menos 48 horas.
+- **Jugadores inactivos** 💤: quien lleva una semana sin entrar aparece marcado en el mapa (y es un buen objetivo).
 - **Mapa del mundo** 🌍: todo el archipiélago en un mapa que se arrastra y se acerca, con las ciudades coloreadas según vuestra relación (aliados, pactos, enemigos), buscador de jugadores y distancia en tiempo de viaje.
 - **Almirante** 🎖️: un héroe que contratas en el ayuntamiento. Acompaña a una flota (más ataque, carga o velocidad) o defiende la isla; sube de nivel con los combates y repartes sus puntos. Si su flota cae, vuelve herido.
 - **Contraespionaje**: la muralla puede descubrir y hundir los botes espía (8 % por nivel).
@@ -87,7 +90,5 @@ En la consola del navegador, ya dentro de la partida, está `window.__IMPERIUM__
 
 ## Próximos pasos posibles
 
-- Foro de alianza con hilos.
-- Modo vacaciones (no te pueden atacar mientras no juegas).
 - Varias ciudades por jugador (las colonias como ciudades completas).
 - Recuperar la contraseña por correo.

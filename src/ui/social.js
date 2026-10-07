@@ -1,6 +1,7 @@
-import { ACHIEVEMENTS, DAILY_REWARDS, RESOURCES, RESOURCE_KEYS } from '../game/data.js';
+import { universe } from '../config.js';
+import { ACHIEVEMENTS, DAILY_REWARDS, RESOURCES, RESOURCE_KEYS, VACATION } from '../game/data.js';
 import { api } from '../net/api.js';
-import { bag, escapeHtml, fmtAgo, fmtDec, fmtNum } from './format.js';
+import { bag, escapeHtml, fmtAgo, fmtDec, fmtNum, fmtTime } from './format.js';
 import { runSimulation, simulatorHtml } from './simulator.js';
 
 /** Ventanas que gestiona este módulo. */
@@ -27,6 +28,9 @@ export class Social {
     this.draft = null;
     this.offers = [];
     this.offersAt = 0;
+    this.allianceTab = 'members';
+    this.forum = null;
+    this.thread = null;
   }
 
   /** Lanza una petición y avisa del error si lo hay. Devuelve los datos o null. */
@@ -79,7 +83,14 @@ export class Social {
         : '';
     return `<div class="modal-card">
       ${head('🤝', `${escapeHtml(a.name)} <span class="tag">[${escapeHtml(a.tag)}]</span>`, `${a.members.length} miembros · ${fmtNum(a.points)} puntos`)}
-      ${description}
+      <div class="tabs small-tabs">
+        <button data-action="ally-tab" data-tab="members" class="${this.allianceTab === 'members' ? 'active' : ''}">👥 Miembros</button>
+        <button data-action="ally-tab" data-tab="forum" class="${this.allianceTab === 'forum' ? 'active' : ''}">🗂️ Foro${this.game.forumUnread ? ` (${this.game.forumUnread})` : ''}</button>
+      </div>
+      ${
+        this.allianceTab === 'forum'
+          ? this.#forumHtml()
+          : `${description}
       <table class="ranking"><thead><tr><th>Miembro</th><th>Puntos</th><th></th></tr></thead><tbody>${rows}</tbody></table>
       <p class="muted small">Los miembros de una alianza no pueden atacarse entre sí. Usa el transporte para ayudarles con recursos.</p>
       <div class="modal-actions">
@@ -87,8 +98,63 @@ export class Social {
         ${a.members.length > 1 ? '<button class="ghost small" data-action="circular">📜 Circular</button>' : ''}
         <button class="ghost small" data-action="leave">Dejar la alianza</button>
       </div>
-      ${this.#diplomacyHtml(a)}
+      ${this.#diplomacyHtml(a)}`
+      }
     </div>`;
+  }
+
+  // ── Foro de la alianza ──────────────────────────────────────────────────────
+
+  async #loadForum() {
+    const data = await this.#call('GET', '/api/forum');
+    this.forum = data ?? { threads: [] };
+  }
+
+  async #openThread(id) {
+    const data = await this.#call('GET', `/api/forum/thread?id=${id}`);
+    if (data) this.thread = data.thread;
+    else await this.#loadForum();
+    this.renderAlliance();
+  }
+
+  #forumHtml() {
+    if (!this.forum) return '<p class="muted">Cargando el foro…</p>';
+    const text = (s) => escapeHtml(s).replace(/\n/g, '<br />');
+    if (this.thread) {
+      const th = this.thread;
+      const posts = th.posts
+        .map((p) => `<article class="post"><div class="post-head"><button class="link" data-action="profile" data-name="${escapeHtml(p.author)}">${escapeHtml(p.author)}</button><span class="muted small">${fmtAgo(p.t)}</span></div><p>${text(p.text)}</p></article>`)
+        .join('');
+      return `<div class="thread-head">
+          <button class="ghost small" data-action="forum-back">← Temas</button>
+          <h4>${th.pinned ? '📌 ' : ''}${escapeHtml(th.title)}</h4>
+          <div class="row-actions">
+            ${th.canModerate ? `<button class="ghost small" data-action="forum-pin" data-id="${th.id}">${th.pinned ? 'Desfijar' : '📌 Fijar'}</button>` : ''}
+            ${th.canModerate || th.mine ? `<button class="ghost small" data-action="forum-delete" data-id="${th.id}" title="Borrar el tema">🗑️</button>` : ''}
+          </div>
+        </div>
+        <div class="posts">${posts}</div>
+        <form class="stack" data-form="forum-reply" data-id="${th.id}">
+          <textarea name="text" rows="3" maxlength="3000" placeholder="Escribe tu respuesta…" required></textarea>
+          <button class="primary small auto">Responder</button>
+        </form>`;
+    }
+    const rows = this.forum.threads
+      .map(
+        (th) => `<li data-action="forum-open" data-id="${th.id}" class="${th.unread ? 'unread' : ''}">
+          <span class="who">${th.pinned ? '📌 ' : ''}${escapeHtml(th.title)}</span>
+          <span class="muted small">${th.count} ${th.count === 1 ? 'mensaje' : 'mensajes'} · ${escapeHtml(th.lastBy)}, ${fmtAgo(th.last)}</span></li>`,
+      )
+      .join('');
+    return `<details class="new-thread" ${this.forum.threads.length ? '' : 'open'}>
+        <summary>✏️ Abrir un tema nuevo</summary>
+        <form class="stack" data-form="forum-new">
+          <input name="title" maxlength="80" minlength="3" placeholder="Título" required />
+          <textarea name="text" rows="4" maxlength="3000" placeholder="¿Qué quieres contar a la alianza?" required></textarea>
+          <button class="primary small auto">Publicar</button>
+        </form>
+      </details>
+      ${rows ? `<ul class="mail-list forum-list">${rows}</ul>` : '<p class="muted">Todavía no hay ningún tema. Abre el primero: planes de ataque, quién necesita recursos, reglas de la alianza…</p>'}`;
   }
 
   #diplomacyHtml(a) {
@@ -304,6 +370,33 @@ export class Social {
     );
   }
 
+  // ── Modo vacaciones ─────────────────────────────────────────────────────────
+
+  openVacation() {
+    const now = this.game.now();
+    const st = this.game.vacationStatus(now);
+    const span = (h) => fmtTime((h * 3600) / universe.speed);
+    let body;
+    if (st.active) {
+      body = `<p>Estás de vacaciones desde el ${new Date(st.since).toLocaleString('es-ES', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}.</p>
+        ${st.canEnd ? '<p class="hint ok">Ya puedes volver cuando quieras.</p>' : `<p class="hint">Podrás volver dentro de ${fmtTime((st.until - now) / 1000)}.</p>`}
+        <div class="modal-actions"><button class="primary auto" data-action="vacation-end" ${st.canEnd ? '' : 'disabled'}>⚓ Volver al juego</button></div>`;
+    } else {
+      const wait = st.readyAt > now ? ` Podrás irte dentro de ${fmtTime((st.readyAt - now) / 1000)}.` : '';
+      body = `<p class="desc">¿Te vas unos días? Deja tu isla a buen recaudo.</p>
+        <ul class="vac-list">
+          <li>🛡️ Nadie puede atacar ni espiar tu ciudad.</li>
+          <li>⏸️ La isla no produce ni gasta: las tropas tampoco comen.</li>
+          <li>🏴‍☠️ No llegan piratas ni visitantes.</li>
+          <li>🔒 No puedes construir, investigar, reclutar ni zarpar (lo que ya estaba en marcha termina).</li>
+          <li>⏳ Duran al menos ${span(VACATION.minHours)}; al volver tendrás que esperar ${span(VACATION.cooldownHours)} para irte otra vez.</li>
+        </ul>
+        ${st.reason ? `<p class="hint">${escapeHtml(st.reason)}${wait}</p>` : ''}
+        <div class="modal-actions"><button class="primary auto" data-action="vacation-start" ${st.reason ? 'disabled' : ''}>🏖️ Irme de vacaciones</button></div>`;
+    }
+    this.hud.showModal('vacation', `<div class="modal-card narrow">${head('🏖️', 'Modo vacaciones', st.active ? 'Tu isla descansa' : 'Para cuando no puedas jugar')}${body}</div>`);
+  }
+
   openPassword() {
     this.hud.showModal(
       'password',
@@ -391,6 +484,55 @@ export class Social {
           this.alliance = data.alliance;
           this.renderAlliance();
         }
+        return true;
+      }
+      case 'ally-tab':
+        this.allianceTab = btn.dataset.tab;
+        this.thread = null;
+        if (this.allianceTab === 'forum') {
+          this.forum = null;
+          this.renderAlliance();
+          await this.#loadForum();
+        }
+        this.renderAlliance();
+        return true;
+      case 'forum-open':
+        await this.#openThread(Number(btn.dataset.id));
+        return true;
+      case 'forum-back':
+        this.thread = null;
+        await this.#loadForum();
+        this.renderAlliance();
+        return true;
+      case 'forum-pin':
+      case 'forum-delete': {
+        const op = action === 'forum-pin' ? 'pin' : 'delete';
+        if (op === 'delete' && !confirm('¿Borrar este tema con todas sus respuestas?')) return true;
+        const data = await this.#call('POST', `/api/forum/${op}`, { id: Number(btn.dataset.id) });
+        if (!data) return true;
+        if (op === 'delete') {
+          this.thread = null;
+          this.forum = data;
+        } else {
+          await this.#openThread(Number(btn.dataset.id));
+          return true;
+        }
+        this.renderAlliance();
+        return true;
+      }
+      case 'vacation-start': {
+        if (!confirm('¿Irte de vacaciones? Tu isla dejará de producir y no podrás volver hasta que pase el tiempo mínimo.')) return true;
+        btn.disabled = true;
+        const res = await this.game.startVacation();
+        if (!res.ok) this.hud.toast(res.reason, 'error');
+        this.openVacation();
+        return true;
+      }
+      case 'vacation-end': {
+        btn.disabled = true;
+        const res = await this.game.endVacation();
+        if (!res.ok) this.hud.toast(res.reason, 'error');
+        else this.hud.closeModal();
         return true;
       }
       case 'diplo': {
@@ -505,6 +647,14 @@ export class Social {
         if (res) {
           this.alliance = res.alliance;
           this.renderAlliance();
+        }
+      } else if (form.dataset.form === 'forum-new' || form.dataset.form === 'forum-reply') {
+        const reply = form.dataset.form === 'forum-reply';
+        const res = await this.#call('POST', reply ? '/api/forum/reply' : '/api/forum', reply ? { id: Number(form.dataset.id), text: data.text } : { title: data.title, text: data.text });
+        if (res) {
+          this.thread = res.thread;
+          this.renderAlliance();
+          this.hud.modal.querySelector('.posts')?.lastElementChild?.scrollIntoView({ block: 'nearest' });
         }
       } else if (form.dataset.form === 'diplo') {
         const op = e.submitter?.value;

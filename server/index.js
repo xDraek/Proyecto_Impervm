@@ -93,7 +93,12 @@ const ACTIONS = {
   acceptVisitor: (g) => g.acceptVisitor(),
   dismissVisitor: (g) => g.dismissVisitor(),
   markReportsRead: (g) => g.markReportsRead(),
+  startVacation: (g) => g.startVacation(),
+  endVacation: (g) => g.endVacation(),
 };
+
+/** De vacaciones solo se puede volver, recoger cosas y deshacer lo que estaba en marcha. */
+const VACATION_OK = new Set(['endVacation', 'markReportsRead', 'claimQuest', 'claimDaily', 'cancel', 'cancelResearch', 'cancelTraining', 'dismissVisitor']);
 
 // ── Límites de peticiones ─────────────────────────────────────────────────────
 
@@ -170,7 +175,11 @@ async function api(req, res, url) {
       const { action, args } = await readJson(req);
       const handler = own(ACTIONS, action) ? ACTIONS[action] : null;
       if (!handler) return send(res, 400, { error: 'Acción desconocida.' });
-      const result = handler(world.games.get(uid), Array.isArray(args) ? args : []);
+      const game = world.games.get(uid);
+      const result =
+        game.state.vacation && !VACATION_OK.has(action)
+          ? { ok: false, reason: '🏖️ Estás de vacaciones: vuelve al juego desde ⚙ para hacer eso.' }
+          : handler(game, Array.isArray(args) ? args : []);
       // Si va hacia otra ciudad, que su dueño lo vea llegar al momento
       if (action === 'sendMission' && result?.ok) {
         const owner = world.island(String(args[1]))?.owner;
@@ -232,6 +241,24 @@ async function api(req, res, url) {
       }
       else return send(res, 404, { error: 'No existe.' });
       return send(res, 200, { alliance: world.allianceDetail(uid), snapshot: world.snapshot(uid) });
+    }
+
+    // Foro de la alianza
+    if (route === 'GET /api/forum') return send(res, 200, world.forumList(uid));
+    if (route === 'GET /api/forum/thread') return send(res, 200, { thread: world.forumThread(uid, int(url.searchParams.get('id'))), snapshot: world.snapshot(uid) });
+    if (req.method === 'POST' && url.pathname.startsWith('/api/forum')) {
+      const body = await readJson(req);
+      const sub = url.pathname.slice('/api/forum'.length);
+      if (sub === '' || sub === '/reply') {
+        if (limited(`forum:${uid}`, 6, 60_000)) return send(res, 429, { error: 'Escribes muy deprisa. Espera un minuto.' });
+        const thread = world.forumPost(uid, sub === '' ? null : int(body.id), body.title, body.text);
+        return send(res, 200, { thread, snapshot: world.snapshot(uid) });
+      }
+      if (sub === '/pin' || sub === '/delete') {
+        world.forumModerate(uid, int(body.id), sub.slice(1));
+        return send(res, 200, world.forumList(uid));
+      }
+      return send(res, 404, { error: 'No existe.' });
     }
 
     // Correo

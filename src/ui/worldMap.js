@@ -73,7 +73,7 @@ export class WorldMap {
           <button class="ghost small" data-wm="out" title="Alejar">－</button>
         </div>
         <div class="wm-wrap"><canvas></canvas><div class="wm-tip" hidden></div></div>
-        <div class="wm-legend">${legend}<span><i class="ring"></i>Lo que ves desde tu ciudad</span></div>
+        <div class="wm-legend">${legend}<span><i class="ring"></i>Lo que ves desde tu ciudad</span><span>🏖️ De vacaciones</span><span>💤 Inactivo</span></div>
         <div class="wm-info"><p class="muted small">Arrastra para moverte, usa la rueda para acercarte y pulsa una ciudad para ver quién vive en ella.</p></div>
       </div>`,
     );
@@ -263,7 +263,7 @@ export class WorldMap {
     let text;
     if (hit.kind === 'city') {
       const c = hit.item;
-      text = `🏰 ${c.tag ? `[${c.tag}] ` : ''}${c.name} · ${c.city} · ${fmtNum(c.points)} pts`;
+      text = `🏰 ${c.tag ? `[${c.tag}] ` : ''}${c.name} · ${c.city} · ${fmtNum(c.points)} pts${c.vacation ? ' · 🏖️' : c.inactive ? ' · 💤' : ''}`;
     } else {
       const [, , type, colonist] = hit.item;
       const t = ISLAND_TYPES[type];
@@ -295,7 +295,7 @@ export class WorldMap {
       const visible = !!this.game.world.island(c.id);
       this.info.innerHTML = `<div class="wm-card">
         <div><b>🏰 ${escapeHtml(c.city)}</b> <span class="rel-chip" style="--rel:${REL[rel].color}">${REL[rel].name}</span>
-          <div class="small">${me ? 'Tu capital' : `de <b>${escapeHtml(c.name)}</b>`}${c.tag ? ` <span class="tag">[${escapeHtml(c.tag)}]</span>` : ''} · ${fmtNum(c.points)} puntos${c.protected ? ' · 🛡️ novato' : ''}</div>
+          <div class="small">${me ? 'Tu capital' : `de <b>${escapeHtml(c.name)}</b>`}${c.tag ? ` <span class="tag">[${escapeHtml(c.tag)}]</span>` : ''} · ${fmtNum(c.points)} puntos${c.protected ? ' · 🛡️ novato' : ''}${c.vacation ? ' · 🏖️ de vacaciones' : c.inactive ? ' · 💤 inactivo' : ''}</div>
           ${me ? '' : far}</div>
         <div class="row-actions">
           ${me ? '' : `<button class="ghost small" data-action="profile" data-name="${escapeHtml(c.name)}">👤 Perfil</button><button class="ghost small" data-action="mail-to" data-name="${escapeHtml(c.name)}">✉️</button>`}
@@ -382,6 +382,7 @@ export class WorldMap {
       const rel = this.#relation(c.uid, c.aid);
       const color = REL[rel].color;
       const selected = this.selected?.kind === 'city' && this.selected.item === c;
+      ctx.globalAlpha = c.inactive || c.vacation ? 0.5 : 1;
       ctx.fillStyle = color;
       ctx.shadowColor = color;
       ctx.shadowBlur = rel === 'otro' ? 0 : 10;
@@ -392,6 +393,7 @@ export class WorldMap {
       ctx.strokeStyle = 'rgba(0,0,0,0.55)';
       ctx.lineWidth = 1.5;
       ctx.stroke();
+      ctx.globalAlpha = 1;
       if (c.protected) {
         ctx.strokeStyle = 'rgba(255,255,255,0.7)';
         ctx.setLineDash([2, 3]);
@@ -408,7 +410,7 @@ export class WorldMap {
         ctx.stroke();
       }
       if (labels || selected || rel === 'yo') {
-        const text = `${c.tag ? `[${c.tag}] ` : ''}${c.name}`;
+        const text = `${c.tag ? `[${c.tag}] ` : ''}${c.name}${c.vacation ? ' 🏖️' : c.inactive ? ' 💤' : ''}`;
         ctx.lineWidth = 3;
         ctx.strokeStyle = 'rgba(8,20,30,0.85)';
         ctx.strokeText(text, sx, sy - cr - 6);

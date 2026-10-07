@@ -18,6 +18,7 @@ import {
   RESOURCE_KEYS,
   STARTING_RESOURCES,
   UNITS,
+  VACATION,
   VISITORS,
 } from './data.js';
 import { battle, count, hasCombat } from './combat.js';
@@ -104,6 +105,8 @@ export function newState({ now = clock.now(), home, name }) {
     quests: { claimed: [] },
     visitor: null,
     nextVisitAt: null,
+    vacation: null,
+    vacationReadyAt: 0,
     startedAt: now,
     seq: 1,
     lastUpdate: now,
@@ -312,6 +315,45 @@ export class Game extends EventTarget {
     return ACHIEVEMENTS.filter((a) => a.check(this)).map((a) => a.id);
   }
 
+  // ── Modo vacaciones ────────────────────────────────────────────────────────
+
+  /** Si estás de vacaciones (y cuándo puedes volver) o, si no, si puedes irte y por qué no. */
+  vacationStatus(now = this.now()) {
+    const s = this.state;
+    if (s.vacation) return { active: true, since: s.vacation.since, until: s.vacation.until, canEnd: now >= s.vacation.until };
+    const attacked = this.world.underAttack ? this.world.underAttack(this.userId) : !!this.incoming?.length;
+    let reason = null;
+    if (s.missions.length) reason = 'Tienes flotas en el mar o tropas de apoyo fuera: espera a que vuelvan.';
+    else if (s.raid) reason = 'Hay piratas a la vista: defiende antes tu isla.';
+    else if (attacked) reason = 'Una flota enemiga viene hacia tu isla.';
+    else if ((s.vacationReadyAt ?? 0) > now) reason = 'Acabas de volver de vacaciones.';
+    return { active: false, reason, readyAt: s.vacationReadyAt ?? 0 };
+  }
+
+  startVacation(now = this.now()) {
+    this.#advance(now);
+    const st = this.vacationStatus(now);
+    if (st.active) return this.#fail('Ya estás de vacaciones.');
+    if (st.reason) return this.#fail(st.reason);
+    this.state.vacation = { since: now, until: now + hours(VACATION.minHours) };
+    this.#note('🏖️ Modo vacaciones: tu isla descansa y nadie la puede atacar.', 'success');
+    return this.#done();
+  }
+
+  endVacation(now = this.now()) {
+    this.#advance(now);
+    const s = this.state;
+    if (!s.vacation) return this.#fail('No estás de vacaciones.');
+    if (now < s.vacation.until) return this.#fail(`Las vacaciones duran al menos ${VACATION.minHours} horas.`);
+    s.vacation = null;
+    s.vacationReadyAt = now + hours(VACATION.cooldownHours);
+    // Que los piratas y los visitantes no lleguen todos de golpe al volver
+    if (s.nextRaidAt) s.nextRaidAt = Math.max(s.nextRaidAt, now + hours(RAID_MIN_H));
+    if (s.nextVisitAt) s.nextVisitAt = Math.max(s.nextVisitAt, now + hours(1));
+    this.#note('⚓ ¡Bienvenido de vuelta! Tu isla vuelve a producir.', 'success');
+    return this.#done();
+  }
+
   // ── Almirante ──────────────────────────────────────────────────────────────
 
   get hero() {
@@ -475,6 +517,8 @@ export class Game extends EventTarget {
         townLevel: p?.townLevel ?? 1,
         alliance: p?.alliance ?? null,
         online: !!p?.online,
+        vacation: !!p?.vacation,
+        inactive: !!p?.inactive,
         relation: this.world.relation?.(this.userId, isl.owner) ?? null,
       });
       return view;
@@ -656,6 +700,7 @@ export class Game extends EventTarget {
     if (isl.type === 'jugador') {
       if (type === 'explorar') {
         if (Object.keys(sent).some((id) => !UNITS[id].explorer)) reason ||= 'Para espiar envía solo botes exploradores.';
+        if (view.vacation) reason ||= `${view.ownerName} está de vacaciones: no hay nada que espiar.`;
       } else if (type === 'transporte') {
         load = this.#cleanPayload(payload);
         const total = sum(load);
@@ -670,6 +715,7 @@ export class Game extends EventTarget {
       } else if (type === 'atacar') {
         if (this.world.sameAlliance?.(this.userId, isl.owner)) reason ||= `${view.ownerName} es de tu alianza.`;
         else if (view.relation === 'pacto') reason ||= `Tu alianza tiene un pacto de no agresión con la de ${view.ownerName}.`;
+        else if (view.vacation) reason ||= `${view.ownerName} está de vacaciones: su isla no se puede atacar.`;
         else if (view.protected) reason ||= `${view.ownerName} está bajo protección de novato (menos de ${NEWBIE_POINTS} puntos).`;
         else if (this.isProtected()) reason ||= `Mientras tengas menos de ${NEWBIE_POINTS} puntos no puedes atacar a otros jugadores.`;
         if (!hasCombat(sent)) reason ||= 'Envía al menos una unidad de combate.';
@@ -1043,9 +1089,9 @@ export class Game extends EventTarget {
       consider(m.phase === 'ida' ? m.arrive : m.back, (t) => this.#missionEvent(m, t));
     }
     if (s.raid) consider(s.raid.arrival, (t) => this.#resolveRaid(t));
-    else if (s.nextRaidAt) consider(s.nextRaidAt, (t) => this.#spawnRaid(t));
+    else if (s.nextRaidAt && !s.vacation) consider(s.nextRaidAt, (t) => this.#spawnRaid(t));
     if (s.visitor) consider(s.visitor.expires, (t) => this.#visitorLeaves(t));
-    else if (s.nextVisitAt) consider(s.nextVisitAt, (t) => this.#spawnVisitor(t));
+    else if (s.nextVisitAt && !s.vacation) consider(s.nextVisitAt, (t) => this.#spawnVisitor(t));
     // El final de un efecto divino también es un suceso: cambia la producción
     for (const [id, until] of Object.entries(s.buffs)) consider(until, () => delete s.buffs[id]);
     return best;
@@ -1056,7 +1102,7 @@ export class Game extends EventTarget {
     const start = s.lastUpdate;
     const h = Math.max(0, t - start) / HOUR_MS;
     s.lastUpdate = Math.max(start, t);
-    if (h === 0) return;
+    if (h === 0 || s.vacation) return; // de vacaciones la isla ni produce ni gasta
     s.favor = Math.min(Math.max(s.favor, favorMax(s)), s.favor + favorRate(s) * h);
     const eco = economy(s, start);
     const cap = storageCapacity(s);
