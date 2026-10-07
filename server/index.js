@@ -93,6 +93,7 @@ const ACTIONS = {
   acceptVisitor: (g) => g.acceptVisitor(),
   dismissVisitor: (g) => g.dismissVisitor(),
   markReportsRead: (g) => g.markReportsRead(),
+  upgradeColony: (g, [id]) => (typeof id === 'string' ? g.upgradeColony(id) : bad()),
   startVacation: (g) => g.startVacation(),
   endVacation: (g) => g.endVacation(),
 };

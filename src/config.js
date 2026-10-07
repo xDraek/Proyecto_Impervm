@@ -4,7 +4,7 @@
  * Velocidad del universo (producción, obras, viajes…). La decide el servidor
  * (variable GAME_SPEED) y el navegador la recibe al conectarse.
  */
-export const universe = { speed: 1 };
+export const universe = { speed: 1, eventSeed: 0 };
 
 /** Reloj del juego. En el navegador se corrige con la hora del servidor. */
 export const clock = {

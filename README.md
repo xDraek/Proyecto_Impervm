@@ -49,6 +49,8 @@ El servidor guarda el mundo en memoria y lo vuelca a la base de datos cada 10 se
 - **Otros jugadores**: espía sus ciudades con botes exploradores y atácalas para llevarte sus recursos (salvo lo que esconde su almacén). Si alguien viene a por ti, lo verás llegar. Con menos de 100 puntos tienes **protección de novato**: nadie te ataca y tú no atacas a otros jugadores.
 - **Alianzas** 🤝: fúndalas o únete a una (hasta 20 miembros). Los aliados no pueden atacarse, tienen su propio chat, circulares para todos los miembros y una clasificación de alianzas.
 - **Diplomacia** 🕊️⚔️: quien lidera una alianza puede proponer **pactos de no agresión** (mientras duren, no os podéis atacar) o **declarar la guerra**. En guerra los barcos cargan un 20 % más de botín al saquear al enemigo y se lleva el marcador de bajas y botín de cada bando hasta que se firma la paz.
+- **Eventos del archipiélago** 📅: cada 6 horas puede empezar una temporada para todos (Fiebre del oro, Festival de Poseidón, Gran feria, Vientos de bonanza…). Se anuncian en el chat y el calendario (botón de la barra superior) enseña las próximas.
+- **Colonias mejorables** 🚩: amplía cada colonia hasta el nivel 10; cada nivel produce un 60 % más de lo que daba al fundarla.
 - **Foro de la alianza** 🗂️: temas con respuestas para organizarse; quien lidera puede fijarlos y el botón de la alianza avisa de lo que no has leído.
 - **Modo vacaciones** 🏖️ (desde ⚙): mientras estás fuera nadie te ataca ni te espía y no llegan piratas, pero tu isla tampoco produce ni puedes jugar. Dura al menos 48 horas.
 - **Jugadores inactivos** 💤: quien lleva una semana sin entrar aparece marcado en el mapa (y es un buen objetivo).

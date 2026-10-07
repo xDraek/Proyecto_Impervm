@@ -2431,3 +2431,50 @@ input[type='text'] {
   white-space: normal;
   overflow-wrap: anywhere;
 }
+
+/* ── Eventos del archipiélago ───────────────────────────────────────────── */
+
+.event-pill {
+  opacity: 0.75;
+}
+
+.event-pill.active {
+  opacity: 1;
+  border-color: rgba(242, 201, 76, 0.7);
+  box-shadow: 0 0 12px rgba(242, 201, 76, 0.35);
+}
+
+.event-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 10px;
+  margin: 6px 0;
+  border: 1px solid var(--panel-border);
+  border-radius: 10px;
+}
+
+.event-row > div {
+  flex: 1;
+}
+
+.event-row.current {
+  background: rgba(242, 201, 76, 0.1);
+  border-color: rgba(242, 201, 76, 0.6);
+}
+
+.event-row.calm {
+  opacity: 0.7;
+}
+
+.event-icon {
+  font-size: 22px;
+}
+
+.landing-event {
+  margin: 12px 0 4px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(242, 201, 76, 0.5);
+  background: rgba(242, 201, 76, 0.1);
+}

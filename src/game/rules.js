@@ -2,6 +2,7 @@ import { universe } from '../config.js';
 import {
   BASE_PRODUCTION,
   BUILDINGS,
+  COLONY,
   COLONY_COST,
   PLAYER_UNITS,
   RESEARCH,
@@ -9,6 +10,9 @@ import {
   RESOURCES,
   RESOURCE_KEYS,
   UNITS,
+  WORLD_EVENTS,
+  WORLD_EVENT_CHANCE,
+  WORLD_EVENT_HOURS,
 } from './data.js';
 
 // Fórmulas puras. Reciben el estado de la partida (o partes) y no lo modifican.
@@ -137,8 +141,53 @@ export function researchBonus(state, res) {
   return 0.1 * lvl(state, RESOURCE_RESEARCH[res]);
 }
 
+/** Lo que da una colonia (o una isla libre si la colonizaras) por hora. */
 export function colonyYield(island) {
-  return island.yield * universe.speed;
+  return island.yield * universe.speed * (1 + COLONY.yieldPerLevel * ((island.level ?? 1) - 1));
+}
+
+/** Coste y duración (segundos) de ampliar una colonia de `level` a `level + 1`. */
+export function colonyUpgrade(level) {
+  return {
+    cost: Object.fromEntries(Object.entries(multiplyCost(COLONY.upgradeCost, COLONY.costFactor ** (level - 1))).map(([r, n]) => [r, Math.round(n / 10) * 10])),
+    seconds: Math.max(1, Math.round((COLONY.upgradeMinutes * 60 * COLONY.timeFactor ** (level - 1)) / universe.speed)),
+  };
+}
+
+// ── Eventos del archipiélago ─────────────────────────────────────────────────
+
+/** Duración de cada tramo del calendario, en milisegundos (un número entero). */
+export function worldEventSpan() {
+  return Math.max(60_000, Math.round((WORLD_EVENT_HOURS * HOUR_MS) / universe.speed));
+}
+
+/** El evento que hay en el instante `t` (o `id: null` si es un tramo tranquilo), con su principio y su final. */
+export function worldEventAt(t) {
+  const span = worldEventSpan();
+  const idx = Math.floor(t / span);
+  const r = hash01(universe.eventSeed, idx);
+  const keys = Object.keys(WORLD_EVENTS);
+  const id = r < WORLD_EVENT_CHANCE ? keys[Math.floor((r / WORLD_EVENT_CHANCE) * keys.length)] : null;
+  return { id, event: id ? WORLD_EVENTS[id] : null, start: idx * span, end: (idx + 1) * span };
+}
+
+/** Los `n` tramos siguientes al de `t` (para el calendario). */
+export function upcomingWorldEvents(t, n = 4) {
+  const out = [];
+  let cur = worldEventAt(t);
+  for (let i = 0; i < n; i++) {
+    cur = worldEventAt(cur.end);
+    out.push(cur);
+  }
+  return out;
+}
+
+function hash01(seed, n) {
+  let h = (Math.imul(seed ^ 0x9e3779b9, 0x85ebca6b) + Math.imul(n, 0xc2b2ae35)) >>> 0;
+  h = Math.imul(h ^ (h >>> 16), 0x7feb352d);
+  h = Math.imul(h ^ (h >>> 15), 0x846ca68b);
+  h ^= h >>> 16;
+  return (h >>> 0) / 4294967296;
 }
 
 /** Todas las unidades que mantienes: en casa y en misiones. */
@@ -184,15 +233,18 @@ export function economy(state, t = state.lastUpdate) {
     if (b.produces) buildings[b.produces] += producerOutput(id, state.buildings[id] ?? 0);
   }
   for (const col of state.colonies ?? []) colonies[col.specialty] += colonyYield(col);
+  const event = worldEventAt(t).event;
+  const eventBonus = {};
   for (const res of RESOURCE_KEYS) {
     research[res] = (base[res] + buildings[res]) * researchBonus(state, res);
-    gross[res] = (base[res] + buildings[res] + research[res] + colonies[res]) * bonus;
+    eventBonus[res] = event?.prod?.[res] ?? 0;
+    gross[res] = (base[res] + buildings[res] + research[res] + colonies[res]) * bonus * (1 + eventBonus[res]);
   }
   const upkeep = upkeepPerHour(state);
   const net = { ...gross, comida: gross.comida - upkeep };
   const hungry = {};
   for (const res of RESOURCE_KEYS) hungry[res] = res === 'comida' ? net.comida : net[res] * 0.5;
-  return { base, buildings, research, colonies, bonus, gross, upkeep, net, hungry };
+  return { base, buildings, research, colonies, bonus, eventBonus, gross, upkeep, net, hungry };
 }
 
 /** Lo que el almacén esconde de cada recurso y los piratas no pueden robar. */
@@ -202,8 +254,8 @@ export function protectedAmount(state) {
 
 // ── Templo ───────────────────────────────────────────────────────────────────
 
-export function favorRate(state) {
-  return 6 * lvl(state, 'templo') * universe.speed;
+export function favorRate(state, t = state.lastUpdate) {
+  return 6 * lvl(state, 'templo') * universe.speed * (worldEventAt(t).event?.favor ?? 1);
 }
 
 export function favorMax(state) {
@@ -227,8 +279,9 @@ export function storageCapacity(state) {
 }
 
 /** Cuánto recibes por cada unidad de `from` al cambiarla por `to` en el mercado. */
-export function tradeRate(state, from, to) {
-  const efficiency = Math.min(0.92, 0.5 + 0.04 * lvl(state, 'mercado') + 0.04 * lvl(state, 'comercio'));
+export function tradeRate(state, from, to, t = state.lastUpdate) {
+  const fair = worldEventAt(t).event?.trade ?? 0;
+  const efficiency = Math.min(0.92 + fair, 0.5 + 0.04 * lvl(state, 'mercado') + 0.04 * lvl(state, 'comercio') + fair);
   return (RESOURCES[from].value / RESOURCES[to].value) * efficiency;
 }
 

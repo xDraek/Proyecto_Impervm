@@ -62,6 +62,7 @@ async function loadStats() {
       : '<p class="muted small">Todavía no hay nadie. ¡Sé el primero en fundar una ciudad!</p>';
     el.innerHTML = `
       <div class="stat-row"><div><b>${fmtNum(s.players)}</b><span>capitanes</span></div><div><b>${fmtNum(s.online)}</b><span>en línea</span></div></div>
+      ${s.event ? `<div class="landing-event">${s.event.icon} <b>${escapeHtml(s.event.name)}</b><div class="small">${escapeHtml(s.event.text)}</div></div>` : ''}
       <h4>Los imperios más grandes</h4>${top}`;
   } catch {
     el.innerHTML = '<p class="muted small">No se puede conectar con el servidor ahora mismo.</p>';

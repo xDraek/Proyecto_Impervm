@@ -2,6 +2,7 @@ import { clock, universe } from '../src/config.js';
 import { RESOURCES } from '../src/game/data.js';
 import { count } from '../src/game/combat.js';
 import { Game, newState } from '../src/game/Game.js';
+import { worldEventAt } from '../src/game/rules.js';
 import { freshIslandState, generateSector, homeIsland } from '../src/game/world.js';
 import { hashPassword, newSecret, verifyPassword } from './auth.js';
 
@@ -47,6 +48,9 @@ export class WorldServer {
     this.meta = { sectors: 0, seed: Math.floor(Math.random() * 1e9), ...data.meta };
     if (!this.meta.secret) this.meta.secret = process.env.AUTH_SECRET || newSecret();
     this.secret = process.env.AUTH_SECRET || this.meta.secret;
+    // Semilla del calendario de eventos (aparte de la del mapa: el navegador la conoce)
+    this.meta.eventSeed ??= Math.floor(Math.random() * 2 ** 31);
+    universe.eventSeed = this.meta.eventSeed;
     for (const isl of data.islands) this.islands.set(isl.id, isl);
     for (const [id, st] of Object.entries(data.islandStates)) this.islandStates.set(id, st);
     for (const isl of this.islands.values()) {
@@ -331,6 +335,12 @@ export class WorldServer {
   tick() {
     const now = clock.now();
     for (const game of this.games.values()) game.update(now);
+    // Cuando empieza una temporada del archipiélago, se anuncia una sola vez
+    const ev = worldEventAt(now);
+    if (this.meta.eventAnnounced !== ev.start) {
+      this.meta.eventAnnounced = ev.start;
+      if (ev.event) this.announce(`${ev.event.icon} Comienza ${ev.event.name}: ${ev.event.text}`);
+    }
     // Las ofertas del mercado caducan y devuelven lo apartado
     const limit = Date.now() - OFFER_DAYS * 86_400_000;
     if (this.meta.offers.some((o) => o.t < limit)) {
@@ -383,6 +393,7 @@ export class WorldServer {
     return {
       serverTime: now,
       speed: universe.speed,
+      eventSeed: universe.eventSeed,
       userId,
       username: user.username,
       alliance: a ? { id: a.id, tag: a.tag, name: a.name } : null,
@@ -451,7 +462,9 @@ export class WorldServer {
   stats() {
     const now = Date.now();
     const online = [...this.users.values()].filter((u) => now - u.lastSeen < ONLINE_MS).length;
-    return { players: this.users.size, online, top: this.ranking(null).top.slice(0, 5) };
+    const ev = worldEventAt(clock.now());
+    const event = ev.event ? { icon: ev.event.icon, name: ev.event.name, text: ev.event.text, end: ev.end } : null;
+    return { players: this.users.size, online, top: this.ranking(null).top.slice(0, 5), event };
   }
 
   addChat(userId, text, channel = 'global') {

@@ -3,6 +3,7 @@ import {
   ACHIEVEMENTS,
   BUILDINGS,
   BUILDING_KEYS,
+  COLONY,
   DAILY_REWARDS,
   DIPLOMACY,
   HERO,
@@ -28,6 +29,7 @@ import {
   buildingMax,
   canAfford,
   colonyCost,
+  colonyUpgrade,
   costFor,
   economy,
   favorMax,
@@ -43,6 +45,7 @@ import {
   researchSeconds,
   scoreOf,
   storageCapacity,
+  worldEventAt,
   sum,
   tradeRate,
   travelSeconds,
@@ -238,7 +241,7 @@ export class Game extends EventTarget {
   }
 
   favorRate() {
-    return favorRate(this.state);
+    return favorRate(this.state, this.now());
   }
 
   favorMax() {
@@ -490,7 +493,38 @@ export class Game extends EventTarget {
   }
 
   tradeRate(from, to) {
-    return tradeRate(this.state, from, to);
+    return tradeRate(this.state, from, to, this.now());
+  }
+
+  /** El evento del archipiélago que hay ahora (o null). */
+  worldEvent(now = this.now()) {
+    return worldEventAt(now);
+  }
+
+  colony(id) {
+    return this.state.colonies.find((c) => c.id === id) ?? null;
+  }
+
+  /** Ampliar una colonia: cuesta recursos y tarda un rato; solo una a la vez. */
+  upgradeColony(id, now = this.now()) {
+    this.#advance(now);
+    const col = this.colony(id);
+    if (!col) return this.#fail('Esa isla no es tu colonia.');
+    const level = col.level ?? 1;
+    if (level >= COLONY.maxLevel) return this.#fail('La colonia ya está al máximo.');
+    if (this.state.colonies.some((c) => c.upgradeEnd)) return this.#fail('Ya estás ampliando una colonia.');
+    const { cost, seconds } = colonyUpgrade(level);
+    if (!canAfford(this.state.resources, cost)) return this.#fail('No tienes recursos suficientes.');
+    this.#pay(cost);
+    col.upgradeEnd = now + seconds * 1000;
+    this.#note(`🚩 Los colonos de ${col.name} empiezan a ampliar la colonia`, 'success');
+    return this.#done();
+  }
+
+  #finishColony(col) {
+    col.level = (col.level ?? 1) + 1;
+    delete col.upgradeEnd;
+    this.#note(`🚩 ${col.name} sube a nivel ${col.level}`, 'success');
   }
 
   /** Vista de una isla en el instante `t`: datos fijos, estado compartido y lo que sabes de ella. */
@@ -526,6 +560,7 @@ export class Game extends EventTarget {
     const colonizedBy = rt?.colonizedBy ?? null;
     Object.assign(view, {
       colonized: colonizedBy != null && colonizedBy === this.userId,
+      colony: colonizedBy != null && colonizedBy === this.userId ? this.colony(id) : null,
       colonizedBy,
       colonistName: colonizedBy != null ? (this.world.playerInfo(colonizedBy)?.name ?? '¿?') : null,
       looted: !!rt?.looted,
@@ -1092,6 +1127,9 @@ export class Game extends EventTarget {
     else if (s.nextRaidAt && !s.vacation) consider(s.nextRaidAt, (t) => this.#spawnRaid(t));
     if (s.visitor) consider(s.visitor.expires, (t) => this.#visitorLeaves(t));
     else if (s.nextVisitAt && !s.vacation) consider(s.nextVisitAt, (t) => this.#spawnVisitor(t));
+    for (const col of s.colonies) if (col.upgradeEnd) consider(col.upgradeEnd, () => this.#finishColony(col));
+    // Cambia la temporada del archipiélago: cambia la producción
+    consider(worldEventAt(s.lastUpdate).end, () => {});
     // El final de un efecto divino también es un suceso: cambia la producción
     for (const [id, until] of Object.entries(s.buffs)) consider(until, () => delete s.buffs[id]);
     return best;
@@ -1103,7 +1141,7 @@ export class Game extends EventTarget {
     const h = Math.max(0, t - start) / HOUR_MS;
     s.lastUpdate = Math.max(start, t);
     if (h === 0 || s.vacation) return; // de vacaciones la isla ni produce ni gasta
-    s.favor = Math.min(Math.max(s.favor, favorMax(s)), s.favor + favorRate(s) * h);
+    s.favor = Math.min(Math.max(s.favor, favorMax(s)), s.favor + favorRate(s, start) * h);
     const eco = economy(s, start);
     const cap = storageCapacity(s);
     // Si el mantenimiento se come la comida, a partir de ese momento hay hambruna

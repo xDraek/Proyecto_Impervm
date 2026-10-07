@@ -1,7 +1,7 @@
 import { play } from '../audio.js';
 import { clock, universe } from '../config.js';
 import { BUILDINGS, BUILDING_KEYS, ISLAND_TYPES, MISSION_TYPES, PLAYER_UNITS, POWERS, RESEARCH, RESOURCES, RESOURCE_KEYS, UNITS, VISITORS } from '../game/data.js';
-import { HOUR_MS, canAfford, multiplyCost } from '../game/rules.js';
+import { HOUR_MS, canAfford, multiplyCost, upcomingWorldEvents } from '../game/rules.js';
 import { api } from '../net/api.js';
 import { buildingPanel } from './buildingPanel.js';
 import { bag, costItems, escapeHtml, fmtNum, fmtTime, unitList } from './format.js';
@@ -80,6 +80,8 @@ export class Hud {
     $('#rank-btn').addEventListener('click', () => this.openModal('ranking'));
     $('#map-btn').addEventListener('click', () => this.worldMap.open());
     this.favorEl.addEventListener('click', () => this.onSelect('templo'));
+    this.eventEl = $('#event-pill');
+    this.eventEl.addEventListener('click', () => this.openEvents());
     this.modal.addEventListener('click', async (e) => {
       if (e.target === this.modal || e.target.closest('[data-action="close-modal"]')) return this.closeModal();
       const claim = e.target.closest('[data-action="claim"]');
@@ -284,6 +286,7 @@ export class Hud {
   update() {
     this.#updateResources();
     this.#updateFavor();
+    this.#updateEvent();
     this.#refreshLive(this.panel);
     this.#refreshLive(this.dock);
     this.#refreshLive(this.alert);
@@ -369,10 +372,44 @@ export class Hud {
       ];
       if (eco.research[key]) lines.push(`Investigación: +${fmtNum(eco.research[key])}/h`);
       if (eco.colonies[key]) lines.push(`Colonias: +${fmtNum(eco.colonies[key])}/h`);
+      if (eco.eventBonus?.[key]) lines.push(`Evento del archipiélago: +${Math.round(eco.eventBonus[key] * 100)} %`);
       if (key === 'comida' && eco.upkeep) lines.push(`Tropas: −${fmtNum(eco.upkeep)}/h`);
       if (starving) lines.push('Hambruna: la producción cae a la mitad');
       els.root.title = lines.join('\n');
     }
+  }
+
+  /** La temporada del archipiélago, con lo que le queda. */
+  #updateEvent() {
+    const ev = this.game.worldEvent();
+    const left = fmtTime(Math.max(0, (ev.end - this.game.now()) / 1000));
+    const text = ev.event ? `${ev.event.icon} ${left}` : `🌤️ ${left}`;
+    if (this.eventEl.textContent !== text) this.eventEl.textContent = text;
+    this.eventEl.classList.toggle('active', !!ev.event);
+    const title = ev.event ? `${ev.event.name}: ${ev.event.text}\nTermina en ${left}. Clic para ver el calendario.` : `Mares tranquilos. La próxima temporada puede empezar en ${left}.\nClic para ver el calendario.`;
+    if (this.eventEl.title !== title) this.eventEl.title = title;
+  }
+
+  openEvents() {
+    const now = this.game.now();
+    const cur = this.game.worldEvent(now);
+    const when = (t) => new Date(t).toLocaleString('es-ES', { weekday: 'short', hour: '2-digit', minute: '2-digit' });
+    const row = (ev, current) => `<div class="event-row ${current ? 'current' : ''} ${ev.event ? '' : 'calm'}">
+        <span class="event-icon">${ev.event ? ev.event.icon : '🌤️'}</span>
+        <div><b>${ev.event ? ev.event.name : 'Mares tranquilos'}</b><div class="small muted">${ev.event ? ev.event.text : 'Sin temporada especial.'}</div></div>
+        <span class="small">${current ? `quedan ${fmtTime((ev.end - now) / 1000)}` : when(ev.start)}</span>
+      </div>`;
+    const next = upcomingWorldEvents(now, 4);
+    this.showModal(
+      'events',
+      `<div class="modal-card narrow">
+        <div class="panel-head"><span class="panel-icon">📅</span><div><h3>Calendario del archipiélago</h3><div class="panel-lvl">Temporadas para todos los jugadores a la vez</div></div>
+        <button class="icon-btn" data-action="close-modal" title="Cerrar">✕</button></div>
+        <h4>Ahora</h4>${row(cur, true)}
+        <h4>Próximamente</h4>${next.map((ev) => row(ev, false)).join('')}
+        <p class="muted small">Aprovecha la Fiebre del oro para guardar oro, el Festival de Poseidón para acumular favor o la Gran feria para cambiar en el mercado.</p>
+      </div>`,
+    );
   }
 
   #updateFavor() {
@@ -425,6 +462,7 @@ export class Hud {
           let icon = v.explored ? t.icon : '❔';
           if (v.colonized) icon = '🚩';
           let tag = v.inbound.length ? '⛵' : v.explored && v.tier && !v.colonized ? `Nv ${v.tier}` : '';
+          if (v.colonized && !v.inbound.length) tag = `${v.colony?.upgradeEnd ? '🔨 ' : ''}Nv ${v.colony?.level ?? 1}`;
           if (v.type === 'jugador') tag = `${fmtNum(v.score)}`;
           const cls = [v.id === this.selected && 'active', !v.explored && 'empty', v.type === 'jugador' && 'player'].filter(Boolean).join(' ');
           const name = v.type === 'jugador' ? `${v.name} · ${v.ownerName}` : v.name;
@@ -534,6 +572,9 @@ export class Hud {
         break;
       case 'upgrade':
         await this.#run(btn, () => game.upgrade(this.selected));
+        break;
+      case 'colony-upgrade':
+        await this.#run(btn, () => game.upgradeColony(this.selected), '🔨 Los colonos se ponen manos a la obra');
         break;
       case 'research': {
         const r = RESEARCH[btn.dataset.id];

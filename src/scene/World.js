@@ -811,7 +811,7 @@ export class World {
       if (view.type === 'jugador') {
         const tag = view.alliance ? `[${view.alliance.tag}] ` : '';
         status = `🏰 ${tag}${view.ownerName} · ${view.score} pts${view.protected ? ' · 🛡️' : ''}${view.vacation ? ' · 🏖️' : view.inactive ? ' · 💤' : ''}${view.relation === 'guerra' ? ' · ⚔️' : view.relation === 'pacto' ? ' · 🕊️' : ''}`;
-      } else if (view.colonized) status = '🚩 Tu colonia';
+      } else if (view.colonized) status = `🚩 Tu colonia · Nv ${view.colony?.level ?? 1}${view.colony?.upgradeEnd ? ' 🔨' : ''}`;
       else if (view.colonizedBy != null) status = `🚩 Colonia de ${view.colonistName}`;
       else if (view.explored && view.tier) status += ` · Nv ${view.tier}`;
       if (view.inbound.length) status += ' · ⛵';

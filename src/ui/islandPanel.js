@@ -1,5 +1,5 @@
-import { ISLAND_TYPES, MISSION_TYPES, PLAYER_UNITS, RESOURCES, RESOURCE_KEYS, UNITS } from '../game/data.js';
-import { colonyYield } from '../game/rules.js';
+import { COLONY, ISLAND_TYPES, MISSION_TYPES, PLAYER_UNITS, RESOURCES, RESOURCE_KEYS, UNITS } from '../game/data.js';
+import { colonyUpgrade, colonyYield } from '../game/rules.js';
 import { NEWBIE_POINTS } from '../game/Game.js';
 import { bag, costList, escapeHtml, fmtAgo, fmtNum, fmtTime, unitList } from './format.js';
 
@@ -39,6 +39,31 @@ function playerSection(game, view) {
     </div>`;
 }
 
+function colonySection(game, view) {
+  const r = RESOURCES[view.specialty];
+  const col = view.colony ?? {};
+  const level = col.level ?? 1;
+  const yieldAt = (n) => colonyYield({ ...view, level: n });
+  let upgrade;
+  if (col.upgradeEnd) {
+    upgrade = `<p class="hint">🔨 Los colonos amplían la colonia al nivel ${level + 1}: terminan en <span data-until="${col.upgradeEnd}"></span>.</p>`;
+  } else if (level >= COLONY.maxLevel) {
+    upgrade = '<p class="hint ok">🚩 La colonia ya no puede crecer más.</p>';
+  } else {
+    const { cost, seconds } = colonyUpgrade(level);
+    const busy = game.colonies().some((c) => c.upgradeEnd);
+    upgrade = `<h4>Ampliar a nivel ${level + 1}</h4>
+      <div class="effect"><span>${r.icon} Producción</span><b class="up">+${fmtNum(yieldAt(level))} → +${fmtNum(yieldAt(level + 1))}/h</b></div>
+      ${costList(cost, game.resources)}
+      <button class="primary" data-action="colony-upgrade" data-need='${JSON.stringify(cost)}' data-blocked="${busy ? 1 : 0}">🔨 Ampliar · ${fmtTime(seconds)}</button>
+      ${busy ? '<p class="muted small">Ya estás ampliando otra colonia: solo hay colonos para una obra a la vez.</p>' : ''}`;
+  }
+  return `<p class="desc">Tus colonos trabajan la isla y mandan sus cosechas a la capital.</p>
+    <div class="info-row"><span>🚩 Nivel</span><b>${level} / ${COLONY.maxLevel}</b></div>
+    <div class="effect"><span>${r.icon} Producción de la colonia</span><b class="up">+${fmtNum(yieldAt(level))}/h</b></div>
+    ${upgrade}`;
+}
+
 function infoSection(game, view) {
   const t = ISLAND_TYPES[view.type];
   if (view.type === 'jugador') return playerSection(game, view);
@@ -46,11 +71,7 @@ function infoSection(game, view) {
     const r = RESOURCES[view.specialty];
     return `<p class="desc">Colonia de <b>${escapeHtml(view.colonistName)}</b>. Produce ${r.icon} ${r.name.toLowerCase()} para su imperio.</p>`;
   }
-  if (view.colonized) {
-    const r = RESOURCES[view.specialty];
-    return `<p class="desc">Tus colonos trabajan la isla y mandan sus cosechas a la capital.</p>
-      <div class="effect"><span>${r.icon} Producción de la colonia</span><b class="up">+${fmtNum(colonyYield(view))}/h</b></div>`;
-  }
+  if (view.colonized) return colonySection(game, view);
   if (view.type === 'brumas') {
     return `<p class="desc">Más allá de las islas conocidas, una niebla que nunca se levanta. Las expediciones vuelven con tesoros, barcos perdidos… o no vuelven.</p>
       <p class="desc small">Hace falta Navegación 2. Cuantos más barcos y más bodega lleves, más botín puedes traer, pero también hay piratas y monstruos.</p>`;
@@ -215,7 +236,7 @@ export function islandPanel(hud, id) {
   const view = game.island(id);
   const t = ISLAND_TYPES[view.type];
   let icon = view.colonized || view.colonizedBy != null ? '🚩' : view.explored ? t.icon : '❔';
-  let sub = view.colonized ? 'Tu colonia' : view.explored ? `${t.name}${view.tier ? ` · Nv ${view.tier}` : ''}` : 'Isla desconocida';
+  let sub = view.colonized ? `Tu colonia · nivel ${view.colony?.level ?? 1}` : view.explored ? `${t.name}${view.tier ? ` · Nv ${view.tier}` : ''}` : 'Isla desconocida';
   if (view.type === 'jugador') {
     icon = '🏰';
     sub = `Ciudad de ${escapeHtml(view.ownerName)}`;

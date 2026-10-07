@@ -459,6 +459,16 @@ export const ISLAND_TYPES = {
 /** Recursos que viajan en el mercante para fundar una colonia (se multiplican por colonia). */
 export const COLONY_COST = { madera: 1500, piedra: 1000, comida: 800, oro: 300 };
 
+/** Ampliar una colonia: cada nivel produce un 60 % más de lo que daba al fundarla. */
+export const COLONY = {
+  maxLevel: 10,
+  yieldPerLevel: 0.6,
+  upgradeCost: { madera: 700, piedra: 550, comida: 300, oro: 180 },
+  costFactor: 1.6,
+  upgradeMinutes: 20,
+  timeFactor: 1.45,
+};
+
 export const MISSION_TYPES = {
   explorar: { name: 'Explorar', icon: '🔭' },
   atacar: { name: 'Atacar', icon: '⚔️' },
@@ -612,6 +622,25 @@ export const HERO_SKILLS = {
 
 export const DIPLOMACY = {
   warLoot: 0.2,
+};
+
+// ── Eventos del archipiélago ────────────────────────────────────────────────
+// Cada `WORLD_EVENT_HOURS` horas puede empezar una temporada para todos los
+// jugadores. El calendario sale de una semilla, así que el servidor y el
+// navegador saben siempre cuál toca sin decirse nada.
+
+export const WORLD_EVENT_HOURS = 6;
+export const WORLD_EVENT_CHANCE = 0.7;
+
+export const WORLD_EVENTS = {
+  oro: { name: 'Fiebre del oro', icon: '💰', text: '+40 % de oro en todas las islas.', prod: { oro: 0.4 } },
+  cosecha: { name: 'Año de buenas cosechas', icon: '🌾', text: '+40 % de comida en todas las islas.', prod: { comida: 0.4 } },
+  tala: { name: 'Temporada de tala', icon: '🪵', text: '+35 % de madera en todas las islas.', prod: { madera: 0.35 } },
+  vetas: { name: 'Vetas nuevas', icon: '⛏️', text: '+30 % de piedra y de hierro.', prod: { piedra: 0.3, hierro: 0.3 } },
+  estrellas: { name: 'Lluvia de estrellas', icon: '💎', text: '+40 % de cristal en todas las islas.', prod: { cristal: 0.4 } },
+  festival: { name: 'Festival de Poseidón', icon: '🔱', text: 'Los templos dan el doble de favor.', favor: 2 },
+  feria: { name: 'Gran feria del archipiélago', icon: '⚖️', text: 'El mercado cambia un 15 % mejor.', trade: 0.15 },
+  bonanza: { name: 'Vientos de bonanza', icon: '⛵', text: '+15 % de todos los recursos.', prod: { madera: 0.15, piedra: 0.15, comida: 0.15, hierro: 0.15, cristal: 0.15, oro: 0.15 } },
 };
 
 // ── Modo vacaciones ─────────────────────────────────────────────────────────

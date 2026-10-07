@@ -24,6 +24,7 @@ export class ClientGame extends Game {
   applySnapshot(snap, { first = false } = {}) {
     clock.offset = snap.serverTime - Date.now();
     universe.speed = snap.speed ?? universe.speed;
+    universe.eventSeed = snap.eventSeed ?? universe.eventSeed;
     this.username = snap.username;
     this.alliance = snap.alliance ?? null;
     this.admin = !!snap.admin;
@@ -145,6 +146,10 @@ export class ClientGame extends Game {
 
   heroSkill(skill) {
     return this.#act('heroSkill', skill);
+  }
+
+  upgradeColony(id) {
+    return this.#act('upgradeColony', id);
   }
 
   startVacation() {
