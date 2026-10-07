@@ -1,41 +1,70 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { CSS2DObject, CSS2DRenderer } from 'three/addons/renderers/CSS2DRenderer.js';
-import { BUILDINGS, BUILDING_KEYS } from '../game/data.js';
-import { C, box, createBuilding, createScaffold, cyl, disposeTree, mat } from './models.js';
+import { BUILDINGS, BUILDING_KEYS, ISLANDS, ISLAND_TYPES, LAND_UNITS, SHIP_UNITS } from '../game/data.js';
+import { C, box, createBuilding, createScaffold, createShip, createSoldier, cyl, disposeTree, mat, wallHeight } from './models.js';
+import { createIslandBase, createIslandFeature, islandLook, islandRadius } from './islands.js';
+import { mountainGeometry, paintByNormal, plateauGeometry, polar, rng } from './util.js';
 
 const SKY_TOP = '#4a9be0';
 const HORIZON = '#cfe8f7';
 const WATER_Y = -0.7;
-const RING_RADIUS = 7.6;
+const ISLAND_R = 19;
+const BEACH_Y = -0.5;
+const ROAD_R = 10.4;
+const WALL_R = 11.7;
+const GATE_ANGLE = 15;
+const HARBOR_R = 30; // radio por el que las flotas rodean la isla al salir
+const RAID_FROM = 260;
 
-// Disposición de la isla: el ayuntamiento en el centro, el resto en anillo.
-// Ángulo 0 = hacia la cámara (+Z).
-const SLOT_ANGLES = { mercado: 0, almacen: 72, aserradero: 144, cantera: 216, mina: 288 };
+// Disposición de la isla. Ángulo 0 = hacia +Z (la cámara mira desde unos 36°).
+const LAYOUT = {
+  ayuntamiento: { r: 0, angle: 0 },
+  academia: { r: 7.8, angle: 60 },
+  almacen: { r: 7.8, angle: 150 },
+  cuartel: { r: 7.8, angle: 240 },
+  mercado: { r: 7.8, angle: 330 },
+  granja: { r: 15, angle: 72 },
+  aserradero: { r: 15, angle: 125 },
+  cantera: { r: 15, angle: 178 },
+  mina: { r: 15, angle: 236 },
+  fundicion: { r: 15, angle: 292 },
+  muralla: { r: WALL_R, angle: GATE_ANGLE, hit: 1.8, ring: 0.7 },
+  puerto: { r: 20.4, angle: GATE_ANGLE, y: BEACH_Y, hit: 3.2, hitZ: -2.6 },
+};
+const INNER = ['academia', 'almacen', 'cuartel', 'mercado'];
+const OUTER = ['granja', 'aserradero', 'cantera', 'mina', 'fundicion'];
 const MOUNTAINS = [
-  { angle: 252, r: 10.6, radius: 3.2, height: 5.8 },
-  { angle: 232, r: 11.9, radius: 2.0, height: 3.6 },
-  { angle: 272, r: 12.0, radius: 1.8, height: 3.0 },
+  { angle: 207, r: 18.6, radius: 3.4, height: 6.2 },
+  { angle: 190, r: 20.2, radius: 2.2, height: 3.8 },
+  { angle: 224, r: 20.4, radius: 2.0, height: 3.2 },
 ];
+const VIEWS = {
+  isla: { offset: new THREE.Vector3(26, 27, 36), min: 14, max: 90 },
+  mapa: { offset: new THREE.Vector3(0, 420, 250), min: 60, max: 900 },
+};
+const SHIP_PRIORITY = ['galeon', 'trirreme', 'mercante', 'bote'];
 
-function polar(r, deg) {
-  const a = THREE.MathUtils.degToRad(deg);
-  return new THREE.Vector3(r * Math.sin(a), 0, r * Math.cos(a));
-}
+/** Polilínea recorrible por longitud de arco (u en [0, 1]). */
+class Route {
+  constructor(points) {
+    this.points = points;
+    this.lengths = [0];
+    for (let i = 1; i < points.length; i++) this.lengths.push(this.lengths[i - 1] + points[i].distanceTo(points[i - 1]));
+    this.total = this.lengths.at(-1) || 1;
+  }
 
-function rng(seed) {
-  return () => {
-    seed |= 0;
-    seed = (seed + 0x6d2b79f5) | 0;
-    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
-
-function hash(x, y, z) {
-  const s = Math.sin(x * 12.9898 + y * 78.233 + z * 37.719) * 43758.5453;
-  return s - Math.floor(s);
+  at(u, out = new THREE.Vector3(), dir = new THREE.Vector3()) {
+    const d = THREE.MathUtils.clamp(u, 0, 1) * this.total;
+    let i = 1;
+    while (i < this.points.length - 1 && this.lengths[i] < d) i++;
+    const a = this.points[i - 1];
+    const b = this.points[i];
+    const seg = this.lengths[i] - this.lengths[i - 1] || 1;
+    out.lerpVectors(a, b, (d - this.lengths[i - 1]) / seg);
+    dir.subVectors(b, a).normalize();
+    return out;
+  }
 }
 
 export class World {
@@ -49,15 +78,20 @@ export class World {
     this.game = game;
     this.onSelect = onSelect;
     this.slots = {};
+    this.islands = {};
+    this.fleets = new Map();
     this.selected = null;
     this.hovered = null;
     this.animated = [];
     this.clouds = [];
+    this.view = 'isla';
+    this.waterTime = { value: 0 };
 
     this.#setupRenderer();
     this.#setupScene();
     this.#buildIsland();
     this.#buildSlots();
+    this.#buildArchipelago();
     this.#buildClouds();
     this.#setupInput();
     this.sync();
@@ -65,22 +99,42 @@ export class World {
     game.addEventListener('change', () => this.sync());
   }
 
-  get slotIds() {
-    return BUILDING_KEYS;
-  }
-
-  slotPosition(id) {
-    return this.slots[id].pos.clone();
+  /** Centro de un edificio o isla en el mundo. */
+  centerOf(id) {
+    if (this.slots[id]) return this.slots[id].center.clone();
+    if (this.islands[id]) return this.islands[id].pos.clone();
+    return new THREE.Vector3();
   }
 
   select(id) {
     this.selected = id;
     this.selectRing.visible = !!id;
-    if (id) {
-      const p = this.slots[id].pos;
-      this.selectRing.position.set(p.x, 0.16, p.z);
-      this.focusTarget = p.clone();
-    }
+    if (!id) return;
+    const { center, radius } = this.#ringFor(id);
+    this.selectRing.position.copy(center);
+    this.selectRing.scale.setScalar(radius);
+    this.focusTarget = this.islands[id] ? new THREE.Vector3(center.x, 0, center.z) : center.clone().setY(0);
+  }
+
+  setView(view) {
+    if (view === this.view) return;
+    this.view = view;
+    const v = VIEWS[view];
+    const target = new THREE.Vector3();
+    const offset = v.offset.clone();
+    if (this.camera.aspect < 1) offset.multiplyScalar(1 / this.camera.aspect ** 0.6);
+    this.focusTarget = null;
+    this.camTween = {
+      t: 0,
+      fromPos: this.camera.position.clone(),
+      fromTarget: this.controls.target.clone(),
+      toPos: target.clone().add(offset),
+      toTarget: target,
+    };
+    this.controls.minDistance = Math.min(this.controls.minDistance, v.min);
+    this.controls.maxDistance = Math.max(this.controls.maxDistance, v.max);
+    for (const slot of Object.values(this.slots)) slot.label.visible = view === 'isla';
+    for (const isl of Object.values(this.islands)) isl.label.visible = view === 'mapa';
   }
 
   // ── Montaje ────────────────────────────────────────────────────────────────
@@ -97,14 +151,14 @@ export class World {
     Object.assign(this.labelRenderer.domElement.style, { position: 'absolute', inset: '0', pointerEvents: 'none' });
     this.container.appendChild(this.labelRenderer.domElement);
 
-    this.camera = new THREE.PerspectiveCamera(42, 1, 0.5, 600);
-    this.camera.position.set(20, 21, 27);
+    this.camera = new THREE.PerspectiveCamera(42, 1, 0.5, 3000);
+    this.camera.position.copy(VIEWS.isla.offset);
 
     const controls = new OrbitControls(this.camera, r.domElement);
     controls.enableDamping = true;
     controls.enablePan = false;
-    controls.minDistance = 12;
-    controls.maxDistance = 60;
+    controls.minDistance = VIEWS.isla.min;
+    controls.maxDistance = VIEWS.isla.max;
     controls.maxPolarAngle = 1.32;
     controls.target.set(0, 0, 0);
     this.controls = controls;
@@ -122,7 +176,7 @@ export class World {
 
     // En pantallas verticales, alejar la cámara para que quepa la isla
     if (this.camera.aspect < 1) {
-      controls.maxDistance = 90;
+      controls.maxDistance = 130;
       this.camera.position.multiplyScalar(1 / this.camera.aspect ** 0.75);
     }
   }
@@ -143,33 +197,38 @@ export class World {
     const sky = new THREE.CanvasTexture(canvas);
     sky.colorSpace = THREE.SRGBColorSpace;
     scene.background = sky;
-    scene.fog = new THREE.Fog(HORIZON, 70, 210);
+    scene.fog = new THREE.Fog(HORIZON, 80, 260);
 
     scene.add(new THREE.HemisphereLight('#dff1ff', '#5a7a3a', 1.3));
     const sun = new THREE.DirectionalLight('#fff3dc', 2.6);
-    sun.position.set(22, 38, 18);
+    sun.position.set(26, 44, 20);
     sun.castShadow = true;
     sun.shadow.mapSize.set(2048, 2048);
-    Object.assign(sun.shadow.camera, { left: -20, right: 20, top: 20, bottom: -20, near: 1, far: 100 });
+    Object.assign(sun.shadow.camera, { left: -28, right: 28, top: 28, bottom: -28, near: 1, far: 120 });
     sun.shadow.bias = -0.0005;
     sun.shadow.normalBias = 0.03;
     scene.add(sun);
 
-    // Mar con oleaje low-poly (los vértices se mueven en CPU)
-    const waterGeo = new THREE.PlaneGeometry(320, 320, 90, 90);
+    // Mar con oleaje low-poly: los vértices se desplazan en la GPU
+    const waterGeo = new THREE.PlaneGeometry(1800, 1800, 330, 330);
     waterGeo.rotateX(-Math.PI / 2);
-    this.waterBase = Float32Array.from(waterGeo.attributes.position.array);
-    this.water = new THREE.Mesh(
-      waterGeo,
-      new THREE.MeshStandardMaterial({
-        color: '#2f8fc4',
-        flatShading: true,
-        roughness: 0.35,
-        metalness: 0.05,
-        transparent: true,
-        opacity: 0.92,
-      }),
-    );
+    const waterMat = new THREE.MeshStandardMaterial({
+      color: '#2f8fc4',
+      flatShading: true,
+      roughness: 0.35,
+      metalness: 0.05,
+      transparent: true,
+      opacity: 0.92,
+    });
+    waterMat.onBeforeCompile = (shader) => {
+      shader.uniforms.uTime = this.waterTime;
+      shader.vertexShader = `uniform float uTime;\n${shader.vertexShader}`.replace(
+        '#include <begin_vertex>',
+        `#include <begin_vertex>
+        transformed.y += sin(position.x * 0.18 + uTime * 1.1) * 0.16 + cos(position.z * 0.23 + uTime * 0.8) * 0.14;`,
+      );
+    };
+    this.water = new THREE.Mesh(waterGeo, waterMat);
     this.water.position.y = WATER_Y;
     this.water.receiveShadow = true;
     scene.add(this.water);
@@ -179,81 +238,87 @@ export class World {
     const scene = this.scene;
 
     // Meseta de hierba con acantilados
-    const geo = new THREE.CylinderGeometry(13, 11.5, 2.2, 36, 2).toNonIndexed();
-    geo.translate(0, -1.1, 0);
-    const pos = geo.attributes.position;
-    for (let i = 0; i < pos.count; i++) {
-      const x = pos.getX(i);
-      const y = pos.getY(i);
-      const z = pos.getZ(i);
-      const r = Math.hypot(x, z);
-      if (r < 1e-3) continue;
-      const k = 1 + (hash(Math.round(x * 10), Math.round(y * 10), Math.round(z * 10)) - 0.5) * (y > -0.01 ? 0.08 : 0.16);
-      pos.setXYZ(i, x * k, y, z * k);
-    }
-    this.#paintByNormal(geo, (ny, cy) => (ny > 0.7 ? '#6fae4a' : cy > -0.8 ? '#8a6a46' : '#7c7466'));
+    const geo = plateauGeometry(ISLAND_R, ISLAND_R - 1.6, 2.2, 48, 0, 0);
+    paintByNormal(geo, (ny, cy) => (ny > 0.7 ? '#6fae4a' : cy > -0.8 ? '#8a6a46' : '#7c7466'));
     const island = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 1 }));
     island.receiveShadow = true;
     island.castShadow = true;
     scene.add(island);
 
-    // Playa
-    const sand = new THREE.Mesh(new THREE.CylinderGeometry(15.4, 17, 1.6, 40), mat('#e8d49a'));
-    sand.position.y = -0.5 - 0.8;
+    const sand = new THREE.Mesh(new THREE.CylinderGeometry(ISLAND_R + 2.5, ISLAND_R + 4.2, 1.6, 48), mat('#e8d49a'));
+    sand.position.y = BEACH_Y - 0.8;
     sand.receiveShadow = true;
     scene.add(sand);
 
-    // Plaza central y caminos hacia cada parcela
+    // Plaza, calles radiales, ronda interior y avenida hasta el puerto
     const plaza = cyl(3.4, 3.4, 0.04, 28, '#cbbfa8');
     plaza.castShadow = false;
     scene.add(plaza);
-    for (const deg of Object.values(SLOT_ANGLES)) {
-      const mid = polar((3.2 + RING_RADIUS - 2.2) / 2, deg);
-      const path = box(1.0, 0.03, RING_RADIUS - 2.2 - 3.2 + 0.4, '#c9b48a', mid.x, 0, mid.z);
+    this.roads = [];
+    const road = (deg, from, to, width = 1.0) => {
+      const mid = polar((from + to) / 2, deg);
+      const path = box(width, 0.03, to - from, '#c9b48a', mid.x, 0, mid.z);
       path.rotation.y = THREE.MathUtils.degToRad(deg);
       path.castShadow = false;
       scene.add(path);
-    }
+      this.roads.push({ deg, from, to, width });
+    };
+    for (const id of INNER) road(LAYOUT[id].angle, 3.2, LAYOUT[id].r - 2.2);
+    for (const id of OUTER) road(LAYOUT[id].angle, ROAD_R, LAYOUT[id].r - 2.2);
+    road(GATE_ANGLE, 3.2, ISLAND_R - 0.9, 1.3);
+    const ringGeo = new THREE.RingGeometry(ROAD_R - 0.45, ROAD_R + 0.45, 72);
+    ringGeo.rotateX(-Math.PI / 2);
+    const ring = new THREE.Mesh(ringGeo, mat('#c9b48a'));
+    ring.position.y = 0.025;
+    ring.receiveShadow = true;
+    scene.add(ring);
+    // Rampa de la avenida hasta la playa
+    const rampLen = 2.6;
+    const rampMid = polar(ISLAND_R - 0.9 + rampLen / 2 - 0.1, GATE_ANGLE, -0.22);
+    const ramp = box(1.3, 0.08, rampLen, '#c9b48a', 0, 0, 0);
+    ramp.position.copy(rampMid);
+    ramp.rotation.set(Math.atan2(0.5, rampLen), THREE.MathUtils.degToRad(GATE_ANGLE), 0, 'YXZ');
+    scene.add(ramp);
 
-    // Montañas detrás de la cantera
+    // Montañas detrás de la cantera y la mina
     for (const m of MOUNTAINS) {
-      const mg = new THREE.ConeGeometry(m.radius, m.height, 7, 3);
-      const mp = mg.attributes.position;
-      const half = m.height / 2;
-      for (let i = 0; i < mp.count; i++) {
-        const y = mp.getY(i);
-        if (y <= -half + 1e-3 || y >= half - 1e-3) continue;
-        const x = mp.getX(i);
-        const z = mp.getZ(i);
-        const hx = Math.round(x * 10);
-        const hy = Math.round(y * 10);
-        const hz = Math.round(z * 10);
-        const k = 1 + (hash(hx, hy, m.angle) - 0.5) * 0.35;
-        mp.setXYZ(i, x * k, y + (hash(hx, hy, hz) - 0.5) * 0.3, z * k);
-      }
-      const geoM = mg.toNonIndexed();
-      geoM.translate(0, half - 0.05, 0);
-      this.#paintByNormal(geoM, (ny, cy) => (cy > m.height * 0.72 ? '#f4f6f8' : ny > 0.75 ? '#7d9a52' : '#8c8780'));
-      const mountain = new THREE.Mesh(geoM, new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 1 }));
+      const mountain = new THREE.Mesh(
+        mountainGeometry(m.radius, m.height, m.angle, { snow: '#f4f6f8', grass: '#7d9a52', rock: '#8c8780' }),
+        new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 1 }),
+      );
       mountain.position.copy(polar(m.r, m.angle));
       mountain.castShadow = mountain.receiveShadow = true;
       scene.add(mountain);
     }
 
-    // Bosque y rocas, evitando parcelas, montañas y la plaza
+    // Bosque (más denso junto al aserradero) y rocas, sin pisar nada
     const rand = rng(7);
     const blockers = [
       { p: new THREE.Vector3(), r: 4.2 },
-      ...Object.values(SLOT_ANGLES).map((deg) => ({ p: polar(RING_RADIUS, deg), r: 3.6 })),
+      ...Object.entries(LAYOUT)
+        .filter(([id]) => id !== 'ayuntamiento')
+        .map(([, l]) => ({ p: polar(l.r, l.angle), r: 3.5 })),
       ...MOUNTAINS.map((m) => ({ p: polar(m.r, m.angle), r: m.radius + 0.6 })),
     ];
-    const free = (p) => blockers.every((b) => b.p.distanceTo(p) > b.r);
+    const free = (p) => {
+      const r = Math.hypot(p.x, p.z);
+      if (r > ISLAND_R - 1.3) return false;
+      if (r > ROAD_R - 1.0 && r < WALL_R + 0.9) return false;
+      for (const rd of this.roads) {
+        const a = THREE.MathUtils.degToRad(rd.deg);
+        const along = p.x * Math.sin(a) + p.z * Math.cos(a);
+        const across = Math.abs(p.x * Math.cos(a) - p.z * Math.sin(a));
+        if (along > rd.from - 0.5 && along < rd.to + 0.5 && across < rd.width / 2 + 0.7) return false;
+      }
+      return blockers.every((b) => b.p.distanceTo(p) > b.r);
+    };
     const trunkGeo = new THREE.CylinderGeometry(0.1, 0.15, 0.6, 6);
     const leafGeo = new THREE.ConeGeometry(0.75, 1.5, 7);
     const leafColors = ['#3f8a3a', '#4f9a3a', '#2f7a43'];
+    const forest = polar(16.5, LAYOUT.aserradero.angle);
     let trees = 0;
-    for (let tries = 0; tries < 400 && trees < 40; tries++) {
-      const p = polar(3.5 + rand() * 8.8, rand() * 360);
+    for (let tries = 0; tries < 1200 && trees < 95; tries++) {
+      const p = tries % 3 === 0 ? forest.clone().add(polar(rand() * 6, rand() * 360)) : polar(3.5 + rand() * 15, rand() * 360);
       if (!free(p)) continue;
       blockers.push({ p, r: 0.9 });
       const t = new THREE.Group();
@@ -273,8 +338,8 @@ export class World {
       trees++;
     }
     const rockGeo = new THREE.DodecahedronGeometry(0.4);
-    for (let i = 0, placed = 0; i < 200 && placed < 14; i++) {
-      const p = polar(4 + rand() * 9, rand() * 360);
+    for (let i = 0, placed = 0; i < 400 && placed < 20; i++) {
+      const p = polar(4 + rand() * 14, rand() * 360);
       if (!free(p)) continue;
       const rock = new THREE.Mesh(rockGeo, mat(C.stone));
       rock.position.set(p.x, 0.1, p.z);
@@ -283,26 +348,9 @@ export class World {
       scene.add(rock);
       placed++;
     }
-  }
 
-  #paintByNormal(geo, pick) {
-    geo.computeVertexNormals();
-    const pos = geo.attributes.position;
-    const colors = new Float32Array(pos.count * 3);
-    const a = new THREE.Vector3();
-    const b = new THREE.Vector3();
-    const c = new THREE.Vector3();
-    const n = new THREE.Vector3();
-    const col = new THREE.Color();
-    for (let i = 0; i < pos.count; i += 3) {
-      a.fromBufferAttribute(pos, i);
-      b.fromBufferAttribute(pos, i + 1);
-      c.fromBufferAttribute(pos, i + 2);
-      n.subVectors(c, b).cross(a.clone().sub(b)).normalize();
-      col.set(pick(n.y, (a.y + b.y + c.y) / 3));
-      for (let k = 0; k < 3; k++) col.toArray(colors, (i + k) * 3);
-    }
-    geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+    this.wallGroup = new THREE.Group();
+    scene.add(this.wallGroup);
   }
 
   #buildSlots() {
@@ -310,25 +358,28 @@ export class World {
     this.hitTargets = [];
 
     for (const id of BUILDING_KEYS) {
-      const pos = id === 'ayuntamiento' ? new THREE.Vector3() : polar(RING_RADIUS, SLOT_ANGLES[id]);
+      const l = LAYOUT[id];
+      const pos = polar(l.r, l.angle, l.y ?? 0);
       const root = new THREE.Group();
       root.position.copy(pos);
       // Que los edificios miren hacia la plaza
       if (id !== 'ayuntamiento') root.rotation.y = Math.atan2(-pos.x, -pos.z);
-      else root.rotation.y = 0;
       this.scene.add(root);
 
-      if (id !== 'ayuntamiento') {
+      if (id !== 'ayuntamiento' && id !== 'puerto' && id !== 'muralla') {
         const plot = cyl(2.3, 2.4, 0.12, 28, C.dirt);
         plot.castShadow = false;
         root.add(plot);
       }
 
-      const hit = new THREE.Mesh(new THREE.CylinderGeometry(2.6, 2.6, 5, 12), hitMat);
-      hit.position.y = 2.5;
+      const hitR = l.hit ?? 2.6;
+      const hit = new THREE.Mesh(new THREE.CylinderGeometry(hitR, hitR, 5, 12), hitMat);
+      hit.position.set(0, 2.5, l.hitZ ?? 0);
       hit.userData.slot = id;
       root.add(hit);
       this.hitTargets.push(hit);
+      root.updateMatrixWorld(true);
+      const center = hit.getWorldPosition(new THREE.Vector3()).setY(pos.y);
 
       const el = document.createElement('div');
       el.className = 'label';
@@ -336,7 +387,7 @@ export class World {
       const label = new CSS2DObject(el);
       this.scene.add(label);
 
-      this.slots[id] = { id, pos, root, label, el, key: null, building: null, scaffold: null, pop: 1 };
+      this.slots[id] = { id, pos, center, root, label, el, key: null, building: null, scaffold: null, extras: null, extrasKey: null, pop: 1, ring: l.ring ?? 1 };
     }
 
     const ringGeo = new THREE.RingGeometry(2.55, 2.85, 48);
@@ -349,11 +400,49 @@ export class World {
     this.scene.add(this.hoverRing);
   }
 
+  #buildArchipelago() {
+    const hitMat = new THREE.MeshBasicMaterial({ colorWrite: false, depthWrite: false });
+    for (const isl of ISLANDS) {
+      const pos = polar(isl.dist, isl.angle);
+      const radius = islandRadius(isl);
+      const group = new THREE.Group();
+      group.position.copy(pos);
+      group.add(createIslandBase(isl));
+      this.scene.add(group);
+
+      const hit = new THREE.Mesh(new THREE.CylinderGeometry(radius + 2, radius + 2, 10, 16), hitMat);
+      hit.position.y = 3;
+      hit.userData.slot = isl.id;
+      group.add(hit);
+      this.hitTargets.push(hit);
+
+      const el = document.createElement('div');
+      el.className = 'label isl';
+      el.innerHTML = `<span class="label-name">${isl.name}</span><span class="label-lvl"></span>`;
+      const label = new CSS2DObject(el);
+      // Debajo de la isla en pantalla, para no taparla
+      label.position.set(pos.x, 0, pos.z + radius * 1.35 + 3);
+      label.visible = false;
+      this.scene.add(label);
+
+      this.islands[isl.id] = { isl, pos, radius, group, feature: null, look: null, label, el };
+    }
+
+    // Etiqueta de tu isla en el mapa
+    const el = document.createElement('div');
+    el.className = 'label isl home';
+    el.innerHTML = '<span class="label-name">⚜ Tu isla</span>';
+    this.homeLabel = new CSS2DObject(el);
+    this.homeLabel.position.set(0, 0, ISLAND_R + 9);
+    this.homeLabel.visible = false;
+    this.scene.add(this.homeLabel);
+  }
+
   #buildClouds() {
     const rand = rng(42);
     const geo = new THREE.IcosahedronGeometry(1, 0);
     const material = new THREE.MeshStandardMaterial({ color: '#ffffff', flatShading: true, roughness: 1, transparent: true, opacity: 0.95 });
-    for (let i = 0; i < 9; i++) {
+    for (let i = 0; i < 22; i++) {
       const cloud = new THREE.Group();
       const puffs = 3 + Math.floor(rand() * 3);
       for (let k = 0; k < puffs; k++) {
@@ -362,8 +451,11 @@ export class World {
         puff.scale.setScalar(1 + rand() * 0.9);
         cloud.add(puff);
       }
-      cloud.position.set((rand() - 0.5) * 140, 16 + rand() * 10, (rand() - 0.5) * 100);
+      const near = i < 8;
+      cloud.position.set((rand() - 0.5) * (near ? 140 : 560), 18 + rand() * 12, (rand() - 0.5) * (near ? 100 : 500));
+      if (!near) cloud.scale.setScalar(2 + rand() * 1.5);
       cloud.userData.speed = 0.8 + rand() * 1.2;
+      cloud.userData.span = near ? 80 : 300;
       this.scene.add(cloud);
       this.clouds.push(cloud);
     }
@@ -400,9 +492,28 @@ export class World {
     });
   }
 
+  #ringFor(id) {
+    if (this.islands[id]) {
+      const isl = this.islands[id];
+      return { center: new THREE.Vector3(isl.pos.x, -0.25, isl.pos.z), radius: (isl.radius * 1.45) / 2.7 };
+    }
+    const slot = this.slots[id];
+    return { center: slot.center.clone().setY(slot.center.y + 0.16), radius: slot.ring };
+  }
+
   // ── Sincronización con la partida ──────────────────────────────────────────
 
   sync() {
+    this.#syncBuildings();
+    this.#syncWall();
+    this.#syncExtras();
+    this.#syncIslands();
+    this.#syncFleets();
+    this.#syncRaid();
+    this.#collectAnimated();
+  }
+
+  #syncBuildings() {
     const q = this.game.queue;
     for (const id of BUILDING_KEYS) {
       const slot = this.slots[id];
@@ -413,54 +524,258 @@ export class World {
       const leveledUp = slot.key !== null && Number(slot.key.split('|')[0]) < level;
       slot.key = key;
 
-      if (slot.building) {
-        slot.root.remove(slot.building);
-        disposeTree(slot.building);
+      for (const part of ['building', 'scaffold']) {
+        if (slot[part]) {
+          slot.root.remove(slot[part]);
+          disposeTree(slot[part]);
+          slot[part] = null;
+        }
       }
-      if (slot.scaffold) {
-        slot.root.remove(slot.scaffold);
-        disposeTree(slot.scaffold);
-        slot.scaffold = null;
-      }
+      slot.extras = null;
+      slot.extrasKey = null;
 
       slot.building = createBuilding(id, level);
-      slot.building.position.y = id === 'ayuntamiento' ? 0.04 : 0.12;
+      slot.building.position.y = id === 'ayuntamiento' ? 0.04 : id === 'puerto' || id === 'muralla' ? 0 : 0.12;
       slot.baseScale = slot.building.scale.x;
       slot.root.add(slot.building);
-      const height = new THREE.Box3().setFromObject(slot.building).max.y;
+      slot.root.updateMatrixWorld(true);
+      const top = new THREE.Box3().setFromObject(slot.building).max.y;
 
       if (building) {
-        slot.scaffold = createScaffold(level > 0 ? height - 0.2 : 2.2);
-        slot.scaffold.position.y = 0.12;
+        slot.scaffold = createScaffold(level > 0 ? top - slot.pos.y - 0.2 : 2.2);
+        slot.scaffold.position.y = slot.building.position.y;
+        if (id === 'puerto') slot.scaffold.position.z = 0.6;
         slot.root.add(slot.scaffold);
       }
       if (leveledUp) slot.pop = 0;
 
-      slot.label.position.set(slot.pos.x, Math.max(height, building ? 2.6 : 0) + 0.9, slot.pos.z);
-      slot.el.querySelector('.label-lvl').textContent = level > 0 ? `Nv ${level}` : 'Parcela libre';
+      slot.label.position.set(slot.center.x, Math.max(top, slot.pos.y + (building ? 2.6 : 0)) + 0.9, slot.center.z);
+      slot.el.querySelector('.label-lvl').textContent = level > 0 ? `Nv ${level}` : id === 'puerto' || id === 'muralla' ? 'Sin construir' : 'Parcela libre';
       slot.el.classList.toggle('building', building);
       slot.el.classList.toggle('empty', level === 0);
-
-      this.#collectAnimated();
     }
+  }
+
+  #syncWall() {
+    const level = this.game.level('muralla');
+    if (this.wallLevel === level) return;
+    this.wallLevel = level;
+    for (const child of [...this.wallGroup.children]) {
+      this.wallGroup.remove(child);
+      disposeTree(child);
+    }
+    if (level <= 0) return;
+    const h = wallHeight(level);
+    const gaps = [{ a: GATE_ANGLE, w: 9 }, ...OUTER.map((id) => ({ a: LAYOUT[id].angle, w: 4.5 }))];
+    const blocked = (a) => gaps.some((g) => Math.abs(((a - g.a + 540) % 360) - 180) < g.w);
+    const step = 4;
+    const len = 2 * WALL_R * Math.sin(THREE.MathUtils.degToRad(step / 2)) + 0.06;
+    for (let a = 0; a < 360; a += step) {
+      if (blocked(a)) continue;
+      const seg = box(len, h, 0.55, C.stone, 0, 0, 0);
+      seg.position.copy(polar(WALL_R, a, h / 2));
+      seg.rotation.y = THREE.MathUtils.degToRad(a);
+      this.wallGroup.add(seg);
+      if (level >= 2 && (a / step) % 2 === 0) {
+        const merlon = box(0.4, 0.3, 0.6, C.stone, 0, 0, 0);
+        merlon.position.copy(polar(WALL_R, a, h + 0.15));
+        merlon.rotation.y = seg.rotation.y;
+        this.wallGroup.add(merlon);
+      }
+    }
+    if (level >= 3) {
+      for (let a = 45; a < 360; a += 45) {
+        if (blocked(a)) continue;
+        const tower = cyl(0.8, 0.9, h + 1.1, 8, C.stone);
+        tower.position.add(polar(WALL_R, a));
+        const roof = new THREE.Mesh(new THREE.ConeGeometry(1.0, 1.0, 8), mat(C.roofBlue));
+        roof.position.copy(polar(WALL_R, a, h + 1.6));
+        roof.castShadow = true;
+        this.wallGroup.add(tower, roof);
+      }
+    }
+  }
+
+  /** Tropas en el patio del cuartel y barcos amarrados en el puerto. */
+  #syncExtras() {
+    const units = this.game.units;
+    const fill = (slot, ids, spotsKey, make) => {
+      if (!slot.building) return;
+      const counts = ids.map((id) => units[id] ?? 0);
+      const key = counts.join(',');
+      if (slot.extrasKey === key && slot.extras) return;
+      slot.extrasKey = key;
+      if (slot.extras) {
+        slot.building.remove(slot.extras);
+        disposeTree(slot.extras);
+      }
+      slot.extras = new THREE.Group();
+      slot.building.add(slot.extras);
+      const spots = slot.building.userData[spotsKey] ?? [];
+      const total = counts.reduce((a, b) => a + b, 0);
+      if (!total || !spots.length) return;
+      // Reparto proporcional de los huecos, con al menos uno por tipo presente
+      const list = [];
+      ids.forEach((id, i) => {
+        if (!counts[i]) return;
+        const k = Math.max(1, Math.round((counts[i] / total) * spots.length));
+        for (let j = 0; j < k; j++) list.push(id);
+      });
+      list.slice(0, spots.length).forEach((id, i) => make(slot.extras, id, spots[i], i));
+    };
+
+    fill(this.slots.cuartel, LAND_UNITS, 'yard', (g, id, spot, i) => {
+      const s = createSoldier(id);
+      s.position.set(spot.x, 0.03, spot.z);
+      s.rotation.y = Math.PI + (i % 3 - 1) * 0.15;
+      s.scale.setScalar(1.1);
+      g.add(s);
+    });
+    fill(this.slots.puerto, SHIP_UNITS, 'docks', (g, id, spot) => {
+      const s = createShip(id);
+      s.position.set(spot.x, WATER_Y - BEACH_Y, spot.z);
+      s.rotation.y = Math.PI;
+      s.userData.bob = { amp: 0.06, speed: 1.3 + spot.z * 0.1, base: WATER_Y - BEACH_Y };
+      g.add(s);
+    });
+  }
+
+  #syncIslands() {
+    for (const [id, entry] of Object.entries(this.islands)) {
+      const view = this.game.island(id);
+      const look = islandLook(view);
+      if (entry.look !== look) {
+        entry.look = look;
+        if (entry.feature) {
+          entry.group.remove(entry.feature);
+          disposeTree(entry.feature);
+        }
+        entry.feature = createIslandFeature(entry.isl, look);
+        entry.group.add(entry.feature);
+      }
+      const t = ISLAND_TYPES[entry.isl.type];
+      let status = !view.explored ? '❔ Inexplorada' : `${t.icon} ${t.name}`;
+      if (view.colonized) status = '🚩 Tu colonia';
+      if (view.explored && view.tier && !view.colonized) status += ` · Nv ${view.tier}`;
+      if (view.inbound.length) status += ' · ⛵';
+      entry.el.querySelector('.label-lvl').textContent = status;
+      entry.el.classList.toggle('colony', view.colonized);
+      entry.el.classList.toggle('unknown', !view.explored);
+    }
+  }
+
+  #routeTo(target) {
+    const entry = this.islands[target];
+    const a0 = GATE_ANGLE;
+    const a1 = entry.isl.angle;
+    let delta = ((a1 - a0 + 540) % 360) - 180;
+    const points = [polar(26, a0), polar(HARBOR_R, a0)];
+    const steps = Math.ceil(Math.abs(delta) / 15);
+    for (let i = 1; i <= steps; i++) points.push(polar(HARBOR_R, a0 + (delta * i) / steps));
+    points.push(polar(entry.isl.dist - entry.radius * 1.35 - 2, a1));
+    return new Route(points);
+  }
+
+  #syncFleets() {
+    const missions = this.game.missions;
+    const alive = new Set(missions.map((m) => m.id));
+    for (const [id, f] of this.fleets) {
+      if (alive.has(id)) continue;
+      for (const o of [f.group, f.line]) {
+        this.scene.remove(o);
+        disposeTree(o);
+      }
+      this.fleets.delete(id);
+    }
+    for (const m of missions) {
+      if (this.fleets.has(m.id)) continue;
+      const route = this.#routeTo(m.target);
+      const type = SHIP_PRIORITY.find((s) => m.units[s]) ?? 'mercante';
+      const group = new THREE.Group();
+      const ship = createShip(type);
+      group.add(ship);
+      const ships = Object.entries(m.units).filter(([u]) => SHIP_UNITS.includes(u)).reduce((a, [, n]) => a + n, 0);
+      if (ships > 1) {
+        const escort = createShip(type === 'bote' ? 'bote' : 'mercante');
+        escort.position.set(1.6, 0, -1.8);
+        group.add(escort);
+      }
+      group.scale.setScalar(2.6);
+      this.scene.add(group);
+      const lineGeo = new THREE.BufferGeometry().setFromPoints(route.points.map((p) => p.clone().setY(0.3)));
+      const line = new THREE.Line(lineGeo, new THREE.LineDashedMaterial({ color: m.type === 'atacar' ? '#ff9a8a' : '#ffffff', dashSize: 3, gapSize: 2.5, transparent: true, opacity: 0.7 }));
+      line.computeLineDistances();
+      this.scene.add(line);
+      this.fleets.set(m.id, { group, line, route });
+    }
+  }
+
+  #syncRaid() {
+    const raid = this.game.raid;
+    const key = raid ? raid.spawn : null;
+    if (this.raidKey === key) return;
+    this.raidKey = key;
+    if (this.raidGroup) {
+      this.scene.remove(this.raidGroup, this.raidLine);
+      disposeTree(this.raidGroup);
+      disposeTree(this.raidLine);
+      this.raidGroup = null;
+    }
+    if (!raid) return;
+    // Siempre por el lado que ve la cámara al empezar, para que se vean llegar
+    const angle = -50 + ((raid.spawn / 997) % 140);
+    this.raidRoute = new Route([polar(RAID_FROM, angle), polar(ISLAND_R + 9, angle)]);
+    this.raidGroup = new THREE.Group();
+    const ships = Math.min(4, 1 + (raid.army.corsario ?? 0) + Math.floor((raid.army.pirata ?? 0) / 15));
+    for (let i = 0; i < ships; i++) {
+      const s = createShip('corsario');
+      s.position.set((i % 2 ? 1 : -1) * Math.ceil(i / 2) * 2.2, 0, -Math.ceil(i / 2) * 2.4);
+      this.raidGroup.add(s);
+    }
+    this.raidGroup.scale.setScalar(2.6);
+    this.scene.add(this.raidGroup);
+    const lineGeo = new THREE.BufferGeometry().setFromPoints(this.raidRoute.points.map((p) => p.clone().setY(0.3)));
+    this.raidLine = new THREE.Line(lineGeo, new THREE.LineDashedMaterial({ color: '#ff5a4a', dashSize: 4, gapSize: 3, transparent: true, opacity: 0.8 }));
+    this.raidLine.computeLineDistances();
+    this.scene.add(this.raidLine);
   }
 
   #collectAnimated() {
     this.animated = [];
+    const collect = (root) =>
+      root?.traverse((o) => {
+        const d = o.userData;
+        if (d.spin || d.swing || d.wave || d.smoke || d.flicker || d.bob || d.wiggle) this.animated.push(o);
+      });
     for (const slot of Object.values(this.slots)) {
-      for (const part of [slot.building, slot.scaffold]) {
-        part?.traverse((o) => {
-          if (o.userData.spin || o.userData.swing || o.userData.wave) this.animated.push(o);
-        });
-      }
+      collect(slot.building);
+      collect(slot.scaffold);
     }
+    for (const isl of Object.values(this.islands)) collect(isl.feature);
+    for (const f of this.fleets.values()) collect(f.group);
+    collect(this.raidGroup);
   }
 
   // ── Bucle ─────────────────────────────────────────────────────────────────
 
   update(dt, t) {
-    // Encuadrar el edificio seleccionado moviendo cámara y objetivo a la vez
-    if (this.focusTarget) {
+    const now = Date.now();
+
+    // Cambio de vista: interpolar cámara y objetivo
+    if (this.camTween) {
+      const tw = this.camTween;
+      tw.t = Math.min(1, tw.t + dt * 1.1);
+      const k = tw.t * tw.t * (3 - 2 * tw.t);
+      this.camera.position.lerpVectors(tw.fromPos, tw.toPos, k);
+      this.controls.target.lerpVectors(tw.fromTarget, tw.toTarget, k);
+      if (tw.t >= 1) {
+        this.camTween = null;
+        const v = VIEWS[this.view];
+        this.controls.minDistance = v.min;
+        this.controls.maxDistance = this.camera.aspect < 1 ? v.max * 1.4 : v.max;
+      }
+    } else if (this.focusTarget) {
+      // Encuadrar lo seleccionado moviendo cámara y objetivo a la vez
       const target = this.controls.target;
       const step = this.focusTarget.clone().sub(target).multiplyScalar(1 - Math.exp(-dt * 4));
       target.add(step);
@@ -469,29 +784,77 @@ export class World {
     }
     this.controls.update(dt);
 
-    // Oleaje
-    const pos = this.water.geometry.attributes.position;
-    const base = this.waterBase;
-    for (let i = 0; i < pos.count; i++) {
-      const x = base[i * 3];
-      const z = base[i * 3 + 2];
-      pos.array[i * 3 + 1] = Math.sin(x * 0.18 + t * 1.1) * 0.16 + Math.cos(z * 0.23 + t * 0.8) * 0.14;
-    }
-    pos.needsUpdate = true;
+    // Niebla según lo lejos que esté la cámara
+    const dist = this.camera.position.distanceTo(this.controls.target);
+    this.scene.fog.near = dist * 0.9 + 25;
+    this.scene.fog.far = dist * 2.6 + 160;
+    this.homeLabel.visible = this.view === 'mapa';
+
+    this.waterTime.value = t;
 
     for (const cloud of this.clouds) {
       cloud.position.x += cloud.userData.speed * dt;
-      if (cloud.position.x > 80) cloud.position.x = -80;
+      if (cloud.position.x > cloud.userData.span) cloud.position.x = -cloud.userData.span;
     }
 
     for (const o of this.animated) {
-      const { spin, swing, wave } = o.userData;
+      const { spin, swing, wave, smoke, flicker, bob, wiggle } = o.userData;
       if (spin) o.rotation[spin.axis] += spin.speed * dt;
       if (swing) o.rotation.y = Math.sin(t * swing.speed) * swing.amp;
       if (wave) o.rotation.y = Math.sin(t * 3) * 0.3;
+      if (flicker) o.scale.set(1, 1 + Math.sin(t * 13 + o.id) * 0.18, 1);
+      if (bob) {
+        o.position.y = bob.base + Math.sin(t * bob.speed + o.id) * bob.amp;
+        o.rotation.z = Math.sin(t * bob.speed * 0.8 + o.id) * 0.05;
+      }
+      if (wiggle) o.rotation.z = wiggle.base + Math.sin(t * wiggle.speed + wiggle.phase) * wiggle.amp;
+      if (smoke) {
+        o.children.forEach((puff, k) => {
+          const f = (t * 0.35 + smoke.phase + k / o.children.length) % 1;
+          puff.position.set(f * 0.3, f * 1.6, 0);
+          puff.scale.setScalar(0.5 + f * 1.1);
+        });
+      }
     }
 
-    // Progreso de la obra en la etiqueta
+    // Flotas en el mar (más grandes en el mapa para que se distingan)
+    const shipScale = THREE.MathUtils.clamp(dist / 40, 2.6, 7);
+    const pos = new THREE.Vector3();
+    const dir = new THREE.Vector3();
+    for (const m of this.game.missions) {
+      const f = this.fleets.get(m.id);
+      if (!f) continue;
+      let u;
+      let back = false;
+      if (m.phase === 'ida') {
+        u = (now - m.depart) / (m.arrive - m.depart);
+      } else {
+        back = true;
+        const turn = m.recalled ? (m.back + m.depart) / 2 : m.arrive;
+        const u0 = Math.min(1, (turn - m.depart) / (m.arrive - m.depart));
+        u = u0 * THREE.MathUtils.clamp((m.back - now) / (m.back - turn), 0, 1);
+      }
+      f.route.at(u, pos, dir);
+      if (back) dir.negate();
+      f.group.position.set(pos.x, WATER_Y + Math.sin(t * 1.4 + m.id) * 0.12, pos.z);
+      f.group.rotation.y = Math.atan2(dir.x, dir.z);
+      f.group.scale.setScalar(shipScale);
+      f.line.visible = this.view === 'mapa';
+    }
+
+    if (this.raidGroup) {
+      const raid = this.game.raid;
+      if (raid) {
+        const u = (now - raid.spawn) / (raid.arrival - raid.spawn);
+        this.raidRoute.at(u, pos, dir);
+        this.raidGroup.position.set(pos.x, WATER_Y + Math.sin(t * 1.2) * 0.15, pos.z);
+        this.raidGroup.rotation.y = Math.atan2(dir.x, dir.z);
+        this.raidGroup.scale.setScalar(shipScale);
+      }
+      this.raidLine.visible = this.view === 'mapa';
+    }
+
+    // Construcciones: rebote al subir de nivel y barra de progreso
     const q = this.game.queue;
     for (const slot of Object.values(this.slots)) {
       if (slot.pop < 1) {
@@ -499,7 +862,7 @@ export class World {
         slot.building.scale.setScalar(slot.baseScale * (1 + Math.sin(slot.pop * Math.PI) * 0.18));
       }
       if (q?.id === slot.id) {
-        const p = Math.min(1, (Date.now() - q.start) / (q.end - q.start));
+        const p = Math.min(1, (now - q.start) / (q.end - q.start));
         slot.el.querySelector('.label-bar i').style.width = `${(p * 100).toFixed(1)}%`;
       }
     }
@@ -508,11 +871,13 @@ export class World {
     const showHover = this.hovered && this.hovered !== this.selected;
     this.hoverRing.visible = !!showHover;
     if (showHover) {
-      const p = this.slots[this.hovered].pos;
-      this.hoverRing.position.set(p.x, 0.15, p.z);
+      const { center, radius } = this.#ringFor(this.hovered);
+      this.hoverRing.position.copy(center).setY(center.y - 0.01);
+      this.hoverRing.scale.setScalar(radius);
     }
 
     this.renderer.render(this.scene, this.camera);
     this.labelRenderer.render(this.scene, this.camera);
   }
 }
+

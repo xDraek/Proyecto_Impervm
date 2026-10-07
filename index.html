@@ -14,14 +14,17 @@
       <header id="topbar">
         <div class="brand">⚜ Imperium</div>
         <div id="resources"></div>
-        <button id="menu-btn" class="icon-btn" title="Opciones">⚙</button>
+        <div class="top-actions">
+          <button id="view-btn" class="tab-btn" title="Cambiar entre tu isla y el archipiélago">🗺️ <span>Mapa</span></button>
+          <button id="reports-btn" class="icon-btn" title="Informes">📜<span class="badge" hidden></span></button>
+          <button id="menu-btn" class="icon-btn" title="Reiniciar partida">⚙</button>
+        </div>
       </header>
-      <aside id="sidebar">
-        <h2>Edificios</h2>
-        <ul id="building-list"></ul>
-      </aside>
+      <button id="alert" hidden></button>
+      <aside id="sidebar"></aside>
       <section id="panel" hidden></section>
-      <div id="queue" hidden></div>
+      <div id="dock" hidden></div>
+      <div id="modal" hidden></div>
       <div id="toasts"></div>
     </div>
     <script type="module" src="/src/main.js"></script>
