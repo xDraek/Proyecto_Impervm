@@ -12,7 +12,16 @@ import { Hud } from './ui/Hud.js';
 import { showLanding } from './ui/landing.js';
 
 const DAYNIGHT_KEY = 'imperium.daynight';
+const NOTIFY_KEY = 'imperium.notify';
 const scene = document.getElementById('scene');
+
+function notifyOn() {
+  try {
+    return localStorage.getItem(NOTIFY_KEY) === '1' && 'Notification' in window && Notification.permission === 'granted';
+  } catch {
+    return false;
+  }
+}
 
 function readDayNight() {
   try {
@@ -94,6 +103,19 @@ function startGame(game) {
       setMuted(!on);
       if (on) unlockAudio();
     },
+    notify: () => notifyOn(),
+    /** Activa los avisos del navegador (pide permiso). Devuelve si han quedado activos. */
+    setNotify: async (on) => {
+      let ok = on;
+      if (on && 'Notification' in window && Notification.permission !== 'granted') ok = (await Notification.requestPermission()) === 'granted';
+      if (on && !ok) hud.toast('El navegador no deja mostrar avisos. Revisa los permisos del sitio.', 'error');
+      try {
+        localStorage.setItem(NOTIFY_KEY, ok ? '1' : '0');
+      } catch {
+        // sin almacenamiento
+      }
+      return ok;
+    },
     dayNight: () => world.dayNight,
     setDayNight: (on) => {
       world.setDayNight(on);
@@ -129,12 +151,47 @@ function startGame(game) {
   });
   game.addEventListener('notify', (e) => {
     const { text, kind } = e.detail;
+    // Con la pestaña en segundo plano, lo importante también como aviso del navegador
+    const important = kind === 'error' || /⚔️|🏴‍☠️|🛡️|✉️/.test(text);
+    if (document.hidden && important && notifyOn()) {
+      try {
+        new Notification('Imperium', { body: text, tag: 'imperium' });
+      } catch {
+        // algunos navegadores no dejan crear avisos así
+      }
+    }
     if (text.includes('¡Velas piratas') || text.startsWith('⚔️')) play(kind === 'error' ? 'horn' : 'success');
     else if (kind === 'success') play('success');
     else if (kind === 'error') play('error');
   });
   if (universe.speed > 1) hud.toast(`Universo a velocidad ×${universe.speed}`);
   hud.toast(`Bienvenido, ${game.username}.`, 'success');
+
+  // Ataques que se acercan: aviso del navegador una vez por flota
+  const warned = new Set();
+  game.addEventListener('change', () => {
+    for (const m of game.incoming ?? []) {
+      if (warned.has(m.id)) continue;
+      warned.add(m.id);
+      if (document.hidden && notifyOn()) {
+        try {
+          new Notification('Imperium · ¡Te atacan!', { body: `${m.from} viene hacia tu isla con ${m.size} unidades`, tag: `ataque-${m.id}` });
+        } catch {
+          // sin avisos
+        }
+      }
+    }
+  });
+
+  // Jugadores nuevos: bienvenida; luego, el regalo del día si está disponible
+  let welcomed = true;
+  try {
+    welcomed = localStorage.getItem(`imperium.welcome.${game.userId}`) === '1';
+  } catch {
+    // sin almacenamiento
+  }
+  if (!welcomed && game.score() < 50) hud.social.openWelcome();
+  else if (game.dailyStatus().available) hud.social.openDaily();
 
   game.start();
   let last = performance.now();

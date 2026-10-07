@@ -84,15 +84,12 @@ export class Hud {
         this.rankTab = tab.dataset.tab;
         return this.#renderModal();
       }
-      const go = e.target.closest('[data-action="goto"]');
-      if (go && this.modalKind === 'ranking') {
-        this.closeModal();
-        return this.onSelect(go.dataset.island);
-      }
-      if (this.modalKind === 'alliance' || this.modalKind === 'mail') await this.social.onModalClick(e);
+      await this.social.onModalClick(e);
     });
     this.modal.addEventListener('submit', (e) => this.social.onModalSubmit(e));
     $('#alliance-btn').addEventListener('click', () => this.social.openAlliance());
+    this.dailyBtn = $('#daily-btn');
+    this.dailyBtn.addEventListener('click', () => this.social.openDaily());
     this.mailBtn.addEventListener('click', () => this.social.openMailbox('in'));
     this.visitorEl.addEventListener('click', async (e) => {
       const btn = e.target.closest('[data-action]');
@@ -105,6 +102,10 @@ export class Hud {
     this.chatBtn.addEventListener('click', () => this.toggleChat());
     this.chatEl.querySelector('[data-action="close-chat"]').addEventListener('click', () => this.toggleChat(false));
     this.chatEl.querySelector('.chat-form').addEventListener('submit', (e) => this.#sendChat(e));
+    this.chatEl.querySelector('.chat-log').addEventListener('click', (e) => {
+      const name = e.target.closest('[data-profile]')?.dataset.profile;
+      if (name) this.social.openProfile(name);
+    });
     this.chatEl.querySelector('.chat-tabs').addEventListener('click', (e) => {
       const b = e.target.closest('[data-channel]');
       if (b) this.toggleChat(true, b.dataset.channel);
@@ -123,6 +124,7 @@ export class Hud {
       this.menu.hidden = !this.menu.hidden;
       this.menu.querySelector('[name="sound"]').checked = settings.sound();
       this.menu.querySelector('[name="daynight"]').checked = settings.dayNight();
+      this.menu.querySelector('[name="notify"]').checked = settings.notify();
     });
     document.addEventListener('click', (e) => {
       if (!this.menu.hidden && !this.menu.contains(e.target)) this.menu.hidden = true;
@@ -130,6 +132,15 @@ export class Hud {
     this.menu.addEventListener('change', (e) => {
       if (e.target.name === 'sound') settings.setSound(e.target.checked);
       if (e.target.name === 'daynight') settings.setDayNight(e.target.checked);
+      if (e.target.name === 'notify') settings.setNotify(e.target.checked).then((on) => (e.target.checked = on));
+    });
+    this.menu.querySelector('[data-action="password"]').addEventListener('click', () => {
+      this.menu.hidden = true;
+      this.social.openPassword();
+    });
+    this.menu.querySelector('[data-action="profile-me"]').addEventListener('click', () => {
+      this.menu.hidden = true;
+      this.social.openProfile(game.username);
     });
     this.menu.querySelector('[data-action="logout"]').addEventListener('click', () => onLogout());
 
@@ -225,6 +236,7 @@ export class Hud {
     const badge = this.reportsBtn.querySelector('.badge');
     badge.hidden = !unread;
     badge.textContent = unread;
+    this.dailyBtn.hidden = !this.game.dailyStatus().available;
     const mail = this.game.mailUnread ?? 0;
     const mBadge = this.mailBtn.querySelector('.badge');
     mBadge.hidden = !mail;
@@ -549,6 +561,20 @@ export class Hud {
       case 'mail-to':
         this.social.compose(btn.dataset.name);
         break;
+      case 'profile':
+        this.social.openProfile(btn.dataset.name);
+        break;
+      case 'simulate': {
+        const view = game.island(this.selected);
+        const attacker = readFleet(root);
+        if (!Object.keys(attacker).length) for (const id of PLAYER_UNITS) if (UNITS[id].atk > 0 && game.units[id] > 0) attacker[id] = game.units[id];
+        const defender = view?.type === 'jugador' ? (view.intel?.garrison ?? {}) : (view?.garrison ?? {});
+        const { atkMul, hpMul } = game.combatBonus();
+        const wall = view?.type === 'jugador' ? 0.1 * (view.intel?.wall ?? 0) : (view?.wall ?? 0);
+        const towers = view?.type === 'jugador' ? 10 * (view.intel?.wall ?? 0) : 0;
+        this.social.openSimulator({ attacker, defender, atkMul, hpMul, wall, towers, title: `Contra ${view?.name ?? 'la isla'}` });
+        break;
+      }
       case 'offer-post':
       case 'offer-accept':
       case 'offer-cancel':
@@ -601,6 +627,12 @@ export class Hud {
     }
     for (const m of game.missions) {
       const t = MISSION_TYPES[m.type];
+      if (m.phase === 'estacionada') {
+        rows.push(`<div class="dock-row" data-select="${m.target}">
+          <div class="q-title"><span>🛡️ Defendiendo ${escapeHtml(m.targetName ?? '')}</span><span class="muted small">${unitList(m.units)}</span></div>
+          <button class="ghost small" data-action="recall" data-mission="${m.id}">Retirar</button></div>`);
+        continue;
+      }
       const going = m.phase === 'ida';
       const start = going ? m.depart : (m.turn ?? (m.recalled ? (m.back + m.depart) / 2 : m.arrive));
       const end = going ? m.arrive : m.back;
@@ -727,7 +759,7 @@ export class Hud {
         const time = new Date(m.t).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
         return m.system
           ? `<div class="msg system"><span>${escapeHtml(m.text)}</span><time>${time}</time></div>`
-          : `<div class="msg${m.name === this.game.username ? ' mine' : ''}"><b>${escapeHtml(m.name)}</b> <span>${escapeHtml(m.text)}</span><time>${time}</time></div>`;
+          : `<div class="msg${m.name === this.game.username ? ' mine' : ''}"><b data-profile="${escapeHtml(m.name)}">${escapeHtml(m.name)}</b> <span>${escapeHtml(m.text)}</span><time>${time}</time></div>`;
       })
       .join('');
     if (scroll || atBottom) log.scrollTop = log.scrollHeight;

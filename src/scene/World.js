@@ -1012,7 +1012,9 @@ export class World {
       if (!f) continue;
       let u;
       let back = false;
-      if (m.phase === 'ida') {
+      if (m.phase === 'estacionada') {
+        u = 1;
+      } else if (m.phase === 'ida') {
         u = (now - m.depart) / (m.arrive - m.depart);
       } else {
         back = true;

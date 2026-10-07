@@ -27,7 +27,10 @@ function playerSection(game, view) {
     : 'La ciudad de otro jugador. Si la atacas y ganas, te llevas lo que quepa en tus barcos (salvo lo que esconde su almacén).';
   return `<p class="desc">${intro}</p>
     ${lines.join('')}${spy}
-    <button class="ghost wide" data-action="mail-to" data-name="${escapeHtml(view.ownerName)}">✉️ Mandar un mensaje a ${escapeHtml(view.ownerName)}</button>`;
+    <div class="modal-actions">
+      <button class="ghost small" data-action="profile" data-name="${escapeHtml(view.ownerName)}">👤 Perfil</button>
+      <button class="ghost small" data-action="mail-to" data-name="${escapeHtml(view.ownerName)}">✉️ Mensaje</button>
+    </div>`;
 }
 
 function infoSection(game, view) {
@@ -108,6 +111,7 @@ function fleetForm(game, view) {
   const hostile = ['barbaros', 'piratas', 'kraken', 'jugador'].includes(view.type);
   if (view.type !== 'brumas' && view.colonizedBy == null && (!view.explored || hostile)) types.push('atacar');
   if (view.type === 'jugador') types.push('transporte');
+  if (view.type === 'jugador' && view.alliance && view.alliance.id === game.alliance?.id) types.push('apoyo');
   if (view.type === 'libre' && view.explored && view.colonizedBy == null) types.push('colonizar');
 
   const buttons = types
@@ -131,6 +135,7 @@ function fleetForm(game, view) {
     ${cargoForm}
     ${colony}
     <div class="mission-buttons">${buttons}</div>
+    ${hostile ? '<button class="ghost wide sim-btn" data-action="simulate">🎲 Simular el combate</button>' : ''}
     <div class="hint warn" data-fleet-reason></div>
   </div>`;
 }

@@ -1888,3 +1888,236 @@ body.landing-mode #chat {
 .payload input {
   width: 100%;
 }
+
+/* ── Perfil, logros, regalo diario, bienvenida y simulador ──────────────── */
+
+.link {
+  padding: 0;
+  border: none;
+  background: none;
+  color: inherit;
+  font-weight: 600;
+  text-decoration: underline dotted rgba(255, 255, 255, 0.35);
+  text-underline-offset: 3px;
+}
+
+.link:hover {
+  color: var(--gold);
+}
+
+.msg b[data-profile] {
+  cursor: pointer;
+}
+
+.icon-btn.gift {
+  animation: wiggle 1.8s ease-in-out infinite;
+}
+
+@keyframes wiggle {
+  0%,
+  80%,
+  100% {
+    transform: rotate(0);
+  }
+  85% {
+    transform: rotate(-12deg);
+  }
+  90% {
+    transform: rotate(12deg);
+  }
+  95% {
+    transform: rotate(-6deg);
+  }
+}
+
+.stat-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+  margin: 14px 0;
+  text-align: center;
+}
+
+.stat-grid b {
+  display: block;
+  font-family: var(--font-title);
+  font-size: 22px;
+  color: var(--gold);
+}
+
+.stat-grid span {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.medals {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 6px;
+}
+
+.medals li {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  column-gap: 8px;
+  align-items: center;
+  padding: 7px 9px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.03);
+  opacity: 0.4;
+  filter: grayscale(1);
+}
+
+.medals li.got {
+  opacity: 1;
+  filter: none;
+  background: rgba(242, 201, 76, 0.1);
+  border: 1px solid var(--panel-border);
+}
+
+.medals span {
+  grid-row: span 2;
+  font-size: 22px;
+}
+
+.medals b {
+  font-size: 13px;
+}
+
+.medals small {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.daily {
+  list-style: none;
+  margin: 14px 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+  gap: 6px;
+}
+
+.daily li {
+  display: grid;
+  gap: 4px;
+  padding: 10px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  font-size: 12px;
+}
+
+.daily li.done {
+  opacity: 0.45;
+}
+
+.daily li.today {
+  border-color: var(--gold);
+  background: rgba(242, 201, 76, 0.14);
+}
+
+.welcome {
+  list-style: none;
+  margin: 14px 0;
+  padding: 0;
+  display: grid;
+  gap: 12px;
+}
+
+.welcome li {
+  display: flex;
+  gap: 12px;
+  line-height: 1.45;
+  color: var(--muted);
+}
+
+.welcome li span {
+  font-size: 24px;
+}
+
+.welcome b {
+  color: var(--text);
+}
+
+.modal-card.wide {
+  width: min(820px, 100%);
+}
+
+.sim {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.sim fieldset {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+}
+
+.sim legend {
+  padding: 0 6px;
+  font-family: var(--font-title);
+  color: var(--gold);
+}
+
+.sim label {
+  display: grid;
+  grid-template-columns: 1fr 80px;
+  gap: 6px;
+  align-items: center;
+  font-size: 13px;
+}
+
+.sim > .primary {
+  grid-column: 1 / -1;
+}
+
+.sim-odds {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  margin: 14px 0 6px;
+  text-align: center;
+}
+
+.sim-odds b {
+  display: block;
+  font-family: var(--font-title);
+  font-size: 26px;
+}
+
+.sim-odds span {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.sim-odds .win b {
+  color: var(--ok);
+}
+
+.sim-odds .lose b {
+  color: var(--bad);
+}
+
+.sim-btn {
+  margin-top: 8px;
+}
+
+@media (max-width: 800px) {
+  .sim {
+    grid-template-columns: 1fr;
+  }
+
+  .stat-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}

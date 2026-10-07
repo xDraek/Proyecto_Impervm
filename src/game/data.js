@@ -465,6 +465,7 @@ export const MISSION_TYPES = {
   colonizar: { name: 'Colonizar', icon: '🚩' },
   expedicion: { name: 'Expedición', icon: '🧭' },
   transporte: { name: 'Transporte', icon: '📦' },
+  apoyo: { name: 'Apoyo', icon: '🛡️' },
 };
 
 // ── Templo ───────────────────────────────────────────────────────────────────
@@ -550,6 +551,41 @@ export const QUESTS = [
 ];
 
 // ── Visitantes que llegan a la isla de vez en cuando ─────────────────────────
+
+// ── Recompensa diaria ────────────────────────────────────────────────────────
+// Un regalo por día seguido que entras (el séptimo es el mejor). Se multiplica
+// por el nivel del ayuntamiento para que siga valiendo la pena.
+
+export const DAILY_REWARDS = [
+  { madera: 200, piedra: 150 },
+  { comida: 300, madera: 150 },
+  { piedra: 250, hierro: 80 },
+  { cristal: 120, comida: 200 },
+  { hierro: 150, oro: 60 },
+  { cristal: 200, oro: 100 },
+  { oro: 250, cristal: 250, favor: 30 },
+];
+
+// ── Logros ───────────────────────────────────────────────────────────────────
+// Se ganan solos al cumplirse y se enseñan en el perfil del jugador.
+
+export const ACHIEVEMENTS = [
+  { id: 'saqueador', icon: '⚔️', name: 'Saqueador', text: 'Gana 10 ataques', check: (g) => g.stats.victories >= 10 },
+  { id: 'conquistador', icon: '👑', name: 'Conquistador', text: 'Gana 50 ataques', check: (g) => g.stats.victories >= 50 },
+  { id: 'azote', icon: '🗡️', name: 'Azote de reyes', text: 'Saquea 5 ciudades de otros jugadores', check: (g) => g.stats.pvpWins >= 5 },
+  { id: 'muralla', icon: '🏰', name: 'Inexpugnable', text: 'Rechaza 5 asaltos', check: (g) => g.stats.raidsRepelled >= 5 },
+  { id: 'explorador', icon: '🔭', name: 'Explorador', text: 'Explora 10 islas', check: (g) => g.exploredCount() >= 10 },
+  { id: 'navegante', icon: '🧭', name: 'Lobo de mar', text: 'Completa 10 expediciones', check: (g) => g.stats.expeditions >= 10 },
+  { id: 'colono', icon: '🚩', name: 'Fundador', text: 'Ten 3 colonias', check: (g) => g.colonies().length >= 3 },
+  { id: 'tesoros', icon: '🏺', name: 'Cazatesoros', text: 'Encuentra 2 tesoros', check: (g) => g.stats.treasures >= 2 },
+  { id: 'mercader', icon: '⚖️', name: 'Mercader', text: 'Cierra 10 tratos en el mercado', check: (g) => (g.stats.trades ?? 0) >= 10 },
+  { id: 'generoso', icon: '📦', name: 'Buen vecino', text: 'Entrega 10 transportes', check: (g) => (g.stats.transports ?? 0) >= 10 },
+  { id: 'devoto', icon: '🛕', name: 'Devoto', text: 'Invoca 20 poderes divinos', check: (g) => g.stats.powers >= 20 },
+  { id: 'constante', icon: '📅', name: 'Constante', text: 'Entra 7 días seguidos', check: (g) => (g.state.daily?.best ?? 0) >= 7 },
+  { id: 'imperio', icon: '🏛️', name: 'Imperio', text: 'Llega a 10.000 puntos', check: (g) => g.score() >= 10000 },
+  { id: 'kraken', icon: '🐙', name: 'Matador del Kraken', text: 'Derrota al Kraken', check: (g) => g.stats.kraken >= 1 },
+  { id: 'leyenda', icon: '🗽', name: 'Leyenda', text: 'Termina el Coloso', check: (g) => g.level('coloso') >= 10 },
+];
 
 export const VISITORS = {
   mercader: { name: 'Mercader ambulante', icon: '🧳' },

@@ -1,7 +1,9 @@
 import { clock, universe } from '../config.js';
 import {
+  ACHIEVEMENTS,
   BUILDINGS,
   BUILDING_KEYS,
+  DAILY_REWARDS,
   ISLAND_TYPES,
   LAND_UNITS,
   PLAYER_UNITS,
@@ -93,7 +95,8 @@ export function newState({ now = clock.now(), home, name }) {
     notes: [],
     favor: 0,
     buffs: {},
-    stats: { spent: 0, victories: 0, raidsRepelled: 0, expeditions: 0, powers: 0, treasures: 0, kraken: 0, pvpWins: 0 },
+    stats: { spent: 0, victories: 0, raidsRepelled: 0, expeditions: 0, powers: 0, treasures: 0, kraken: 0, pvpWins: 0, trades: 0, transports: 0 },
+    daily: { last: null, streak: 0, best: 0 },
     quests: { claimed: [] },
     visitor: null,
     nextVisitAt: null,
@@ -116,6 +119,7 @@ export function upgradeState(saved) {
     units: { ...base.units, ...saved.units },
     training: { ...base.training, ...saved.training },
     stats: { ...base.stats, ...saved.stats },
+    daily: { ...base.daily, ...saved.daily },
     quests: { claimed: saved.quests?.claimed ?? [] },
   };
 }
@@ -283,6 +287,25 @@ export class Game extends EventTarget {
 
   claimableQuests() {
     return this.activeQuests().filter((q) => q.done).length;
+  }
+
+  // ── Recompensa diaria y logros ─────────────────────────────────────────────
+
+  /** Estado de la recompensa diaria: si se puede reclamar hoy y qué toca. */
+  dailyStatus(now = this.now()) {
+    const today = Math.floor(now / 86_400_000);
+    const d = this.state.daily;
+    const available = d.last !== today;
+    const streak = available ? (d.last === today - 1 ? d.streak + 1 : 1) : d.streak;
+    const day = ((streak - 1) % DAILY_REWARDS.length) + 1;
+    const k = 1 + 0.25 * Math.max(0, this.level('ayuntamiento') - 1);
+    const reward = {};
+    for (const [res, n] of Object.entries(DAILY_REWARDS[day - 1])) reward[res] = res === 'favor' ? n : Math.round(n * k);
+    return { available, streak, day, reward, today };
+  }
+
+  achievements() {
+    return ACHIEVEMENTS.filter((a) => a.check(this)).map((a) => a.id);
   }
 
   // ── Clasificación ──────────────────────────────────────────────────────────
@@ -610,6 +633,10 @@ export class Game extends EventTarget {
         if (!total) reason ||= 'Elige qué recursos envías.';
         else if (total > cargo) reason ||= `No cabe: llevas ${total} y los barcos cargan ${cargo}.`;
         else if (!canAfford(s.resources, load)) reason ||= 'No tienes tantos recursos.';
+      } else if (type === 'apoyo') {
+        if (!this.world.sameAlliance?.(this.userId, isl.owner)) reason ||= 'Solo puedes mandar tropas de apoyo a miembros de tu alianza.';
+        if (!hasCombat(sent)) reason ||= 'Envía al menos una unidad de combate.';
+        if (s.missions.some((m) => m.type === 'apoyo' && m.target === target && m.phase !== 'vuelta')) reason ||= 'Ya tienes tropas de apoyo en esa ciudad: retíralas antes de mandar más.';
       } else if (type === 'atacar') {
         if (this.world.sameAlliance?.(this.userId, isl.owner)) reason ||= `${view.ownerName} es de tu alianza.`;
         else if (view.protected) reason ||= `${view.ownerName} está bajo protección de novato (menos de ${NEWBIE_POINTS} puntos).`;
@@ -674,11 +701,12 @@ export class Game extends EventTarget {
   recall(id, now = this.now()) {
     this.#advance(now);
     const m = this.state.missions.find((x) => x.id === id);
-    if (!m || m.phase !== 'ida') return this.#fail('Esa flota ya no puede volver.');
+    if (!m || (m.phase !== 'ida' && m.phase !== 'estacionada')) return this.#fail('Esa flota ya no puede volver.');
+    // De ida: deshace lo andado. Estacionada: el viaje completo de vuelta.
+    m.back = m.phase === 'ida' ? now + (now - m.depart) : now + (m.arrive - m.depart);
+    m.recalled = m.phase === 'ida';
     m.phase = 'vuelta';
-    m.back = now + (now - m.depart);
     m.turn = now;
-    m.recalled = true;
     return this.#done();
   }
 
@@ -703,6 +731,18 @@ export class Game extends EventTarget {
     const { favor, ...rest } = q.reward;
     this.#gain(rest);
     if (favor) this.state.favor += favor;
+    return this.#done();
+  }
+
+  claimDaily(now = this.now()) {
+    this.#advance(now);
+    const d = this.dailyStatus(now);
+    if (!d.available) return this.#fail('Ya has recogido el regalo de hoy. ¡Vuelve mañana!');
+    const { favor, ...rest } = d.reward;
+    this.#gain(rest);
+    if (favor) this.state.favor += favor;
+    this.state.daily = { last: d.today, streak: d.streak, best: Math.max(this.state.daily.best ?? 0, d.streak) };
+    this.#note(`🎁 Regalo del día ${d.day}: ${fmtBag(rest)}${favor ? ` · 🙏 ${favor}` : ''}`, 'success');
     return this.#done();
   }
 
@@ -774,11 +814,7 @@ export class Game extends EventTarget {
    */
   receiveAttack({ attackerName, units, atkMul, hpMul, islandName }, t) {
     const s = this.state;
-    const wall = wallBonus(this.level('muralla'));
-    const mine = playerCombat(s);
-    const aegis = (s.buffs.egida ?? 0) > t ? 0.5 : 0;
-    const result = battle({ units, atkMul, hpMul }, { units: { ...s.units }, atkMul: mine.atkMul, hpMul: mine.hpMul + wall.hp + aegis, extraAtk: wall.towers });
-    for (const id of PLAYER_UNITS) s.units[id] = result.def.left[id] ?? 0;
+    const { result, wall } = this.#defend({ units, atkMul, hpMul }, t, attackerName);
 
     let stolen = null;
     let cargo = 0;
@@ -800,6 +836,13 @@ export class Game extends EventTarget {
     this.#note(`⚔️ ${title}`, outcome === 'derrota' ? 'error' : 'success');
     this.#dirty = true;
     return { result, stolen: stolen ?? {} };
+  }
+
+  /** Un informe y un aviso que llegan de fuera (por ejemplo, de tus tropas de apoyo). */
+  receiveNews(report, note, kind = 'info') {
+    if (report) this.#report(report);
+    if (note) this.#note(note, kind);
+    this.#dirty = true;
   }
 
   /** Llega a tu isla un transporte de otro jugador. */
@@ -916,7 +959,10 @@ export class Game extends EventTarget {
       const head = s.training[b][0];
       if (head) consider(head.start + (head.done + 1) * head.each, (t) => this.#trainOne(b, t));
     }
-    for (const m of s.missions) consider(m.phase === 'ida' ? m.arrive : m.back, (t) => this.#missionEvent(m, t));
+    for (const m of s.missions) {
+      if (m.phase === 'estacionada') continue;
+      consider(m.phase === 'ida' ? m.arrive : m.back, (t) => this.#missionEvent(m, t));
+    }
     if (s.raid) consider(s.raid.arrival, (t) => this.#resolveRaid(t));
     else if (s.nextRaidAt) consider(s.nextRaidAt, (t) => this.#spawnRaid(t));
     if (s.visitor) consider(s.visitor.expires, (t) => this.#visitorLeaves(t));
@@ -1011,13 +1057,29 @@ export class Game extends EventTarget {
       // La isla ha desaparecido del mundo: la flota vuelve sin más
     } else if (isl.type === 'jugador') {
       if (m.type === 'explorar') this.#arriveSpy(m, isl, t);
-      else if (m.type === 'transporte') this.#arriveTransport(m, isl, t);
+      else if (m.type === 'apoyo') {
+        // Si ya no sois aliados al llegar, las tropas se dan la vuelta
+        if (!this.world.sameAlliance?.(this.userId, isl.owner)) {
+          this.#report({ t, kind: 'apoyo', island: isl.id, islandName: isl.name, title: `Apoyo rechazado en ${isl.name}`, text: 'Ya no sois aliados. Tus tropas vuelven a casa.' });
+          m.rejected = true;
+        }
+      } else if (m.type === 'transporte') this.#arriveTransport(m, isl, t);
       else this.#arrivePlayerAttack(m, isl, t);
     } else if (m.type === 'explorar') this.#arriveExplore(m, isl, t);
     else if (m.type === 'atacar') this.#arriveAttack(m, isl, t);
     else if (m.type === 'colonizar') this.#arriveColonize(m, isl, t);
     else if (m.type === 'expedicion') this.#arriveExpedition(m, isl, t);
 
+    if (m.type === 'apoyo' && !m.rejected && count(m.units) > 0) {
+      // Las tropas se quedan defendiendo hasta que las retires
+      m.phase = 'estacionada';
+      m.stationedAt = t;
+      const host = this.world.playerInfo(isl.owner)?.name ?? isl.name;
+      this.#note(`🛡️ Tus tropas ya defienden ${isl.name}`, 'success');
+      this.world.hostNews?.(isl.owner, `🛡️ ${this.state.name} ha enviado tropas para defender tu ciudad`);
+      this.#report({ t, kind: 'apoyo', island: isl.id, islandName: isl.name, title: `Defendiendo la ciudad de ${host}`, text: 'Tus tropas se quedan hasta que las retires. Siguen comiendo de tus graneros.' });
+      return;
+    }
     if (count(m.units) > 0) {
       m.phase = 'vuelta';
       m.turn = t;
@@ -1088,6 +1150,7 @@ export class Game extends EventTarget {
       this.#report({ t, kind: 'transporte', island: isl.id, islandName: isl.name, title: `Nadie recoge la carga en ${isl.name}`, text: 'Los barcos vuelven con todo.' });
       return;
     }
+    this.state.stats.transports = (this.state.stats.transports ?? 0) + 1;
     this.#report({ t, kind: 'transporte', island: isl.id, islandName: isl.name, title: `Carga entregada a ${owner}`, loot: { ...m.cargo }, enemy: owner });
     this.#note(`📦 Carga entregada en ${isl.name}`, 'success');
     m.cargo = {};
@@ -1291,14 +1354,59 @@ export class Game extends EventTarget {
     this.#note('🏴‍☠️ ¡Velas piratas en el horizonte! Prepara tus defensas.', 'error');
   }
 
+  /**
+   * Defiende tu isla: tus tropas en casa, las de apoyo de tus aliados y la
+   * muralla. Las bajas se reparten entre todos en proporción a lo que aportó cada uno.
+   */
+  #defend(attacker, t, enemyName = 'Piratas') {
+    const s = this.state;
+    const wall = wallBonus(this.level('muralla'));
+    const mine = playerCombat(s);
+    const aegis = (s.buffs.egida ?? 0) > t ? 0.5 : 0;
+    const pools = [{ units: { ...s.units }, apply: (left) => PLAYER_UNITS.forEach((id) => (s.units[id] = left[id] ?? 0)) }];
+    for (const sup of this.world.supportersAt?.(s.home, this.userId) ?? []) {
+      pools.push({ units: { ...sup.mission.units }, apply: (left) => sup.apply(left), sup });
+    }
+    const combined = {};
+    for (const pool of pools) for (const [id, n] of Object.entries(pool.units)) if (n > 0) combined[id] = (combined[id] ?? 0) + n;
+    const result = battle(attacker, { units: combined, atkMul: mine.atkMul, hpMul: mine.hpMul + wall.hp + aegis, extraAtk: wall.towers });
+
+    // Reparto de supervivientes: cada uno conserva la misma fracción; lo que sobra por redondeo, para el anfitrión
+    const lefts = pools.map(() => ({}));
+    for (const [id, start] of Object.entries(combined)) {
+      const frac = (result.def.left[id] ?? 0) / start;
+      let given = 0;
+      pools.forEach((pool, i) => {
+        const n = Math.floor((pool.units[id] ?? 0) * frac);
+        lefts[i][id] = n;
+        given += n;
+      });
+      const extra = (result.def.left[id] ?? 0) - given;
+      const owner = pools.findIndex((pool) => (pool.units[id] ?? 0) > 0);
+      lefts[owner][id] += extra;
+    }
+    pools.forEach((pool, i) => pool.apply(lefts[i]));
+
+    // Cada aliado recibe su propio informe con sus bajas
+    const outcome = result.winner === 'att' ? 'derrota' : result.winner === 'def' ? 'victoria' : 'empate';
+    pools.forEach((pool, i) => {
+      if (!pool.sup) return;
+      const lost = {};
+      for (const [id, n] of Object.entries(pool.units)) if (n - (lefts[i][id] ?? 0) > 0) lost[id] = n - (lefts[i][id] ?? 0);
+      const title = outcome === 'derrota' ? `Tus tropas no pudieron salvar ${this.homeIsland?.name}` : `Tus tropas defienden ${this.homeIsland?.name}`;
+      pool.sup.game.receiveNews(
+        { t, kind: 'defensa', outcome, title, islandName: this.homeIsland?.name, text: `${enemyName} atacó la ciudad de ${s.name}.`, lostUnits: lost },
+        `🛡️ ${title}`,
+        outcome === 'derrota' ? 'error' : 'success',
+      );
+    });
+    return { result, wall, allies: pools.length - 1 };
+  }
+
   #resolveRaid(t) {
     const s = this.state;
     const raid = s.raid;
-    const wall = wallBonus(this.level('muralla'));
-    const { atkMul, hpMul } = playerCombat(s);
-    const aegis = (s.buffs.egida ?? 0) > t ? 0.5 : 0;
-    const result = battle({ units: raid.army }, { units: { ...s.units }, atkMul, hpMul: hpMul + wall.hp + aegis, extraAtk: wall.towers });
-    for (const id of PLAYER_UNITS) s.units[id] = result.def.left[id] ?? 0;
+    const { result, wall } = this.#defend({ units: raid.army }, t);
 
     let stolen = null;
     let reward = null;

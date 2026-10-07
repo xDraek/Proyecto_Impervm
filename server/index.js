@@ -81,6 +81,7 @@ const ACTIONS = {
     own(MISSION_TYPES, type) && typeof target === 'string' ? g.sendMission(type, target, units(u), resources(load)) : bad(),
   recall: (g, [id]) => g.recall(int(id)),
   claimQuest: (g, [id]) => (typeof id === 'string' ? g.claimQuest(id) : bad()),
+  claimDaily: (g) => g.claimDaily(),
   castPower: (g, [id]) => (own(POWERS, id) ? g.castPower(id) : bad()),
   acceptVisitor: (g) => g.acceptVisitor(),
   dismissVisitor: (g) => g.dismissVisitor(),
@@ -173,6 +174,15 @@ async function api(req, res, url) {
       if (limited(`chat:${uid}`, 5, 10_000)) return send(res, 429, { error: 'Espera un poco antes de escribir otra vez.' });
       const { text, channel } = await readJson(req);
       return send(res, 200, { message: world.addChat(uid, text, channel) });
+    }
+
+    // Perfil y cuenta
+    if (route === 'GET /api/profile') return send(res, 200, { profile: world.profile(url.searchParams.get('name')) });
+    if (route === 'POST /api/password') {
+      if (limited(`auth:${ip(req)}`, 10, 60_000)) return send(res, 429, { error: 'Demasiados intentos. Espera un minuto.' });
+      const { current, next } = await readJson(req);
+      await world.changePassword(uid, current, next);
+      return send(res, 200, { ok: true });
     }
 
     // Alianzas

@@ -28,6 +28,7 @@ export class ClientGame extends Game {
     const islandsChanged = this.world.apply(snap.world);
     this.state = snap.state;
     this.incoming = snap.incoming ?? [];
+    this.support = snap.support ?? [];
     this.due = false;
     this.lastSync = Date.now();
     this.#showNotes(first);
@@ -140,6 +141,10 @@ export class ClientGame extends Game {
 
   claimQuest(id) {
     return this.#act('claimQuest', id);
+  }
+
+  claimDaily() {
+    return this.#act('claimDaily');
   }
 
   castPower(id) {

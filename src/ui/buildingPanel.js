@@ -1,6 +1,6 @@
 import { BUILDINGS, POWERS, POWER_KEYS, RESEARCH, RESEARCH_KEYS, RESOURCES, RESOURCE_KEYS, UNITS, UNIT_KEYS } from '../game/data.js';
 import { favorMax, favorRate, producerOutput, protectedAmount, requirementName, storageCapacity, townSpeedup, wallBonus } from '../game/rules.js';
-import { costList, fmtDec, fmtNum, fmtTime, unitList } from './format.js';
+import { costList, escapeHtml, fmtDec, fmtNum, fmtTime, unitList } from './format.js';
 
 // Panel de detalle de un edificio. Devuelve el HTML y un `refresh` para las
 // partes que cambian sin que cambie la partida (vista previa del mercado).
@@ -248,6 +248,7 @@ function wallSection(game) {
     <div class="info-row"><span>Tropas en casa</span><span>${unitList(units)}</span></div>
     <div class="info-row"><span>Amenaza pirata</span><b>Nv ${game.raidTier()}</b></div>
     ${raid ? `<div class="hint warn">🏴‍☠️ Asalto pirata en <span data-until="${raid.arrival}"></span>: ${unitList(raid.army)}</div>` : ''}
+    ${(game.support ?? []).map((sp) => `<div class="info-row"><span>🛡️ Apoyo de ${escapeHtml(sp.from)}</span><span>${unitList(sp.units)}</span></div>`).join('')}
     <p class="desc small">Las tropas que están en casa (también los barcos) defienden la isla. La amenaza crece con el tamaño de tu ciudad.</p>`;
 }
 

@@ -151,6 +151,54 @@ export class WorldServer {
     return x != null && x === this.memberOf.get(b);
   }
 
+  /**
+   * Tropas de apoyo de otros jugadores estacionadas en la isla `homeId`.
+   * `apply(left)` deja a cada una con sus supervivientes tras un combate.
+   */
+  supportersAt(homeId, hostId) {
+    const out = [];
+    for (const [uid, game] of this.games) {
+      if (uid === hostId) continue;
+      for (const mission of game.state.missions) {
+        if (mission.type !== 'apoyo' || mission.phase !== 'estacionada' || mission.target !== homeId) continue;
+        out.push({
+          game,
+          mission,
+          apply: (left) => {
+            mission.units = Object.fromEntries(Object.entries(left).filter(([, n]) => n > 0));
+            if (!Object.keys(mission.units).length) game.state.missions = game.state.missions.filter((m) => m !== mission);
+            game.dirty = true;
+          },
+        });
+      }
+    }
+    return out;
+  }
+
+  /** Aviso para el dueño de una isla (alguien le manda tropas, etc.). */
+  hostNews(ownerId, text) {
+    const host = this.games.get(ownerId);
+    if (!host) return;
+    host.receiveNews(null, text, 'success');
+    host.dirty = true;
+  }
+
+  /** Si dos jugadores dejan de ser aliados, sus tropas de apoyo vuelven a casa. */
+  #recallBrokenSupport() {
+    const now = clock.now();
+    for (const [uid, game] of this.games) {
+      for (const m of game.state.missions) {
+        if (m.type !== 'apoyo' || m.phase !== 'estacionada') continue;
+        const host = this.islands.get(m.target)?.owner;
+        if (host != null && this.sameAlliance(uid, host)) continue;
+        m.phase = 'vuelta';
+        m.turn = now;
+        m.back = now + (m.arrive - m.depart);
+        game.dirty = true;
+      }
+    }
+  }
+
   /** Llega un transporte de otro jugador a la isla de `ownerId`. */
   deliver(ownerId, payload, t) {
     const target = this.games.get(ownerId);
@@ -272,6 +320,7 @@ export class WorldServer {
       state,
       world: { islands, states, players },
       incoming: this.incoming(game.state.home),
+      support: this.supportersAt(game.state.home, userId).map(({ game: g, mission }) => ({ from: g.name, units: mission.units })),
     };
   }
 
@@ -416,6 +465,7 @@ export class WorldServer {
       this.announce(kickedBy ? `🤝 ${name} ha sido expulsado de la alianza` : `🤝 ${name} deja la alianza`, `a:${a.id}`);
     }
     this.rankingCache = null;
+    this.#recallBrokenSupport();
   }
 
   kickMember(userId, targetId) {
@@ -431,6 +481,39 @@ export class WorldServer {
     if (!a || a.founder !== userId) throw new UserError('Solo quien lidera la alianza puede cambiar la descripción.');
     a.description = String(text ?? '').trim().slice(0, 500);
     return this.allianceDetail(userId);
+  }
+
+  // ── Perfil y cuenta ────────────────────────────────────────────────────────
+
+  profile(name) {
+    const id = this.byName.get(String(name ?? '').trim().toLowerCase());
+    const game = id != null ? this.games.get(id) : null;
+    if (!game) throw new UserError('No hay ningún jugador con ese nombre.');
+    const info = this.playerInfo(id);
+    const rank = this.ranking(null).top.find((r) => r.name === info.name)?.rank ?? null;
+    return {
+      name: info.name,
+      city: this.islands.get(game.state.home)?.name,
+      island: game.state.home,
+      alliance: info.alliance,
+      points: info.score,
+      rank,
+      online: info.online,
+      joined: this.users.get(id).created,
+      townLevel: info.townLevel,
+      colonies: game.state.colonies.map((c) => c.name),
+      coloso: game.level('coloso'),
+      victories: game.stats.victories,
+      achievements: game.achievements(),
+    };
+  }
+
+  async changePassword(userId, current, next) {
+    const user = this.users.get(userId);
+    if (typeof current !== 'string' || !verifyPassword(current, user.pass)) throw new UserError('La contraseña actual no es correcta.');
+    if (typeof next !== 'string' || next.length < 6 || next.length > 100) throw new UserError('La contraseña nueva debe tener al menos 6 caracteres.');
+    user.pass = hashPassword(next);
+    await this.store.updatePassword(userId, user.pass);
   }
 
   // ── Correo ─────────────────────────────────────────────────────────────────
@@ -518,7 +601,9 @@ export class WorldServer {
     this.meta.offers = this.meta.offers.filter((x) => x !== o);
     buyer.giveResources(o.give);
     const name = this.users.get(userId).username;
-    this.games.get(o.seller)?.giveResources(o.want, `⚖️ ${name} ha aceptado tu oferta del mercado`);
+    const seller = this.games.get(o.seller);
+    seller?.giveResources(o.want, `⚖️ ${name} ha aceptado tu oferta del mercado`);
+    for (const g of [buyer, seller]) if (g) g.state.stats.trades = (g.state.stats.trades ?? 0) + 1;
   }
 }
 

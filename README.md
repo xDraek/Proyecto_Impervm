@@ -47,9 +47,14 @@ El servidor guarda el mundo en memoria y lo vuelca a la base de datos cada 10 se
 - **Mapa compartido** (🗺️ o tecla `M`): campamentos bárbaros y fortalezas piratas que se rearman, ruinas con un tesoro para el primero que llegue, islas libres para **colonizar** (la primera flota que llega se la queda), el Kraken y el Mar de las Brumas para las **expediciones**.
 - **Otros jugadores**: espía sus ciudades con botes exploradores y atácalas para llevarte sus recursos (salvo lo que esconde su almacén). Si alguien viene a por ti, lo verás llegar. Con menos de 100 puntos tienes **protección de novato**: nadie te ataca y tú no atacas a otros jugadores.
 - **Alianzas** 🤝: fúndalas o únete a una (hasta 20 miembros). Los aliados no pueden atacarse, tienen su propio chat y una clasificación de alianzas.
+- **Apoyo** 🛡️: manda tropas a defender la ciudad de un aliado. Se quedan allí y combaten junto a él hasta que las retires (y vuelven solas si dejáis de ser aliados).
 - **Correo** ✉️: mensajes privados entre jugadores.
+- **Perfiles y logros** 👤: cada jugador tiene un perfil con su puesto, su ciudad, su alianza y 15 logros que se ganan jugando.
+- **Simulador de combate** 🎲: prueba un ataque antes de lanzarlo, con lo que sabes de la isla por tus espías.
+- **Regalo diario** 🎁: un regalo cada día que entras; la racha de 7 días tiene premio gordo.
 - **Transportes** 📦: manda recursos en barcos mercantes a la ciudad de cualquier jugador.
 - **Mercado del archipiélago** ⚖️: publica ofertas («doy 500 de madera por 200 de cristal») y acepta las de otros. Lo ofrecido queda apartado hasta que alguien acepta o pasan 3 días.
+- Avisos del navegador (opcional) cuando te atacan con la pestaña en segundo plano, y cambio de contraseña desde ⚙.
 - **Piratas** de vez en cuando, **visitantes**, **poderes divinos**, **misiones** con recompensa, **chat** 💬 (global y de alianza) y **clasificación** 🏆 de jugadores y alianzas.
 
 ## Estructura

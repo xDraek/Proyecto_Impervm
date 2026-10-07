@@ -1,6 +1,10 @@
-import { RESOURCES, RESOURCE_KEYS } from '../game/data.js';
+import { ACHIEVEMENTS, DAILY_REWARDS, RESOURCES, RESOURCE_KEYS } from '../game/data.js';
 import { api } from '../net/api.js';
 import { bag, escapeHtml, fmtAgo, fmtDec, fmtNum } from './format.js';
+import { runSimulation, simulatorHtml } from './simulator.js';
+
+/** Ventanas que gestiona este módulo. */
+export const SOCIAL_MODALS = ['alliance', 'mail', 'profile', 'daily', 'welcome', 'password', 'sim'];
 
 // Alianza, correo y mercado del archipiélago: lo que se habla con otros
 // jugadores. Los datos llegan del servidor aparte del estado de la partida.
@@ -57,7 +61,7 @@ export class Social {
     const rows = a.members
       .map(
         (m) => `<tr>
-          <td><span class="dot ${m.online ? 'on' : ''}"></span>${escapeHtml(m.name)}${m.founder ? ' 👑' : ''}<div class="muted small">${escapeHtml(m.city ?? '')}</div></td>
+          <td><span class="dot ${m.online ? 'on' : ''}"></span><button class="link" data-action="profile" data-name="${escapeHtml(m.name)}">${escapeHtml(m.name)}</button>${m.founder ? ' 👑' : ''}<div class="muted small">${escapeHtml(m.city ?? '')}</div></td>
           <td>${fmtNum(m.points)}</td>
           <td class="row-actions">
             ${m.island ? `<button class="ghost small" data-action="goto" data-island="${m.island}" title="Ver en el mapa">🗺️</button>` : ''}
@@ -169,6 +173,98 @@ export class Social {
     this.hud.showModal('mail', `<div class="modal-card">${head('✉️', 'Correo', 'Mensajes privados entre jugadores')}${tabs}${body}</div>`);
   }
 
+  // ── Perfil ──────────────────────────────────────────────────────────────────
+
+  async openProfile(name) {
+    this.hud.showModal('profile', '<div class="modal-card narrow"><p class="muted">Cargando…</p></div>');
+    const data = await this.#call('GET', `/api/profile?name=${encodeURIComponent(name)}`);
+    if (!data || this.hud.modalKind !== 'profile') return;
+    const p = data.profile;
+    const earned = new Set(p.achievements);
+    const medals = ACHIEVEMENTS.map(
+      (a) => `<li class="${earned.has(a.id) ? 'got' : ''}" title="${a.name}: ${a.text}"><span>${a.icon}</span><b>${a.name}</b><small>${a.text}</small></li>`,
+    ).join('');
+    const me = p.name === this.game.username;
+    this.hud.showModal(
+      'profile',
+      `<div class="modal-card">
+        ${head('👤', `${escapeHtml(p.name)}${p.alliance ? ` <span class="tag">[${escapeHtml(p.alliance.tag)}]</span>` : ''}`, `${p.online ? '🟢 En línea' : 'Desconectado'} · en el archipiélago desde ${new Date(p.joined).toLocaleDateString('es-ES')}`)}
+        <div class="stat-grid">
+          <div><b>${p.rank ?? '—'}</b><span>puesto</span></div>
+          <div><b>${fmtNum(p.points)}</b><span>puntos</span></div>
+          <div><b>${p.townLevel}</b><span>ayuntamiento</span></div>
+          <div><b>${fmtNum(p.victories)}</b><span>victorias</span></div>
+        </div>
+        <div class="info-row"><span>🏰 Ciudad</span><b>${escapeHtml(p.city ?? '')}</b></div>
+        <div class="info-row"><span>🤝 Alianza</span><b>${p.alliance ? escapeHtml(p.alliance.name) : 'Ninguna'}</b></div>
+        ${p.colonies.length ? `<div class="info-row"><span>🚩 Colonias</span><span>${p.colonies.map(escapeHtml).join(', ')}</span></div>` : ''}
+        ${p.coloso ? `<div class="info-row"><span>🗽 Coloso</span><b>Nivel ${p.coloso}</b></div>` : ''}
+        <h4>Logros (${earned.size}/${ACHIEVEMENTS.length})</h4>
+        <ul class="medals">${medals}</ul>
+        <div class="modal-actions">
+          ${me ? '' : `<button class="primary small auto" data-action="mail-to" data-name="${escapeHtml(p.name)}">✉️ Mandar un mensaje</button>`}
+          ${me ? '' : `<button class="ghost small" data-action="goto" data-island="${p.island}">🗺️ Ver su ciudad</button>`}
+        </div>
+      </div>`,
+    );
+  }
+
+  // ── Recompensa diaria y bienvenida ─────────────────────────────────────────
+
+  openDaily() {
+    const d = this.game.dailyStatus();
+    const days = DAILY_REWARDS.map((r, i) => {
+      const n = i + 1;
+      const cls = n < d.day || (!d.available && n === d.day) ? 'done' : n === d.day ? 'today' : '';
+      return `<li class="${cls}"><b>Día ${n}</b>${bag(Object.fromEntries(Object.entries(r).filter(([k]) => k !== 'favor')))}${r.favor ? `<span class="bag-item">🙏 ${r.favor}</span>` : ''}</li>`;
+    }).join('');
+    this.hud.showModal(
+      'daily',
+      `<div class="modal-card">
+        ${head('🎁', 'Regalo diario', d.available ? `Racha de ${d.streak} ${d.streak === 1 ? 'día' : 'días'}. ¡Vuelve mañana para seguirla!` : 'Ya lo has recogido hoy. Vuelve mañana.')}
+        <ol class="daily">${days}</ol>
+        <p class="muted small">Las cantidades crecen con el nivel de tu ayuntamiento. Si te saltas un día, la racha vuelve a empezar.</p>
+        ${d.available ? `<button class="primary" data-action="claim-daily">Recoger ${bag(Object.fromEntries(Object.entries(d.reward).filter(([k]) => k !== 'favor')))}${d.reward.favor ? ` · 🙏 ${d.reward.favor}` : ''}</button>` : ''}
+      </div>`,
+    );
+  }
+
+  openWelcome() {
+    this.hud.showModal(
+      'welcome',
+      `<div class="modal-card">
+        ${head('⚜', `Bienvenido a Imperium, ${escapeHtml(this.game.username)}`, `Tu ciudad: ${escapeHtml(this.game.homeIsland?.name ?? '')}`)}
+        <ol class="welcome">
+          <li><span>🏛️</span><div><b>Haz crecer tu isla.</b> Pulsa un edificio para mejorarlo. Los recursos se producen solos, también con el juego cerrado.</div></li>
+          <li><span>📋</span><div><b>Sigue las misiones.</b> Te guían paso a paso y te dan recompensas.</div></li>
+          <li><span>🗺️</span><div><b>Explora el mapa</b> (tecla M). Con un puerto y botes descubrirás bárbaros, ruinas, tierras libres… y a tus vecinos.</div></li>
+          <li><span>🛡️</span><div><b>Tienes protección de novato</b> hasta los 100 puntos: nadie te atacará. Aprovecha para prepararte, que después llegan piratas y vecinos con hambre.</div></li>
+          <li><span>🤝</span><div><b>Únete a una alianza</b> o funda la tuya: os defenderéis, comerciaréis y tendréis chat propio.</div></li>
+        </ol>
+        <button class="primary" data-action="welcome-done">¡A jugar!</button>
+      </div>`,
+    );
+  }
+
+  openPassword() {
+    this.hud.showModal(
+      'password',
+      `<div class="modal-card narrow">
+        ${head('🔑', 'Cambiar contraseña', escapeHtml(this.game.username))}
+        <form class="stack" data-form="password">
+          <input type="password" name="current" placeholder="Contraseña actual" autocomplete="current-password" required />
+          <input type="password" name="next" placeholder="Contraseña nueva (6 o más caracteres)" autocomplete="new-password" minlength="6" required />
+          <input type="password" name="next2" placeholder="Repite la nueva" autocomplete="new-password" required />
+          <button class="primary">Cambiar</button>
+        </form>
+      </div>`,
+    );
+  }
+
+  openSimulator(preset) {
+    this.hud.showModal('sim', simulatorHtml(preset));
+  }
+
   // ── Mercado del archipiélago ───────────────────────────────────────────────
 
   /** Pide las ofertas si hace rato que no se miran (mientras el mercado está abierto). */
@@ -247,6 +343,25 @@ export class Social {
         this.hud.closeModal();
         this.hud.onSelect(btn.dataset.island);
         return true;
+      case 'profile':
+        this.openProfile(btn.dataset.name);
+        return true;
+      case 'claim-daily': {
+        btn.disabled = true;
+        const res = await this.game.claimDaily();
+        if (!res.ok) this.hud.toast(res.reason, 'error');
+        this.openDaily();
+        return true;
+      }
+      case 'welcome-done':
+        try {
+          localStorage.setItem(`imperium.welcome.${this.game.userId}`, '1');
+        } catch {
+          // sin almacenamiento
+        }
+        this.hud.closeModal();
+        if (this.game.dailyStatus().available) this.openDaily();
+        return true;
       case 'mail-to':
         this.compose(btn.dataset.name);
         return true;
@@ -305,6 +420,15 @@ export class Social {
       } else if (form.dataset.form === 'description') {
         const res = await this.#call('POST', '/api/alliance/description', { text: data.text }, 'Descripción guardada');
         if (res) this.alliance = res.alliance;
+      } else if (form.dataset.form === 'sim') {
+        runSimulation(form);
+      } else if (form.dataset.form === 'password') {
+        if (data.next !== data.next2) {
+          this.hud.toast('Las contraseñas nuevas no coinciden.', 'error');
+          return;
+        }
+        const res = await this.#call('POST', '/api/password', { current: data.current, next: data.next }, '🔑 Contraseña cambiada');
+        if (res) this.hud.closeModal();
       } else if (form.dataset.form === 'mail') {
         const res = await this.#call('POST', '/api/mail', { to: data.to, subject: data.subject, text: data.text }, '✉️ Mensaje enviado');
         if (res) {

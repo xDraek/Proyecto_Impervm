@@ -51,7 +51,7 @@ export function rankingHtml({ top, me, total, alliances = [] }, tab = 'players')
       : '<p class="muted">Todavía no hay alianzas.</p>';
   } else {
     const row = (r) => `<tr class="${r.me ? 'me' : ''}"><td>${medal(r.rank)}</td>
-      <td>${r.me ? '⚜ ' : ''}${escapeHtml(r.name)}${r.tag ? ` <span class="tag">[${escapeHtml(r.tag)}]</span>` : ''}
+      <td>${r.me ? '⚜ ' : ''}<button class="link" data-action="profile" data-name="${escapeHtml(r.name)}">${escapeHtml(r.name)}</button>${r.tag ? ` <span class="tag">[${escapeHtml(r.tag)}]</span>` : ''}
         <div class="muted small">${escapeHtml(r.city)}${r.colonies ? ` · 🚩 ${r.colonies}` : ''}${r.coloso ? ` · 🗽 ${r.coloso}` : ''}</div></td>
       <td>${fmtNum(r.points)}</td>
       <td>${r.me ? '' : `<button class="ghost small" data-action="goto" data-island="${r.island}" title="Ver en el mapa">🗺️</button>`}</td></tr>`;
