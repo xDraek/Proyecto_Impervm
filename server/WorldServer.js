@@ -31,6 +31,9 @@ export class WorldServer {
     this.newIslands = [];
     this.pendingChat = [];
     this.rankingCache = null;
+    this.sockets = new Map(); // id → Set de conexiones en vivo
+    this.pendingPush = new Set(); // jugadores cuyo estado ha cambiado y hay que avisar
+    this.admins = new Set(String(process.env.ADMINS ?? '').split(',').map((n) => n.trim().toLowerCase()).filter(Boolean));
   }
 
   async load() {
@@ -51,7 +54,10 @@ export class WorldServer {
       const id = Number(uid);
       if (this.users.has(id)) this.games.set(id, this.#makeGame(id, state));
     }
-    this.chat = data.chat.slice(-MAX_CHAT);
+    this.meta.mod ??= {};
+    this.meta.chatDeleted ??= [];
+    const deleted = new Set(this.meta.chatDeleted);
+    this.chat = data.chat.filter((m) => !deleted.has(m.id)).slice(-MAX_CHAT);
     this.meta.alliances ??= {};
     this.meta.offers ??= [];
     this.memberOf = new Map();
@@ -64,6 +70,8 @@ export class WorldServer {
   #makeGame(userId, state) {
     const game = new Game({ state, world: this, userId, mode: 'server' });
     game.dirty = false;
+    // Cualquier cambio en su partida se le empuja por la conexión en vivo
+    game.addEventListener('change', () => this.pendingPush.add(userId));
     return game;
   }
 
@@ -109,6 +117,7 @@ export class WorldServer {
     const id = this.byName.get(String(username ?? '').trim().toLowerCase());
     const user = id != null ? this.users.get(id) : null;
     if (!user || typeof password !== 'string' || !verifyPassword(password, user.pass)) throw new UserError('Nombre o contraseña incorrectos.');
+    if (this.isBanned(id)) throw new UserError(`Esta cuenta está suspendida${this.meta.mod[id].reason ? `: ${this.meta.mod[id].reason}` : '.'}`);
     return id;
   }
 
@@ -254,7 +263,20 @@ export class WorldServer {
     this.chat.push(msg);
     this.pendingChat.push(msg);
     if (this.chat.length > MAX_CHAT) this.chat.shift();
+    for (const uid of this.sockets.keys()) {
+      const [visible] = this.#visibleChat(uid, [msg]);
+      if (visible) this.send(uid, { type: 'chat', message: visible });
+    }
     return msg;
+  }
+
+  /** Qué mensajes puede leer un jugador (el canal global y el de su alianza), ya preparados para él. */
+  #visibleChat(userId, messages) {
+    const a = this.allianceOf(userId);
+    const mine = a ? `a:${a.id}` : null;
+    return messages
+      .filter((m) => !m.channel || m.channel === 'global' || m.channel === mine)
+      .map((m) => ({ ...m, channel: m.channel && m.channel !== 'global' ? 'alianza' : 'global' }));
   }
 
   // ── Bucle y guardado ───────────────────────────────────────────────────────
@@ -316,6 +338,7 @@ export class WorldServer {
       userId,
       username: user.username,
       alliance: a ? { id: a.id, tag: a.tag, name: a.name } : null,
+      admin: this.isAdmin(userId),
       mailUnread: (mail ?? []).filter((m) => m.box === 'in' && !m.read).length,
       state,
       world: { islands, states, players },
@@ -374,6 +397,8 @@ export class WorldServer {
     const user = this.users.get(userId);
     text = String(text ?? '').replace(/\s+/g, ' ').trim().slice(0, 300);
     if (!text) throw new UserError('Escribe algo.');
+    const muted = this.meta.mod[userId]?.mutedUntil ?? 0;
+    if (muted > Date.now()) throw new UserError(`Estás silenciado en el chat hasta las ${new Date(muted).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })}.`);
     let ch = 'global';
     if (channel === 'alianza') {
       const a = this.allianceOf(userId);
@@ -385,11 +410,10 @@ export class WorldServer {
 
   /** Mensajes nuevos que puede leer el jugador: el canal global y el de su alianza. */
   chatSince(userId, after) {
-    const a = this.allianceOf(userId);
-    const mine = a ? `a:${a.id}` : null;
-    return this.chat
-      .filter((m) => m.id > after && (!m.channel || m.channel === 'global' || m.channel === mine))
-      .map((m) => ({ ...m, channel: m.channel && m.channel !== 'global' ? 'alianza' : 'global' }));
+    return this.#visibleChat(
+      userId,
+      this.chat.filter((m) => m.id > after),
+    );
   }
 
   // ── Alianzas ───────────────────────────────────────────────────────────────
@@ -483,6 +507,82 @@ export class WorldServer {
     return this.allianceDetail(userId);
   }
 
+  // ── Conexiones en vivo (WebSocket) ─────────────────────────────────────────
+
+  addSocket(userId, ws) {
+    if (!this.sockets.has(userId)) this.sockets.set(userId, new Set());
+    this.sockets.get(userId).add(ws);
+  }
+
+  removeSocket(userId, ws) {
+    const set = this.sockets.get(userId);
+    set?.delete(ws);
+    if (set && !set.size) this.sockets.delete(userId);
+  }
+
+  send(userId, msg) {
+    const set = this.sockets.get(userId);
+    if (!set) return;
+    const data = JSON.stringify(msg);
+    for (const ws of set) if (ws.readyState === 1) ws.send(data);
+  }
+
+  /** Manda el estado nuevo a quien esté conectado y haya tenido cambios. */
+  flushPush() {
+    for (const uid of this.pendingPush) {
+      if (this.sockets.has(uid) && this.games.has(uid)) this.send(uid, { type: 'snapshot', data: this.snapshot(uid) });
+    }
+    this.pendingPush.clear();
+  }
+
+  // ── Moderación ─────────────────────────────────────────────────────────────
+  // Moderadores: nombres en la variable de entorno ADMINS, separados por comas.
+
+  isAdmin(userId) {
+    return this.admins.has(this.users.get(userId)?.username.toLowerCase());
+  }
+
+  isBanned(userId) {
+    return !!this.meta.mod?.[userId]?.banned;
+  }
+
+  #target(adminId, name) {
+    if (!this.isAdmin(adminId)) throw new UserError('Solo para moderadores.');
+    const id = this.byName.get(String(name ?? '').trim().toLowerCase());
+    if (id == null) throw new UserError('No hay ningún jugador con ese nombre.');
+    if (this.isAdmin(id)) throw new UserError('No se puede moderar a otro moderador.');
+    return id;
+  }
+
+  mute(adminId, name, minutes) {
+    const id = this.#target(adminId, name);
+    const m = Math.max(0, Math.min(60 * 24 * 30, Math.floor(Number(minutes) || 0)));
+    this.meta.mod[id] = { ...this.meta.mod[id], mutedUntil: m ? Date.now() + m * 60_000 : 0 };
+    this.announce(m ? `🔇 ${this.users.get(id).username} ha sido silenciado en el chat` : `🔈 ${this.users.get(id).username} puede volver a escribir`);
+  }
+
+  ban(adminId, name, reason, banned = true) {
+    const id = this.#target(adminId, name);
+    this.meta.mod[id] = { ...this.meta.mod[id], banned, reason: banned ? String(reason ?? '').slice(0, 200) : '' };
+    if (banned) for (const ws of this.sockets.get(id) ?? []) ws.close(4003, 'Cuenta suspendida');
+  }
+
+  deleteChat(adminId, msgId) {
+    if (!this.isAdmin(adminId)) throw new UserError('Solo para moderadores.');
+    const id = Number(msgId);
+    this.chat = this.chat.filter((m) => m.id !== id);
+    this.meta.chatDeleted.push(id);
+    if (this.meta.chatDeleted.length > 500) this.meta.chatDeleted.splice(0, this.meta.chatDeleted.length - 500);
+    for (const uid of this.sockets.keys()) this.send(uid, { type: 'chat-delete', id });
+  }
+
+  broadcast(adminId, text) {
+    if (!this.isAdmin(adminId)) throw new UserError('Solo para moderadores.');
+    const clean = String(text ?? '').trim().slice(0, 300);
+    if (!clean) throw new UserError('Escribe el anuncio.');
+    this.announce(`📣 ${clean}`);
+  }
+
   // ── Perfil y cuenta ────────────────────────────────────────────────────────
 
   profile(name) {
@@ -505,6 +605,9 @@ export class WorldServer {
       coloso: game.level('coloso'),
       victories: game.stats.victories,
       achievements: game.achievements(),
+      hero: game.state.hero ? { name: game.state.hero.name, level: game.state.hero.level } : null,
+      muted: (this.meta.mod[id]?.mutedUntil ?? 0) > Date.now(),
+      banned: this.isBanned(id),
     };
   }
 

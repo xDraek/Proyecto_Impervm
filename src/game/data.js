@@ -587,6 +587,26 @@ export const ACHIEVEMENTS = [
   { id: 'leyenda', icon: '🗽', name: 'Leyenda', text: 'Termina el Coloso', check: (g) => g.level('coloso') >= 10 },
 ];
 
+// ── Almirante (héroe) ────────────────────────────────────────────────────────
+// Acompaña a una flota o se queda defendiendo la isla. Gana experiencia en
+// cada combate y, con cada nivel, un punto para una de sus cuatro habilidades.
+
+export const HERO = {
+  cost: { oro: 600, comida: 400 },
+  requires: { ayuntamiento: 3 },
+  maxLevel: 30,
+  /** Experiencia total para llegar a `level`. */
+  xpFor: (level) => Math.round(80 * (level - 1) ** 1.6),
+  woundHours: 2,
+};
+
+export const HERO_SKILLS = {
+  ataque: { name: 'Ataque', icon: '⚔️', text: (n) => `+${n * 3} % de ataque de la flota que acompaña`, per: 0.03 },
+  defensa: { name: 'Defensa', icon: '🛡️', text: (n) => `+${n * 3} % de vida de los defensores mientras esté en casa`, per: 0.03 },
+  botin: { name: 'Botín', icon: '💰', text: (n) => `+${n * 5} % de carga de la flota que acompaña`, per: 0.05 },
+  velocidad: { name: 'Navegación', icon: '💨', text: (n) => `Su flota navega un ${n * 4} % más rápido`, per: 0.04 },
+};
+
 export const VISITORS = {
   mercader: { name: 'Mercader ambulante', icon: '🧳' },
   mercenarios: { name: 'Mercenarios', icon: '🗡️' },

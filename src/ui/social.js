@@ -201,10 +201,20 @@ export class Social {
         ${p.coloso ? `<div class="info-row"><span>🗽 Coloso</span><b>Nivel ${p.coloso}</b></div>` : ''}
         <h4>Logros (${earned.size}/${ACHIEVEMENTS.length})</h4>
         <ul class="medals">${medals}</ul>
+        ${p.hero ? `<div class="info-row"><span>🎖️ Almirante</span><b>${escapeHtml(p.hero.name)} · nivel ${p.hero.level}</b></div>` : ''}
         <div class="modal-actions">
           ${me ? '' : `<button class="primary small auto" data-action="mail-to" data-name="${escapeHtml(p.name)}">✉️ Mandar un mensaje</button>`}
           ${me ? '' : `<button class="ghost small" data-action="goto" data-island="${p.island}">🗺️ Ver su ciudad</button>`}
         </div>
+        ${this.game.admin && !me
+          ? `<div class="admin-tools"><b>🛠️ Moderación</b>${p.muted ? ' · silenciado' : ''}${p.banned ? ' · suspendido' : ''}
+              <div class="modal-actions">
+                <button class="ghost small" data-action="mod" data-op="mute" data-minutes="60" data-name="${escapeHtml(p.name)}">🔇 1 h</button>
+                <button class="ghost small" data-action="mod" data-op="mute" data-minutes="1440" data-name="${escapeHtml(p.name)}">🔇 24 h</button>
+                <button class="ghost small" data-action="mod" data-op="mute" data-minutes="0" data-name="${escapeHtml(p.name)}">🔈 Quitar silencio</button>
+                <button class="ghost small" data-action="mod" data-op="${p.banned ? 'unban' : 'ban'}" data-name="${escapeHtml(p.name)}">${p.banned ? '✅ Readmitir' : '⛔ Suspender'}</button>
+              </div></div>`
+          : ''}
       </div>`,
     );
   }
@@ -346,6 +356,18 @@ export class Social {
       case 'profile':
         this.openProfile(btn.dataset.name);
         return true;
+      case 'mod': {
+        const { op, name, minutes } = btn.dataset;
+        let reason = '';
+        if (op === 'ban') {
+          reason = prompt(`¿Por qué suspendes a ${name}?`) ?? '';
+          if (!reason) return true;
+        }
+        const body = op === 'mute' ? { name, minutes: Number(minutes) } : { name, reason };
+        const res = await this.#call('POST', `/api/admin/${op}`, body, 'Hecho');
+        if (res) this.openProfile(name);
+        return true;
+      }
       case 'claim-daily': {
         btn.disabled = true;
         const res = await this.game.claimDaily();

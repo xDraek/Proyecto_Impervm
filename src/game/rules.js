@@ -119,8 +119,9 @@ export function fleetSpeedBonus(state) {
 }
 
 /** Segundos de viaje (solo ida) hasta una isla con una flota a cierta velocidad. */
-export function travelSeconds(state, dist, speed) {
-  return Math.max(1, Math.round((40 + dist * 7) / speed / fleetSpeedBonus(state) / universe.speed));
+/** `extra`: multiplicador de velocidad adicional (por ejemplo, el almirante). */
+export function travelSeconds(state, dist, speed, extra = 1) {
+  return Math.max(1, Math.round((40 + dist * 7) / speed / fleetSpeedBonus(state) / extra / universe.speed));
 }
 
 // ── Economía ─────────────────────────────────────────────────────────────────

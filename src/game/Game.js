@@ -4,6 +4,8 @@ import {
   BUILDINGS,
   BUILDING_KEYS,
   DAILY_REWARDS,
+  HERO,
+  HERO_SKILLS,
   ISLAND_TYPES,
   LAND_UNITS,
   PLAYER_UNITS,
@@ -97,6 +99,7 @@ export function newState({ now = clock.now(), home, name }) {
     buffs: {},
     stats: { spent: 0, victories: 0, raidsRepelled: 0, expeditions: 0, powers: 0, treasures: 0, kraken: 0, pvpWins: 0, trades: 0, transports: 0 },
     daily: { last: null, streak: 0, best: 0 },
+    hero: null,
     quests: { claimed: [] },
     visitor: null,
     nextVisitAt: null,
@@ -306,6 +309,27 @@ export class Game extends EventTarget {
 
   achievements() {
     return ACHIEVEMENTS.filter((a) => a.check(this)).map((a) => a.id);
+  }
+
+  // ── Almirante ──────────────────────────────────────────────────────────────
+
+  get hero() {
+    return this.state.hero;
+  }
+
+  /** Dónde está el almirante: 'casa', 'mision' o 'herido' (null si no hay). */
+  heroStatus(now = this.now()) {
+    const h = this.state.hero;
+    if (!h) return null;
+    if (h.mission != null && this.state.missions.some((m) => m.id === h.mission)) return 'mision';
+    if ((h.woundedUntil ?? 0) > now) return 'herido';
+    return 'casa';
+  }
+
+  /** Bono de una habilidad (0 si el almirante no está o no la tiene). */
+  heroBonus(skill) {
+    const h = this.state.hero;
+    return h ? (h.skills[skill] ?? 0) * HERO_SKILLS[skill].per : 0;
   }
 
   // ── Clasificación ──────────────────────────────────────────────────────────
@@ -580,7 +604,7 @@ export class Game extends EventTarget {
   }
 
   /** Comprueba una misión sin enviarla. `payload`: recursos que lleva un transporte. */
-  planMission(type, target, units, payload) {
+  planMission(type, target, units, payload, opts = {}) {
     const s = this.state;
     const isl = this.world.island(target);
     const sent = {};
@@ -610,12 +634,16 @@ export class Game extends EventTarget {
         used += n * u.size;
       }
     }
-    const seconds = Number.isFinite(speed) ? travelSeconds(s, this.distanceTo(target), speed) : 0;
+    const withHero = !!opts.hero;
+    const heroSpeed = withHero ? 1 + this.heroBonus('velocidad') : 1;
+    const seconds = Number.isFinite(speed) ? travelSeconds(s, this.distanceTo(target), speed, heroSpeed) : 0;
     const slots = fleetSlots(s);
     const pendingColonies = s.missions.filter((m) => m.type === 'colonizar').length;
     let cost = null;
 
     if (target === s.home) reason ||= 'Es tu propia isla.';
+    if (withHero && this.heroStatus() !== 'casa') reason ||= this.state.hero ? 'Tu almirante no está en casa o está herido.' : 'No tienes almirante.';
+    if (withHero) cargo = Math.floor(cargo * (1 + this.heroBonus('botin')));
     if (slots < 1) reason ||= 'Necesitas un puerto para zarpar.';
     else if (s.missions.length >= slots) reason ||= `Todas tus flotas están en el mar (${s.missions.length}/${slots}). Mejora el puerto.`;
     if (!count(sent)) reason ||= 'Elige qué unidades envías.';
@@ -675,9 +703,9 @@ export class Game extends EventTarget {
     return { ok: !reason, reason, units: sent, seconds, capacity, used, cargo, ships, cost, load };
   }
 
-  sendMission(type, target, units, payload, now = this.now()) {
+  sendMission(type, target, units, payload, opts = {}, now = this.now()) {
     this.#advance(now);
-    const plan = this.planMission(type, target, units, payload);
+    const plan = this.planMission(type, target, units, payload, opts);
     if (!plan.ok) return this.#fail(plan.reason);
     for (const [id, n] of Object.entries(plan.units)) this.state.units[id] -= n;
     if (plan.cost) this.#pay(plan.cost);
@@ -693,7 +721,9 @@ export class Game extends EventTarget {
       arrive: now + plan.seconds * 1000,
       back: null,
       phase: 'ida',
+      hero: !!opts.hero,
     });
+    if (opts.hero) this.state.hero.mission = this.state.missions.at(-1).id;
     return this.#done();
   }
 
@@ -731,6 +761,29 @@ export class Game extends EventTarget {
     const { favor, ...rest } = q.reward;
     this.#gain(rest);
     if (favor) this.state.favor += favor;
+    return this.#done();
+  }
+
+  hireHero(name, now = this.now()) {
+    this.#advance(now);
+    if (this.state.hero) return this.#fail('Ya tienes almirante.');
+    if (missingRequirements(this.state, HERO.requires).length) return this.#fail('Necesitas el ayuntamiento a nivel 3.');
+    if (!canAfford(this.state.resources, HERO.cost)) return this.#fail('No tienes recursos suficientes.');
+    const clean = String(name ?? '').replace(/\s+/g, ' ').trim().slice(0, 24) || 'Almirante';
+    this.#pay(HERO.cost);
+    this.state.hero = { name: clean, level: 1, xp: 0, points: 1, skills: { ataque: 0, defensa: 0, botin: 0, velocidad: 0 }, woundedUntil: 0, mission: null };
+    this.#note(`🎖️ ${clean} se pone al mando de tu flota`, 'success');
+    return this.#done();
+  }
+
+  heroSkill(skill, now = this.now()) {
+    this.#advance(now);
+    const h = this.state.hero;
+    if (!h) return this.#fail('No tienes almirante.');
+    if (!HERO_SKILLS[skill]) return this.#fail('Habilidad desconocida.');
+    if (h.points < 1) return this.#fail('No te quedan puntos. Gana combates para subir de nivel.');
+    h.points--;
+    h.skills[skill]++;
     return this.#done();
   }
 
@@ -812,13 +865,14 @@ export class Game extends EventTarget {
    * Otro jugador ataca tu isla en el instante `t`. Defienden tus tropas en casa
    * y la muralla; si ganan los atacantes se llevan recursos (salvo lo protegido).
    */
-  receiveAttack({ attackerName, units, atkMul, hpMul, islandName }, t) {
+  receiveAttack({ attackerName, units, atkMul, hpMul, cargoMul = 1, islandName }, t) {
     const s = this.state;
     const { result, wall } = this.#defend({ units, atkMul, hpMul }, t, attackerName);
 
     let stolen = null;
     let cargo = 0;
     for (const [id, n] of Object.entries(result.att.left)) cargo += n * (UNITS[id].cargo ?? 0);
+    cargo = Math.floor(cargo * cargoMul);
     const outcome = result.winner === 'att' ? 'derrota' : result.winner === 'def' ? 'victoria' : 'empate';
     if (outcome === 'derrota') {
       const bag = {};
@@ -870,6 +924,28 @@ export class Game extends EventTarget {
   }
 
   // ── Internos ───────────────────────────────────────────────────────────────
+
+  /** Experiencia por las bajas causadas en un combate. */
+  #heroXp(killed, t) {
+    const h = this.state.hero;
+    if (!h) return;
+    let xp = 0;
+    for (const [id, n] of Object.entries(killed ?? {})) xp += (n * (UNITS[id].atk + UNITS[id].hp)) / 10;
+    h.xp += Math.round(xp);
+    while (h.level < HERO.maxLevel && h.xp >= HERO.xpFor(h.level + 1)) {
+      h.level++;
+      h.points++;
+      this.#note(`🎖️ ${h.name} sube a nivel ${h.level}: tienes un punto de habilidad`, 'success');
+    }
+  }
+
+  #heroWounded(t) {
+    const h = this.state.hero;
+    if (!h) return;
+    h.mission = null;
+    h.woundedUntil = t + hours(HERO.woundHours);
+    this.#note(`🎖️ ${h.name} vuelve herido. Tardará en recuperarse.`, 'error');
+  }
 
   #fail(reason) {
     this.#flush(false);
@@ -1047,6 +1123,7 @@ export class Game extends EventTarget {
       for (const [id, n] of Object.entries(m.units)) this.state.units[id] += n;
       for (const [res, n] of Object.entries(m.cargo)) this.state.resources[res] += n;
       this.state.missions = this.state.missions.filter((x) => x !== m);
+      if (m.hero && this.state.hero) this.state.hero.mission = null;
       const loot = fmtBag(m.cargo);
       this.#note(`⚓ Ha vuelto la flota de ${m.targetName}${loot ? `: ${loot}` : ''}`, 'success');
       return;
@@ -1086,6 +1163,7 @@ export class Game extends EventTarget {
       m.back = t + (m.arrive - m.depart) * (m.slow ?? 1);
     } else {
       this.state.missions = this.state.missions.filter((x) => x !== m);
+      if (m.hero) this.#heroWounded(t);
     }
   }
 
@@ -1129,6 +1207,15 @@ export class Game extends EventTarget {
       this.#report({ t, kind: 'exploracion', island: isl.id, islandName: isl.name, title: `Sin noticias de ${isl.name}`, text: 'El bote no ha podido acercarse.' });
       return;
     }
+    // Los vigías de la muralla pueden descubrir el bote (8 % por nivel, como mucho 60 %)
+    if (Math.random() < Math.min(0.6, 0.08 * info.wall)) {
+      const lost = { ...m.units };
+      m.units = {};
+      this.#report({ t, kind: 'exploracion', island: isl.id, islandName: isl.name, outcome: 'derrota', title: `Espía descubierto en ${isl.name}`, text: 'Los vigías de la muralla han visto el bote y lo han hundido.', lostUnits: lost });
+      this.#note(`🔭 Han descubierto a tu espía en ${isl.name}`, 'error');
+      this.world.hostNews?.(isl.owner, `🔭 Tus vigías han hundido un bote espía de ${this.state.name}`);
+      return;
+    }
     const intel = { t, garrison: info.units, stock: info.resources, wall: info.wall, town: info.town };
     this.#know(isl.id, { intel });
     this.#report({
@@ -1158,7 +1245,12 @@ export class Game extends EventTarget {
 
   #arrivePlayerAttack(m, isl, t) {
     const { atkMul, hpMul } = playerCombat(this.state);
-    const res = this.world.attackPlayer?.(isl.owner, { attackerName: this.state.name, units: m.units, atkMul, hpMul, islandName: this.homeIsland?.name }, t);
+    const hero = m.hero ? { atk: this.heroBonus('ataque'), cargo: 1 + this.heroBonus('botin') } : { atk: 0, cargo: 1 };
+    const res = this.world.attackPlayer?.(
+      isl.owner,
+      { attackerName: this.state.name, units: m.units, atkMul: atkMul + hero.atk, hpMul, cargoMul: hero.cargo, islandName: this.homeIsland?.name },
+      t,
+    );
     if (!res) {
       this.#report({ t, kind: 'ataque', island: isl.id, islandName: isl.name, title: `No hay nadie en ${isl.name}`, text: 'La ciudad está vacía. Tu flota vuelve a casa.' });
       return;
@@ -1166,6 +1258,7 @@ export class Game extends EventTarget {
     const { result, stolen } = res;
     m.units = result.att.left;
     for (const [r, n] of Object.entries(stolen)) m.cargo[r] = (m.cargo[r] ?? 0) + n;
+    if (m.hero) this.#heroXp(result.def.lost, t);
     const outcome = result.winner === 'att' ? 'victoria' : result.winner === 'def' ? 'derrota' : 'empate';
     if (outcome === 'victoria') {
       this.state.stats.victories++;
@@ -1189,7 +1282,9 @@ export class Game extends EventTarget {
     const { atkMul, hpMul } = playerCombat(this.state);
     const siege = Object.entries(m.units).reduce((s, [id, n]) => s + (UNITS[id].siege ?? 0) * n, 0);
     const wall = Math.max(0, (isl.wall ?? 0) - siege);
-    const result = battle({ units: m.units, atkMul, hpMul }, { units: garrison, hpMul: 1 + wall });
+    const heroAtk = m.hero ? this.heroBonus('ataque') : 0;
+    const result = battle({ units: m.units, atkMul: atkMul + heroAtk, hpMul }, { units: garrison, hpMul: 1 + wall });
+    if (m.hero) this.#heroXp(result.def.lost, t);
 
     rt.garrison = result.def.left;
     rt.garrisonAt = t;
@@ -1199,6 +1294,7 @@ export class Game extends EventTarget {
     if (result.winner === 'att') {
       let capacity = 0;
       for (const [id, n] of Object.entries(m.units)) capacity += n * (UNITS[id].cargo ?? 0);
+      if (m.hero) capacity = Math.floor(capacity * (1 + this.heroBonus('botin')));
       loot = takeLoot(stock, capacity);
       for (const [res, n] of Object.entries(loot)) {
         stock[res] -= n;
@@ -1369,7 +1465,13 @@ export class Game extends EventTarget {
     }
     const combined = {};
     for (const pool of pools) for (const [id, n] of Object.entries(pool.units)) if (n > 0) combined[id] = (combined[id] ?? 0) + n;
-    const result = battle(attacker, { units: combined, atkMul: mine.atkMul, hpMul: mine.hpMul + wall.hp + aegis, extraAtk: wall.towers });
+    const heroHome = this.heroStatus(t) === 'casa';
+    const heroDef = heroHome ? this.heroBonus('defensa') : 0;
+    const result = battle(attacker, { units: combined, atkMul: mine.atkMul, hpMul: mine.hpMul + wall.hp + aegis + heroDef, extraAtk: wall.towers });
+    if (heroHome) {
+      this.#heroXp(result.att.lost, t);
+      if (result.winner === 'att') this.#heroWounded(t);
+    }
 
     // Reparto de supervivientes: cada uno conserva la misma fracción; lo que sobra por redondeo, para el anfitrión
     const lefts = pools.map(() => ({}));

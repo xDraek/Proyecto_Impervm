@@ -9,6 +9,8 @@ import { ClientWorld } from './ClientWorld.js';
 // acciones se mandan al servidor, que es quien decide.
 
 const SYNC_MS = 8000;
+/** Con la conexión en vivo abierta, el servidor avisa de los cambios: basta con preguntar de tarde en tarde. */
+const LIVE_SYNC_MS = 45_000;
 const MIN_GAP_MS = 1500;
 
 export class ClientGame extends Game {
@@ -24,6 +26,7 @@ export class ClientGame extends Game {
     universe.speed = snap.speed ?? universe.speed;
     this.username = snap.username;
     this.alliance = snap.alliance ?? null;
+    this.admin = !!snap.admin;
     this.mailUnread = snap.mailUnread ?? 0;
     const islandsChanged = this.world.apply(snap.world);
     this.state = snap.state;
@@ -88,7 +91,7 @@ export class ClientGame extends Game {
   start() {
     this.timer = setInterval(() => {
       const since = Date.now() - this.lastSync;
-      if ((this.due && since > MIN_GAP_MS) || since > SYNC_MS) this.sync();
+      if ((this.due && since > MIN_GAP_MS) || since > (this.live ? LIVE_SYNC_MS : SYNC_MS)) this.sync();
     }, 500);
   }
 
@@ -131,8 +134,16 @@ export class ClientGame extends Game {
     return this.#act('trade', from, to, n);
   }
 
-  sendMission(type, target, units, payload) {
-    return this.#act('sendMission', type, target, units, payload);
+  sendMission(type, target, units, payload, opts = {}) {
+    return this.#act('sendMission', type, target, units, payload, opts);
+  }
+
+  hireHero(name) {
+    return this.#act('hireHero', name);
+  }
+
+  heroSkill(skill) {
+    return this.#act('heroSkill', skill);
   }
 
   recall(id) {

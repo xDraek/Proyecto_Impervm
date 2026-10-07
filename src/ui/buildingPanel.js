@@ -1,4 +1,4 @@
-import { BUILDINGS, POWERS, POWER_KEYS, RESEARCH, RESEARCH_KEYS, RESOURCES, RESOURCE_KEYS, UNITS, UNIT_KEYS } from '../game/data.js';
+import { BUILDINGS, HERO, HERO_SKILLS, POWERS, POWER_KEYS, RESEARCH, RESEARCH_KEYS, RESOURCES, RESOURCE_KEYS, UNITS, UNIT_KEYS } from '../game/data.js';
 import { favorMax, favorRate, producerOutput, protectedAmount, requirementName, storageCapacity, townSpeedup, wallBonus } from '../game/rules.js';
 import { costList, escapeHtml, fmtDec, fmtNum, fmtTime, unitList } from './format.js';
 
@@ -292,6 +292,43 @@ function refreshTemple(game, root) {
   }
 }
 
+// ── Almirante ─────────────────────────────────────────────────────────────────
+
+function heroSection(game) {
+  const h = game.hero;
+  if (!h) {
+    const locked = game.level('ayuntamiento') < HERO.requires.ayuntamiento;
+    return `<h4>Almirante</h4>
+      <p class="desc small">Un héroe que acompaña a una flota (más ataque, carga o velocidad) o defiende la isla. Gana experiencia en cada combate.</p>
+      ${locked
+        ? `<p class="reqs">🔒 Requiere el ayuntamiento a nivel ${HERO.requires.ayuntamiento}</p>`
+        : `<div class="train-row"><input type="text" name="hero-name" maxlength="24" placeholder="Nombre del almirante" />
+            <button class="primary small auto" data-action="hire-hero" data-need='${JSON.stringify(HERO.cost)}' data-blocked="0">Contratar</button></div>
+          ${costList(HERO.cost, game.resources)}`}`;
+  }
+  const status = game.heroStatus();
+  const next = HERO.xpFor(h.level + 1);
+  const prev = HERO.xpFor(h.level);
+  const pct = h.level >= HERO.maxLevel ? 100 : Math.min(100, ((h.xp - prev) / Math.max(1, next - prev)) * 100);
+  const where = {
+    casa: '⚓ En casa: defiende la isla',
+    mision: '⛵ Navegando con una flota',
+    herido: `🩹 Herido: se recupera en <span data-until="${h.woundedUntil}"></span>`,
+  }[status];
+  const skills = Object.entries(HERO_SKILLS)
+    .map(
+      ([id, sk]) => `<div class="skill"><span>${sk.icon} <b>${sk.name}</b> ${h.skills[id]}</span><span class="muted small">${sk.text(h.skills[id])}</span>
+        <button class="ghost small" data-action="hero-skill" data-skill="${id}" ${h.points ? '' : 'disabled'}>+</button></div>`,
+    )
+    .join('');
+  return `<h4>🎖️ ${escapeHtml(h.name)} · nivel ${h.level}</h4>
+    <div class="progress"><i style="width:${pct}%"></i></div>
+    <p class="muted small">${fmtNum(h.xp)} / ${fmtNum(next)} de experiencia · ${where}</p>
+    ${h.points ? `<p class="hint ok">Tienes ${h.points} ${h.points === 1 ? 'punto' : 'puntos'} para repartir</p>` : ''}
+    <div class="skills">${skills}</div>
+    <p class="desc small">Para llevarlo, marca «Que vaya el almirante» al mandar una flota. Si su flota cae, vuelve herido.</p>`;
+}
+
 function townSection(game) {
   const eco = game.economy();
   return `<h4>Tu imperio</h4>
@@ -310,7 +347,7 @@ export function buildingPanel(hud, id) {
   else if (id === 'cuartel' || id === 'puerto') extra = recruitSection(game, id);
   else if (id === 'mercado') extra = marketSection(game) + (game.level('mercado') > 0 ? hud.social.marketHtml() : '');
   else if (id === 'muralla') extra = wallSection(game);
-  else if (id === 'ayuntamiento') extra = townSection(game);
+  else if (id === 'ayuntamiento') extra = townSection(game) + `<div class="section">${heroSection(game)}</div>`;
   else if (id === 'templo') extra = templeSection(game);
 
   const html = `

@@ -1,10 +1,11 @@
 import { createReadStream } from 'node:fs';
 import { stat } from 'node:fs/promises';
 import { createServer } from 'node:http';
+import { WebSocketServer } from 'ws';
 import { extname, join, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { universe } from '../src/config.js';
-import { BUILDINGS, MISSION_TYPES, PLAYER_UNITS, POWERS, RESEARCH, RESOURCES, UNITS } from '../src/game/data.js';
+import { BUILDINGS, HERO_SKILLS, MISSION_TYPES, PLAYER_UNITS, POWERS, RESEARCH, RESOURCES, UNITS } from '../src/game/data.js';
 import { readToken, signToken } from './auth.js';
 import { openStore } from './store.js';
 import { UserError, WorldServer } from './WorldServer.js';
@@ -13,7 +14,8 @@ import { UserError, WorldServer } from './WorldServer.js';
 //   npm run dev   → con Vite integrado (recarga en caliente) y datos en server/data/
 //   npm start     → producción: sirve dist/ y usa Postgres si hay DATABASE_URL
 //
-// Variables de entorno: PORT, DATABASE_URL, AUTH_SECRET, GAME_SPEED, DATA_FILE (archivo local).
+// Variables de entorno: PORT, DATABASE_URL, AUTH_SECRET, GAME_SPEED, ADMINS (moderadores),
+// DATA_FILE (archivo local).
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const DEV = process.argv.includes('--dev');
@@ -29,7 +31,10 @@ if (!process.env.AUTH_SECRET && store.kind === 'postgres') {
 }
 
 // El mundo sigue vivo aunque nadie esté conectado
-setInterval(() => world.tick(), 1000);
+setInterval(() => {
+  world.tick();
+  world.flushPush();
+}, 1000);
 let saving = false;
 setInterval(async () => {
   if (saving) return;
@@ -77,8 +82,10 @@ const ACTIONS = {
   train: (g, [id, n]) => (own(UNITS, id) ? g.train(id, int(n)) : bad()),
   cancelTraining: (g, [b, i]) => ((b === 'cuartel' || b === 'puerto') && int(i) >= 0 ? g.cancelTraining(b, int(i)) : bad()),
   trade: (g, [from, to, n]) => (own(RESOURCES, from) && own(RESOURCES, to) ? g.trade(from, to, int(n)) : bad()),
-  sendMission: (g, [type, target, u, load]) =>
-    own(MISSION_TYPES, type) && typeof target === 'string' ? g.sendMission(type, target, units(u), resources(load)) : bad(),
+  sendMission: (g, [type, target, u, load, opts]) =>
+    own(MISSION_TYPES, type) && typeof target === 'string' ? g.sendMission(type, target, units(u), resources(load), { hero: opts?.hero === true }) : bad(),
+  hireHero: (g, [name]) => g.hireHero(typeof name === 'string' ? name : ''),
+  heroSkill: (g, [skill]) => (own(HERO_SKILLS, skill) ? g.heroSkill(skill) : bad()),
   recall: (g, [id]) => g.recall(int(id)),
   claimQuest: (g, [id]) => (typeof id === 'string' ? g.claimQuest(id) : bad()),
   claimDaily: (g) => g.claimDaily(),
@@ -133,7 +140,7 @@ async function readJson(req) {
 function authUser(req) {
   const header = req.headers.authorization ?? '';
   const uid = readToken(header.replace(/^Bearer /, ''), world.secret);
-  if (uid == null || !world.games.has(uid)) return null;
+  if (uid == null || !world.games.has(uid) || world.isBanned(uid)) return null;
   world.seen(uid);
   return uid;
 }
@@ -164,7 +171,14 @@ async function api(req, res, url) {
       const handler = own(ACTIONS, action) ? ACTIONS[action] : null;
       if (!handler) return send(res, 400, { error: 'Acción desconocida.' });
       const result = handler(world.games.get(uid), Array.isArray(args) ? args : []);
-      return send(res, 200, { result, snapshot: world.snapshot(uid) });
+      // Si va hacia otra ciudad, que su dueño lo vea llegar al momento
+      if (action === 'sendMission' && result?.ok) {
+        const owner = world.island(String(args[1]))?.owner;
+        if (owner != null) world.pendingPush.add(owner);
+      }
+      const snapshot = world.snapshot(uid);
+      world.pendingPush.delete(uid); // ya lo recibe en la respuesta
+      return send(res, 200, { result, snapshot });
     }
 
     if (route === 'GET /api/ranking') return send(res, 200, world.ranking(uid));
@@ -174,6 +188,19 @@ async function api(req, res, url) {
       if (limited(`chat:${uid}`, 5, 10_000)) return send(res, 429, { error: 'Espera un poco antes de escribir otra vez.' });
       const { text, channel } = await readJson(req);
       return send(res, 200, { message: world.addChat(uid, text, channel) });
+    }
+
+    // Moderación
+    if (req.method === 'POST' && url.pathname.startsWith('/api/admin/')) {
+      const body = await readJson(req);
+      const sub = url.pathname.slice('/api/admin/'.length);
+      if (sub === 'mute') world.mute(uid, body.name, body.minutes);
+      else if (sub === 'ban') world.ban(uid, body.name, body.reason, true);
+      else if (sub === 'unban') world.ban(uid, body.name, '', false);
+      else if (sub === 'delete-chat') world.deleteChat(uid, body.id);
+      else if (sub === 'broadcast') world.broadcast(uid, body.text);
+      else return send(res, 404, { error: 'No existe.' });
+      return send(res, 200, { ok: true });
     }
 
     // Perfil y cuenta
@@ -285,6 +312,39 @@ const server = createServer((req, res) => {
   if (vite) return vite.middlewares(req, res);
   return serveStatic(req, res, url);
 });
+
+// Conexión en vivo: el servidor empuja estados y mensajes del chat al momento
+const wss = new WebSocketServer({ noServer: true, maxPayload: 4096 });
+server.on('upgrade', (req, socket, head) => {
+  const url = new URL(req.url, 'http://localhost');
+  if (url.pathname !== '/ws') return; // otras conexiones (p. ej. la recarga de Vite) no son nuestras
+  const uid = readToken(url.searchParams.get('token'), world.secret);
+  if (uid == null || !world.games.has(uid) || world.isBanned(uid)) {
+    socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
+    return socket.destroy();
+  }
+  wss.handleUpgrade(req, socket, head, (ws) => {
+    world.addSocket(uid, ws);
+    world.seen(uid);
+    ws.alive = true;
+    ws.on('pong', () => {
+      ws.alive = true;
+      world.seen(uid);
+    });
+    ws.on('message', () => {}); // el cliente no manda nada por aquí: las acciones van por la API
+    ws.on('close', () => world.removeSocket(uid, ws));
+  });
+});
+// Latido: cierra las conexiones muertas
+setInterval(() => {
+  for (const ws of wss.clients) {
+    if (!ws.alive) ws.terminate();
+    else {
+      ws.alive = false;
+      ws.ping();
+    }
+  }
+}, 30_000);
 
 server.listen(PORT, () => {
   console.log(`Imperium en http://localhost:${PORT} · datos: ${store.kind} · velocidad ×${universe.speed} · ${world.users.size} jugadores`);

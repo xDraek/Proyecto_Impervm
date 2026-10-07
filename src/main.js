@@ -7,6 +7,7 @@ import { freshIslandState, generateSector } from './game/world.js';
 import { ClientGame } from './net/ClientGame.js';
 import { ClientWorld } from './net/ClientWorld.js';
 import { getToken, setToken } from './net/api.js';
+import { connectLive } from './net/socket.js';
 import { World } from './scene/World.js';
 import { Hud } from './ui/Hud.js';
 import { showLanding } from './ui/landing.js';
@@ -194,6 +195,15 @@ function startGame(game) {
   else if (game.dailyStatus().available) hud.social.openDaily();
 
   game.start();
+  connectLive(game, {
+    onChat: (m) => hud.receiveChat(m),
+    onChatDelete: (id) => hud.removeChat(id),
+    onBanned: () => {
+      setToken(null);
+      alert('Tu cuenta ha sido suspendida.');
+      location.reload();
+    },
+  });
   let last = performance.now();
   let hudTimer = 0;
   world.renderer.setAnimationLoop((now) => {

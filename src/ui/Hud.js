@@ -66,8 +66,8 @@ export class Hud {
     });
     this.dock.addEventListener('click', (e) => this.#onDockClick(e));
     this.sidebar.addEventListener('click', (e) => {
-      const li = e.target.closest('[data-id]');
-      if (li) this.onSelect(li.dataset.id);
+      const li = e.target.closest('[data-id], [data-select]');
+      if (li) this.onSelect(li.dataset.id ?? li.dataset.select);
     });
     this.alert.addEventListener('click', () => this.onSelect('muralla'));
     this.viewBtn.addEventListener('click', () => this.onView(this.view === 'isla' ? 'mapa' : 'isla'));
@@ -103,6 +103,11 @@ export class Hud {
     this.chatEl.querySelector('[data-action="close-chat"]').addEventListener('click', () => this.toggleChat(false));
     this.chatEl.querySelector('.chat-form').addEventListener('submit', (e) => this.#sendChat(e));
     this.chatEl.querySelector('.chat-log').addEventListener('click', (e) => {
+      const del = e.target.closest('[data-delete]')?.dataset.delete;
+      if (del) {
+        api('POST', '/api/admin/delete-chat', { id: Number(del) }).catch((err) => this.toast(err.message, 'error'));
+        return;
+      }
       const name = e.target.closest('[data-profile]')?.dataset.profile;
       if (name) this.social.openProfile(name);
     });
@@ -379,8 +384,12 @@ export class Hud {
         .map((id) => `<li title="${UNITS[id].name}"><span>${UNITS[id].icon}</span><span class="b-name">${UNITS[id].name}</span><b>${fmtNum(game.units[id])}</b></li>`)
         .join('');
       const away = game.missions.length ? `<p class="muted small">${game.missions.length} ${game.missions.length === 1 ? 'flota' : 'flotas'} en el mar</p>` : '';
+      const status = game.heroStatus();
+      const heroLine = status
+        ? `<p class="hero-line" data-select="ayuntamiento">🎖️ ${escapeHtml(game.hero.name)} · Nv ${game.hero.level}${game.hero.points ? ' · ⭐' : ''}<span class="muted small">${{ casa: 'en casa', mision: 'en el mar', herido: 'herido' }[status]}</span></p>`
+        : '';
       html = `<h2>Edificios</h2><ul class="list">${items}</ul>
-        <div class="army-block"><h2>Ejército</h2>${army ? `<ul class="army">${army}</ul>` : '<p class="muted small">Sin tropas en casa</p>'}${away}</div>`;
+        <div class="army-block"><h2>Ejército</h2>${heroLine}${army ? `<ul class="army">${army}</ul>` : '<p class="muted small">Sin tropas en casa</p>'}${away}</div>`;
     } else {
       // Las islas que ves, de la más cercana a la más lejana
       const home = game.state.home;
@@ -554,7 +563,8 @@ export class Hud {
         const payload = readPayload(root);
         const units = fleetFor(game, type, readFleet(root), payload);
         const name = game.world.island(target)?.name ?? 'la isla';
-        const res = await this.#run(btn, () => game.sendMission(type, target, units, payload), `${MISSION_TYPES[type].icon} La flota zarpa hacia ${name}`, 'sail');
+        const opts = { hero: !!root.querySelector('[name="with-hero"]')?.checked };
+        const res = await this.#run(btn, () => game.sendMission(type, target, units, payload, opts), `${MISSION_TYPES[type].icon} La flota zarpa hacia ${name}`, 'sail');
         if (res?.ok) for (const input of this.panel.querySelectorAll('input[name^="f-"], input[name^="p-"]')) input.value = '';
         break;
       }
@@ -563,6 +573,14 @@ export class Hud {
         break;
       case 'profile':
         this.social.openProfile(btn.dataset.name);
+        break;
+      case 'hire-hero': {
+        const name = root.querySelector('[name="hero-name"]')?.value ?? '';
+        await this.#run(btn, () => game.hireHero(name), null, 'success');
+        break;
+      }
+      case 'hero-skill':
+        await this.#run(btn, () => game.heroSkill(btn.dataset.skill), null, 'magic');
         break;
       case 'simulate': {
         const view = game.island(this.selected);
@@ -639,7 +657,7 @@ export class Hud {
       rows.push(
         row({
           icon: going ? t.icon : '⚓',
-          title: `${going ? t.name : 'Vuelta de'} ${escapeHtml(m.targetName ?? game.world.island(m.target)?.name ?? '')}`,
+          title: `${going ? t.name : 'Vuelta de'} ${escapeHtml(m.targetName ?? game.world.island(m.target)?.name ?? '')}${m.hero ? ' 🎖️' : ''}`,
           start,
           end,
           select: m.target,
@@ -725,7 +743,23 @@ export class Hud {
 
   async #pollChat() {
     await this.#fetchChat();
-    setTimeout(() => this.#pollChat(), this.chatEl.hidden ? 15_000 : 3_000);
+    // Con la conexión en vivo los mensajes llegan solos; esto es solo por si acaso
+    const wait = this.game.live ? 60_000 : this.chatEl.hidden ? 15_000 : 3_000;
+    setTimeout(() => this.#pollChat(), wait);
+  }
+
+  /** Mensaje que llega por la conexión en vivo. */
+  receiveChat(message) {
+    if (message.id <= this.chatLast) return;
+    this.chatMessages.push(message);
+    if (this.chatMessages.length > 200) this.chatMessages.shift();
+    this.chatLast = message.id;
+    this.#renderChat();
+  }
+
+  removeChat(id) {
+    this.chatMessages = this.chatMessages.filter((m) => m.id !== id);
+    this.#renderChat();
   }
 
   async #fetchChat(scroll = false) {
@@ -759,7 +793,9 @@ export class Hud {
         const time = new Date(m.t).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
         return m.system
           ? `<div class="msg system"><span>${escapeHtml(m.text)}</span><time>${time}</time></div>`
-          : `<div class="msg${m.name === this.game.username ? ' mine' : ''}"><b data-profile="${escapeHtml(m.name)}">${escapeHtml(m.name)}</b> <span>${escapeHtml(m.text)}</span><time>${time}</time></div>`;
+          : `<div class="msg${m.name === this.game.username ? ' mine' : ''}"><b data-profile="${escapeHtml(m.name)}">${escapeHtml(m.name)}</b> <span>${escapeHtml(m.text)}</span><time>${time}</time>${
+              this.game.admin ? `<button class="msg-del" data-delete="${m.id}" title="Borrar mensaje">✕</button>` : ''
+            }</div>`;
       })
       .join('');
     if (scroll || atBottom) log.scrollTop = log.scrollHeight;
@@ -798,7 +834,9 @@ export class Hud {
     if (!text) return;
     input.value = '';
     try {
-      await api('POST', '/api/chat', { text, channel: this.chatChannel });
+      // Los moderadores pueden hacer anuncios con /anuncio
+      if (this.game.admin && text.startsWith('/anuncio ')) await api('POST', '/api/admin/broadcast', { text: text.slice(9) });
+      else await api('POST', '/api/chat', { text, channel: this.chatChannel });
       await this.#fetchChat(true);
     } catch (err) {
       input.value = text;

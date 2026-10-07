@@ -131,6 +131,7 @@ function fleetForm(game, view) {
   return `<div class="section">
     <h4>Enviar flota <span class="muted small">(${game.missions.length}/${game.fleetSlots()} en el mar)</span></h4>
     <div class="fleet">${rows}</div>
+    ${game.heroStatus() === 'casa' ? `<label class="hero-toggle"><input type="checkbox" name="with-hero" /> 🎖️ Que vaya ${escapeHtml(game.hero.name)} (Nv ${game.hero.level})</label>` : ''}
     <div class="fleet-summary" data-fleet-summary></div>
     ${cargoForm}
     ${colony}
@@ -180,7 +181,7 @@ function refreshFleet(game, id, root) {
   if (!summary) return;
   const units = readFleet(root);
   const any = Object.keys(units).length > 0;
-  const base = game.planMission('atacar', id, units);
+  const base = game.planMission('atacar', id, units, null, { hero: !!root.querySelector('[name="with-hero"]')?.checked });
   const text = any
     ? `👥 ${base.used}/${base.capacity} plazas · 📦 ${fmtNum(base.cargo)} de carga${base.seconds ? ` · ⏱ ${fmtTime(base.seconds)} de ida` : ''}`
     : 'Elige cuántas unidades mandas.';
@@ -190,8 +191,9 @@ function refreshFleet(game, id, root) {
   let anyOk = false;
   let lastReason = '';
   const payload = readPayload(root);
+  const opts = { hero: !!root.querySelector('[name="with-hero"]')?.checked };
   for (const btn of root.querySelectorAll('[data-action="mission"]')) {
-    const plan = game.planMission(btn.dataset.type, id, fleetFor(game, btn.dataset.type, units, payload), payload);
+    const plan = game.planMission(btn.dataset.type, id, fleetFor(game, btn.dataset.type, units, payload), payload, opts);
     btn.disabled = !plan.ok;
     btn.title = plan.ok ? `Llegada en ${fmtTime(plan.seconds)}` : plan.reason;
     anyOk ||= plan.ok;
