@@ -120,7 +120,9 @@ function tree(color, palm) {
 /** Estado visual de la isla según lo que sabe el jugador. */
 export function islandLook(view) {
   if (view.type === 'brumas') return 'brumas';
+  if (view.type === 'jugador') return `ciudad-${view.townLevel >= 6 ? 3 : view.townLevel >= 3 ? 2 : 1}`;
   if (view.colonized) return 'colonia';
+  if (view.colonizedBy != null) return 'colonia-otro';
   if (!view.explored) return 'niebla';
   if (view.type === 'ruinas') return view.looted ? 'ruinas-saqueadas' : 'ruinas';
   return view.type;
@@ -139,7 +141,11 @@ export function createIslandFeature(isl, look) {
     ruinas: () => ruins(g, R, rand, true),
     'ruinas-saqueadas': () => ruins(g, R, rand, false),
     libre: () => specialty(g, isl, R, rand),
-    colonia: () => colony(g, isl, R, rand),
+    colonia: () => colony(g, isl, R, rand, C.cloth[0]),
+    'colonia-otro': () => colony(g, isl, R, rand, ownerColor(isl)),
+    'ciudad-1': () => city(g, isl, R, rand, 1),
+    'ciudad-2': () => city(g, isl, R, rand, 2),
+    'ciudad-3': () => city(g, isl, R, rand, 3),
     kraken: () => lair(g, R, rand),
     brumas: () => fogBank(g, R, rand),
   };
@@ -328,7 +334,59 @@ function specialty(g, isl, R, rand) {
   }
 }
 
-function colony(g, isl, R, rand) {
+const OWNER_COLORS = ['#4f8fd9', '#6bbf59', '#e3b23c', '#8a5ab8', '#d9734f', '#3fb6b6', '#c94f8a', '#7a7f87'];
+
+/** Color de bandera de un jugador (siempre el mismo para cada uno). */
+export function ownerColor(isl) {
+  const id = isl.owner ?? isl.colonizedBy ?? 0;
+  return OWNER_COLORS[Math.abs(Number(id) || hashString(String(id))) % OWNER_COLORS.length];
+}
+
+/** Ciudad de otro jugador: casas, ayuntamiento y muralla según su tamaño. */
+function city(g, isl, R, rand, size) {
+  const roofs = [C.roofRed, C.roofBlue, C.roofGrey, '#a0522d'];
+  const houses = 6 + size * 4;
+  for (let i = 0; i < houses; i++) {
+    const h = new THREE.Group();
+    const w = 1.1 + rand() * 0.5;
+    h.add(box(w, 0.8 + rand() * 0.5, 0.9, C.wall));
+    h.add(gableRoof(w + 0.2, 0.55, 1.1, roofs[i % roofs.length], 0, h.children[0].geometry.parameters.height, 0));
+    h.position.copy(polar(R * (0.25 + (i % 3) * 0.12 + rand() * 0.05), (i / houses) * 360 + rand() * 12));
+    h.rotation.y = rand() * Math.PI;
+    g.add(h);
+  }
+  // Ayuntamiento en el centro
+  g.add(box(2.4, 1.6, 2.4, C.wall, 0, 0, 0));
+  const roof = mesh(new THREE.ConeGeometry(1.9, 1.4, 4), C.roofBlue);
+  roof.rotation.y = Math.PI / 4;
+  roof.position.y = 2.3;
+  g.add(roof);
+  g.add(cyl(0.05, 0.05, 1.6, 6, C.dark, 0, 3.0, 0));
+  const flag = box(1.0, 0.6, 0.03, ownerColor(isl), 0, 0, 0);
+  flag.geometry.translate(0.5, 0, 0);
+  flag.position.y = 4.3;
+  flag.userData.wave = true;
+  g.add(flag);
+  // Muralla en las ciudades grandes
+  if (size >= 2) {
+    const r = R * 0.62;
+    for (let a = 0; a < 360; a += 10) {
+      if (a > 150 && a < 190) continue;
+      const seg = box(r * 0.19, 0.9 + size * 0.2, 0.4, C.stone, 0, 0, 0);
+      seg.position.copy(polar(r, a, (0.9 + size * 0.2) / 2));
+      seg.rotation.y = (a * Math.PI) / 180;
+      g.add(seg);
+    }
+  }
+  const ship = createShip(size >= 3 ? 'galeon' : 'mercante');
+  ship.scale.setScalar(2);
+  ship.position.copy(polar(R * 1.3, 170, SEA));
+  ship.rotation.y = Math.PI / 2;
+  ship.userData.bob = { amp: 0.08, speed: 1.1, base: SEA };
+  g.add(ship);
+}
+
+function colony(g, isl, R, rand, flagColor) {
   specialty(g, isl, R, rand);
   const roofs = [C.roofRed, C.roofBlue, C.roofRed, C.roofGrey];
   for (let i = 0; i < 4; i++) {
@@ -340,7 +398,7 @@ function colony(g, isl, R, rand) {
     g.add(h);
   }
   g.add(cyl(0.06, 0.06, 3.2, 6, C.dark));
-  const flag = box(1.1, 0.7, 0.03, C.cloth[0], 0, 0, 0);
+  const flag = box(1.1, 0.7, 0.03, flagColor, 0, 0, 0);
   flag.geometry.translate(0.55, 0, 0);
   flag.position.y = 2.8;
   flag.userData.wave = true;

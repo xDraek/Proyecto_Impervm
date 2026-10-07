@@ -1,20 +1,20 @@
 # Imperium
 
-Juego de navegador de gestión de imperio al estilo de OGame o Ikariam: un archipiélago low-poly en 3D hecho con Three.js y Vite. Por ahora es para un jugador y no tiene servidor; la partida se guarda en `localStorage`.
+Juego de estrategia multijugador en el navegador al estilo de Ikariam/OGame: un archipiélago low-poly en 3D (Three.js + Vite) compartido por todos los jugadores. Hay un servidor Node (`server/`) que guarda las cuentas y el mundo (Postgres si hay `DATABASE_URL`, si no un archivo en `server/data/`).
 
 - El usuario escribe en español. Responde, comenta el código y escribe los textos del juego en español.
-- Estructura: las reglas puras van en `src/game/` (sin Three.js ni DOM, para poder llevarlas a un servidor más adelante), la escena 3D en `src/scene/` y la interfaz HTML en `src/ui/`.
-- Todo el tiempo de juego se calcula con marcas de tiempo. `Game.#advance` procesa en orden cronológico los sucesos (obras, investigaciones, reclutas, flotas, piratas) y acumula la producción entre uno y otro, así que todo avanza aunque la pestaña esté cerrada. No metas lógica de juego que dependa de los fotogramas: si añades algo con fecha, dale su suceso en `#nextEvent`.
-- Los datos (edificios, unidades, investigaciones, islas) viven en `src/game/data.js`. Los requisitos (`requires`) mezclan edificios e investigaciones, así que sus ids no se pueden repetir.
-- La interfaz solo regenera el HTML de un panel cuando cambia (evento `change` de la partida); lo que corre con el reloj se refresca en el sitio con atributos `data-until`, `data-bar`, `data-cost`, `data-need` y `data-wait` (ver `Hud#refreshLive`).
-- Los modelos de los edificios son procedurales (`src/scene/models.js`) y cambian con el nivel. Las islas del mapa están en `src/scene/islands.js`.
-- La partida guardada lleva versión (`SAVE_VERSION` en `Game.js`); `loadState` amplía las partidas antiguas con los campos nuevos.
+- Estructura: las reglas puras van en `src/game/` (sin Three.js ni DOM): las usan tanto el servidor como el navegador. La escena 3D va en `src/scene/`, la interfaz en `src/ui/` y la conexión con el servidor en `src/net/`.
+- `Game` es la partida de un jugador. En el servidor (`mode: 'server'`) decide todo: `#advance` procesa en orden cronológico los sucesos (obras, investigaciones, reclutas, flotas, piratas, visitantes, fin de poderes) y acumula la producción entre uno y otro. En el navegador (`ClientGame`, `mode: 'mirror'`) solo deja correr la producción y pide el estado nuevo al servidor cuando toca un suceso. Las acciones del jugador siempre las ejecuta el servidor.
+- No metas lógica de juego que dependa de los fotogramas ni de `Date.now()`: usa `clock.now()` de `src/config.js` (en el navegador se corrige con la hora del servidor). Si añades algo con fecha, dale su suceso en `#nextEvent`.
+- `Game` accede al mundo compartido a través de `world` (`WorldServer` en el servidor, `ClientWorld` en el navegador): islas, su estado compartido, información de otros jugadores y, en el servidor, ataques y espionaje entre jugadores.
+- Cada acción nueva que el jugador pueda hacer hay que añadirla a `ACTIONS` en `server/index.js` validando sus argumentos (nunca se pasan tal cual: el último parámetro de casi todos los métodos es la hora) y a `ClientGame`.
+- Los datos (edificios, unidades, investigaciones, poderes, misiones) viven en `src/game/data.js`; las islas se generan por sectores en `src/game/world.js`. Los requisitos (`requires`) mezclan edificios e investigaciones, así que sus ids no se pueden repetir.
+- La interfaz solo regenera el HTML de un panel cuando cambia (evento `change`); lo que corre con el reloj se refresca en el sitio con atributos `data-until`, `data-bar`, `data-cost`, `data-need` y `data-wait` (ver `Hud#refreshLive`). Escapa con `escapeHtml` todo texto que venga de jugadores (nombres, ciudades, chat).
+- Las partidas guardadas llevan versión (`SAVE_VERSION`); `upgradeState` completa las antiguas con los campos nuevos.
 
 ## Probar
 
-- Servidor de desarrollo: configuración `imperium` en `.claude/launch.json` (puerto 5173).
-- `?speed=N` acelera la producción, las obras, las investigaciones, los reclutas y los viajes.
-- `?save=prueba` usa otra partida guardada. Úsalo siempre para probar: el usuario juega en el mismo navegador y no hay que tocar su partida.
-- En la consola tienes `window.__IMPERIUM__` (`game`, `world`, `hud`, `select`, `setView`). Los clics sintéticos sobre el canvas y en los botones sí funcionan.
-- Si cambias niveles a mano en `game.state` para probar algo, hazlo en una partida `?save=…` aparte.
-- Los efectos con duración (poderes del templo) guardan su fin en `state.buffs` y ese fin es un suceso más, para que la producción se calcule bien por tramos.
+- Servidor de desarrollo: configuración `imperium` en `.claude/launch.json` (`npm run dev`, puerto 5173). Es el servidor del juego con Vite dentro.
+- `GAME_SPEED=N` acelera el universo. `DATA_FILE=ruta` usa otro archivo de mundo, útil para probar sin tocar el de desarrollo.
+- Para probar varios jugadores, registra cuentas por la API (`POST /api/register`) o en ventanas privadas.
+- Las reglas se pueden probar sin navegador importando `server/WorldServer.js` con un almacén falso.

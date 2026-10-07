@@ -6,7 +6,7 @@ import * as THREE from 'three';
 // - Junto a la orilla las olas se calman, así nunca suben por encima de la
 //   playa, y aparece agua clara poco profunda con espuma que va y viene.
 
-const MAX_SHORES = 20;
+export const MAX_SHORES = 24;
 const SIZE = 900; // mitad del lado
 const SEGMENTS = 320;
 
@@ -101,4 +101,13 @@ export function createWater(shores, level) {
   mesh.receiveShadow = true;
   mesh.userData.uniforms = uniforms;
   return mesh;
+}
+
+/** Cambia las orillas (con espuma) que tiene en cuenta el mar: las más cercanas. */
+export function setShores(mesh, shores) {
+  const list = mesh.userData.uniforms.uShores.value;
+  for (let i = 0; i < MAX_SHORES; i++) {
+    const s = shores[i];
+    list[i].set(s?.x ?? 1e5, s?.z ?? 1e5, s?.r ?? 0);
+  }
 }

@@ -1,9 +1,7 @@
-import { GAME_SPEED, SAVE_KEY } from '../config.js';
+import { clock, universe } from '../config.js';
 import {
   BUILDINGS,
   BUILDING_KEYS,
-  ISLANDS,
-  ISLAND_BY_ID,
   ISLAND_TYPES,
   LAND_UNITS,
   PLAYER_UNITS,
@@ -13,7 +11,6 @@ import {
   RESEARCH_KEYS,
   RESOURCES,
   RESOURCE_KEYS,
-  RIVALS,
   STARTING_RESOURCES,
   UNITS,
   VISITORS,
@@ -30,7 +27,6 @@ import {
   favorMax,
   favorRate,
   fleetSlots,
-  investedIn,
   maxColonies,
   missingRequirements,
   multiplyCost,
@@ -39,7 +35,6 @@ import {
   researchCost,
   researchMax,
   researchSeconds,
-  rivalScore,
   scoreOf,
   storageCapacity,
   sum,
@@ -49,8 +44,9 @@ import {
   wallBonus,
 } from './rules.js';
 
-const SAVE_VERSION = 3;
+export const SAVE_VERSION = 4;
 const MAX_REPORTS = 40;
+const MAX_NOTES = 30;
 
 // Piratas: el primer asalto llega un rato después de que el ayuntamiento alcance
 // el nivel 3; luego, cada 4-7 horas. Se avistan 20 minutos antes de llegar.
@@ -64,34 +60,23 @@ const LOOT_SHARE = 0.5;
 const VISIT_MIN_H = 3;
 const VISIT_MAX_H = 6;
 const ACTIVE_QUESTS = 3;
+/** Por debajo de estos puntos nadie te puede atacar (ni tú a otros jugadores). */
+export const NEWBIE_POINTS = 100;
 
-const hours = (h) => (h * HOUR_MS) / GAME_SPEED;
+const hours = (h) => (h * HOUR_MS) / universe.speed;
 
-function freshIsland(isl, t) {
-  const stock = {};
-  for (const [res, k] of Object.entries(isl.loot?.mix ?? {})) stock[res] = isl.loot.max * k * 0.6;
-  return {
-    explored: isl.type === 'brumas',
-    colonized: false,
-    looted: false,
-    garrison: { ...(isl.garrison ?? {}) },
-    garrisonAt: t,
-    stock,
-    stockAt: t,
-  };
-}
-
-function newState(now) {
+/** Partida nueva de un jugador cuya isla es `home`. */
+export function newState({ now = clock.now(), home, name }) {
   const buildings = {};
   for (const id of BUILDING_KEYS) buildings[id] = BUILDINGS[id].startLevel ?? 0;
   const research = {};
   for (const id of RESEARCH_KEYS) research[id] = 0;
   const units = {};
   for (const id of PLAYER_UNITS) units[id] = 0;
-  const islands = {};
-  for (const isl of ISLANDS) islands[isl.id] = freshIsland(isl, now);
   return {
     version: SAVE_VERSION,
+    name,
+    home,
     resources: { ...STARTING_RESOURCES },
     buildings,
     research,
@@ -100,13 +85,15 @@ function newState(now) {
     researchQueue: null,
     training: { cuartel: [], puerto: [] },
     missions: [],
-    islands,
+    known: {},
+    colonies: [],
     raid: null,
     nextRaidAt: null,
     reports: [],
+    notes: [],
     favor: 0,
     buffs: {},
-    stats: { spent: 0, victories: 0, raidsRepelled: 0, expeditions: 0, powers: 0, treasures: 0, kraken: 0 },
+    stats: { spent: 0, victories: 0, raidsRepelled: 0, expeditions: 0, powers: 0, treasures: 0, kraken: 0, pvpWins: 0 },
     quests: { claimed: [] },
     visitor: null,
     nextVisitAt: null,
@@ -116,62 +103,65 @@ function newState(now) {
   };
 }
 
-function loadState() {
-  try {
-    const raw = localStorage.getItem(SAVE_KEY);
-    if (!raw) return null;
-    const saved = JSON.parse(raw);
-    // Las versiones antiguas tienen menos campos: se completan con los de una partida nueva.
-    if (![1, 2, SAVE_VERSION].includes(saved?.version)) return null;
-    const base = newState(saved.lastUpdate ?? Date.now());
-    const islands = { ...base.islands };
-    for (const [id, isl] of Object.entries(saved.islands ?? {})) if (islands[id]) islands[id] = { ...islands[id], ...isl };
-    return {
-      ...base,
-      ...saved,
-      version: SAVE_VERSION,
-      resources: { ...base.resources, ...saved.resources },
-      buildings: { ...base.buildings, ...saved.buildings },
-      research: { ...base.research, ...saved.research },
-      units: { ...base.units, ...saved.units },
-      training: { ...base.training, ...saved.training },
-      missions: saved.missions ?? [],
-      reports: saved.reports ?? [],
-      buffs: saved.buffs ?? {},
-      stats: { ...base.stats, ...saved.stats, spent: saved.stats?.spent ?? investedIn({ ...base, ...saved }) },
-      quests: { claimed: saved.quests?.claimed ?? [] },
-      startedAt: saved.startedAt ?? Date.now(),
-      islands,
-    };
-  } catch {
-    return null;
-  }
+/** Completa una partida guardada con los campos que se hayan añadido después. */
+export function upgradeState(saved) {
+  const base = newState({ now: saved.lastUpdate, home: saved.home, name: saved.name });
+  return {
+    ...base,
+    ...saved,
+    version: SAVE_VERSION,
+    resources: { ...base.resources, ...saved.resources },
+    buildings: { ...base.buildings, ...saved.buildings },
+    research: { ...base.research, ...saved.research },
+    units: { ...base.units, ...saved.units },
+    training: { ...base.training, ...saved.training },
+    stats: { ...base.stats, ...saved.stats },
+    quests: { claimed: saved.quests?.claimed ?? [] },
+  };
 }
 
 /**
- * Estado y reglas de la partida. Todo se calcula a partir de marcas de tiempo:
- * `#advance` procesa en orden cronológico cada suceso (obras, investigaciones,
- * reclutas, flotas, piratas) y acumula la producción entre uno y otro, así que
- * todo sigue su curso aunque la página esté cerrada.
+ * Estado y reglas de la partida de un jugador. Todo se calcula a partir de
+ * marcas de tiempo: `#advance` procesa en orden cronológico cada suceso (obras,
+ * investigaciones, reclutas, flotas, piratas…) y acumula la producción entre
+ * uno y otro.
+ *
+ * El mismo código corre en dos sitios:
+ * - En el servidor (`mode: 'server'`) es el árbitro: procesa los sucesos.
+ * - En el navegador (`mode: 'mirror'`) es un espejo: solo hace correr la
+ *   producción hasta el siguiente suceso y avisa (`due`) para pedir al
+ *   servidor el estado nuevo. Las acciones las decide siempre el servidor.
+ *
+ * `world` da acceso a las islas compartidas (ver server/WorldServer.js y
+ * net/ClientWorld.js).
  *
  * Eventos: 'change' (cualquier cambio que no sea el goteo de recursos) y
- * 'notify' (detail: { text, kind }) para los avisos.
+ * 'notify' (detail: { text, kind }).
  */
 export class Game extends EventTarget {
   #notes = [];
   #dirty = false;
 
-  constructor() {
+  constructor({ state, world, userId, mode = 'server' }) {
     super();
-    const now = Date.now();
-    this.state = loadState() ?? newState(now);
-    this.#ensureRaid(this.state.lastUpdate);
-    this.#ensureVisits(this.state.lastUpdate);
-    const before = { ...this.state.resources };
-    const away = now - this.state.lastUpdate;
-    this.#advance(now);
-    this.offlineGains = away > 60_000 ? diff(this.state.resources, before) : null;
-    this.backlog = this.#notes.splice(0);
+    this.state = upgradeState(state);
+    this.world = world;
+    this.userId = userId;
+    this.mode = mode;
+    this.due = false;
+    this.busy = false;
+    if (mode === 'server') {
+      this.#ensureRaid(this.state.lastUpdate);
+      this.#ensureVisits(this.state.lastUpdate);
+    }
+  }
+
+  get mirror() {
+    return this.mode === 'mirror';
+  }
+
+  now() {
+    return clock.now();
   }
 
   // ── Lectura ────────────────────────────────────────────────────────────────
@@ -182,6 +172,14 @@ export class Game extends EventTarget {
 
   researchLevel(id) {
     return this.state.research[id] ?? 0;
+  }
+
+  get name() {
+    return this.state.name;
+  }
+
+  get homeIsland() {
+    return this.world.island(this.state.home);
   }
 
   get resources() {
@@ -237,7 +235,7 @@ export class Game extends EventTarget {
   }
 
   /** Hasta cuándo dura un efecto divino (0 si no está activo). */
-  buffUntil(id, now = Date.now()) {
+  buffUntil(id, now = this.now()) {
     const until = this.state.buffs[id] ?? 0;
     return until > now ? until : 0;
   }
@@ -251,8 +249,19 @@ export class Game extends EventTarget {
     return LAND_UNITS.reduce((a, id) => a + this.armyCount(id), 0);
   }
 
+  known(id) {
+    return this.state.known[id] ?? null;
+  }
+
   exploredCount() {
-    return ISLANDS.filter((i) => i.type !== 'brumas' && this.state.islands[i.id].explored).length;
+    return Object.entries(this.state.known).filter(([id, k]) => k.explored && this.world.island(id)?.type !== 'brumas').length;
+  }
+
+  /** Distancia en leguas desde tu isla. */
+  distanceTo(id) {
+    const a = this.homeIsland;
+    const b = this.world.island(id);
+    return a && b ? Math.hypot(a.x - b.x, a.z - b.z) : Infinity;
   }
 
   // ── Misiones (objetivos) ───────────────────────────────────────────────────
@@ -282,16 +291,13 @@ export class Game extends EventTarget {
     return scoreOf(this.state.stats.spent);
   }
 
-  ranking(now = Date.now()) {
-    const h = ((now - this.state.startedAt) / HOUR_MS) * GAME_SPEED;
-    const rows = RIVALS.map((r) => ({ name: r.name, points: rivalScore(r, h), player: false }));
-    rows.push({ name: 'Tu imperio', points: this.score(), player: true });
-    rows.sort((a, b) => b.points - a.points);
-    return rows.map((r, i) => ({ ...r, rank: i + 1 }));
+  /** Protección de novato: con pocos puntos nadie te ataca. */
+  isProtected() {
+    return this.score() < NEWBIE_POINTS;
   }
 
   economy() {
-    return economy(this.state, Date.now());
+    return economy(this.state, this.now());
   }
 
   protectedAmount() {
@@ -300,11 +306,11 @@ export class Game extends EventTarget {
 
   /** Producción neta por hora (con hambruna si no queda comida). */
   production() {
-    const eco = economy(this.state, Date.now());
+    const eco = economy(this.state, this.now());
     return this.starving(eco) ? eco.hungry : eco.net;
   }
 
-  starving(eco = economy(this.state, Date.now())) {
+  starving(eco = economy(this.state, this.now())) {
     return eco.net.comida < 0 && this.state.resources.comida < 1;
   }
 
@@ -313,7 +319,7 @@ export class Game extends EventTarget {
   }
 
   colonies() {
-    return ISLANDS.filter((i) => this.state.islands[i.id].colonized);
+    return this.state.colonies;
   }
 
   maxColonies() {
@@ -397,31 +403,46 @@ export class Game extends EventTarget {
     return tradeRate(this.state, from, to);
   }
 
-  /** Vista de una isla del archipiélago en el instante `t`. */
-  island(id, t = Date.now()) {
-    const isl = ISLAND_BY_ID[id];
-    const rt = this.state.islands[id];
-    return {
+  /** Vista de una isla en el instante `t`: datos fijos, estado compartido y lo que sabes de ella. */
+  island(id, t = this.now()) {
+    const isl = this.world.island(id);
+    if (!isl) return null;
+    const rt = this.world.islandState(id);
+    const known = this.state.known[id];
+    const view = {
       ...isl,
       typeName: ISLAND_TYPES[isl.type].name,
-      explored: rt.explored,
-      colonized: rt.colonized,
-      looted: rt.looted,
-      garrison: this.#garrisonAt(isl, rt, t),
-      stock: this.#stockAt(isl, rt, t),
-      intel: rt.intel ?? null,
+      dist: this.distanceTo(id),
+      explored: isl.type === 'brumas' || isl.owner === this.userId || !!known?.explored,
+      intel: known?.intel ?? null,
       inbound: this.state.missions.filter((m) => m.target === id),
+      mine: isl.owner != null && isl.owner === this.userId,
     };
+    if (isl.type === 'jugador') {
+      const p = this.world.playerInfo(isl.owner);
+      Object.assign(view, { ownerName: p?.name ?? '¿?', score: p?.score ?? 0, protected: !!p?.protected, townLevel: p?.townLevel ?? 1 });
+      return view;
+    }
+    const colonizedBy = rt?.colonizedBy ?? null;
+    Object.assign(view, {
+      colonized: colonizedBy != null && colonizedBy === this.userId,
+      colonizedBy,
+      colonistName: colonizedBy != null ? (this.world.playerInfo(colonizedBy)?.name ?? '¿?') : null,
+      looted: !!rt?.looted,
+      garrison: rt ? garrisonAt(isl, rt, t) : {},
+      stock: rt ? stockAt(isl, rt, t) : {},
+    });
+    return view;
   }
 
   // ── Acciones ───────────────────────────────────────────────────────────────
 
-  update(now = Date.now()) {
+  update(now = this.now()) {
     this.#advance(now);
     this.#flush(false);
   }
 
-  upgrade(id, now = Date.now()) {
+  upgrade(id, now = this.now()) {
     this.#advance(now);
     if (this.state.queue) return this.#fail('Ya hay una obra en marcha.');
     const next = this.nextUpgrade(id);
@@ -434,15 +455,16 @@ export class Game extends EventTarget {
     return this.#done();
   }
 
-  cancel() {
+  cancel(now = this.now()) {
+    this.#advance(now);
     const q = this.state.queue;
-    if (!q) return;
+    if (!q) return this.#fail('No hay ninguna obra.');
     this.#refund(q.cost);
     this.state.queue = null;
-    this.#flush(true);
+    return this.#done();
   }
 
-  research(id, now = Date.now()) {
+  research(id, now = this.now()) {
     this.#advance(now);
     if (this.level('academia') < 1) return this.#fail('Necesitas una academia.');
     if (this.state.researchQueue) return this.#fail('Ya hay una investigación en marcha.');
@@ -456,20 +478,21 @@ export class Game extends EventTarget {
     return this.#done();
   }
 
-  cancelResearch() {
+  cancelResearch(now = this.now()) {
+    this.#advance(now);
     const q = this.state.researchQueue;
-    if (!q) return;
+    if (!q) return this.#fail('No hay ninguna investigación.');
     this.#refund(q.cost);
     this.state.researchQueue = null;
-    this.#flush(true);
+    return this.#done();
   }
 
-  train(id, amount, now = Date.now()) {
+  train(id, amount, now = this.now()) {
     this.#advance(now);
     const u = UNITS[id];
     const n = Math.floor(amount);
     if (!u || u.npc) return this.#fail('Unidad desconocida.');
-    if (!(n >= 1)) return this.#fail('Indica cuántas unidades quieres.');
+    if (!(n >= 1 && n <= 100000)) return this.#fail('Indica cuántas unidades quieres.');
     if (this.level(u.building) < 1) return this.#fail(`Necesitas ${BUILDINGS[u.building].name.toLowerCase()}.`);
     if (missingRequirements(this.state, u.requires).length) return this.#fail('No cumples los requisitos.');
     const total = multiplyCost(u.cost, n);
@@ -483,11 +506,11 @@ export class Game extends EventTarget {
     return this.#done();
   }
 
-  cancelTraining(building, index, now = Date.now()) {
+  cancelTraining(building, index, now = this.now()) {
     this.#advance(now);
     const q = this.state.training[building];
-    const batch = q[index];
-    if (!batch) return;
+    const batch = q?.[index];
+    if (!batch) return this.#fail('Esa tanda ya no existe.');
     this.#refund(multiplyCost(batch.cost, batch.count - batch.done));
     q.splice(index, 1);
     let start = index === 0 ? now : q[index - 1].start + q[index - 1].count * q[index - 1].each;
@@ -495,10 +518,10 @@ export class Game extends EventTarget {
       q[i].start = start;
       start += q[i].count * q[i].each;
     }
-    this.#flush(true);
+    return this.#done();
   }
 
-  trade(from, to, amount, now = Date.now()) {
+  trade(from, to, amount, now = this.now()) {
     this.#advance(now);
     const n = Math.floor(amount);
     if (this.level('mercado') < 1) return this.#fail('Necesitas un mercado.');
@@ -519,10 +542,12 @@ export class Game extends EventTarget {
   /** Comprueba una misión sin enviarla. */
   planMission(type, target, units) {
     const s = this.state;
-    const isl = ISLAND_BY_ID[target];
-    const rt = s.islands[target];
+    const isl = this.world.island(target);
     const sent = {};
     let reason = '';
+    if (!isl) return { ok: false, reason: 'Esa isla no existe.', units: {}, seconds: 0, capacity: 0, used: 0, cargo: 0, ships: 0, cost: null };
+    const rt = this.world.islandState(target);
+    const view = this.island(target);
     for (const id of PLAYER_UNITS) {
       const n = Math.max(0, Math.floor(Number(units?.[id]) || 0));
       if (!n) continue;
@@ -545,18 +570,30 @@ export class Game extends EventTarget {
         used += n * u.size;
       }
     }
-    const seconds = Number.isFinite(speed) ? travelSeconds(s, isl.dist, speed) : 0;
+    const seconds = Number.isFinite(speed) ? travelSeconds(s, this.distanceTo(target), speed) : 0;
     const slots = fleetSlots(s);
     const pendingColonies = s.missions.filter((m) => m.type === 'colonizar').length;
     let cost = null;
 
+    if (target === s.home) reason ||= 'Es tu propia isla.';
     if (slots < 1) reason ||= 'Necesitas un puerto para zarpar.';
     else if (s.missions.length >= slots) reason ||= `Todas tus flotas están en el mar (${s.missions.length}/${slots}). Mejora el puerto.`;
     if (!count(sent)) reason ||= 'Elige qué unidades envías.';
     else if (!ships) reason ||= 'Hace falta al menos un barco para cruzar el mar.';
     else if (used > capacity) reason ||= `Faltan plazas en los barcos: ${used}/${capacity}.`;
 
-    if (type === 'explorar') {
+    if (isl.type === 'jugador') {
+      if (type === 'explorar') {
+        if (Object.keys(sent).some((id) => !UNITS[id].explorer)) reason ||= 'Para espiar envía solo botes exploradores.';
+      } else if (type === 'atacar') {
+        if (view.protected) reason ||= `${view.ownerName} está bajo protección de novato (menos de ${NEWBIE_POINTS} puntos).`;
+        else if (this.isProtected()) reason ||= `Mientras tengas menos de ${NEWBIE_POINTS} puntos no puedes atacar a otros jugadores.`;
+        if (!hasCombat(sent)) reason ||= 'Envía al menos una unidad de combate.';
+      } else {
+        reason ||= 'Esa misión no sirve contra otra ciudad.';
+      }
+    } else if (type === 'explorar') {
+      if (isl.type === 'brumas') reason ||= 'En el Mar de las Brumas solo caben expediciones.';
       if (Object.keys(sent).some((id) => !UNITS[id].explorer)) reason ||= 'Para explorar envía solo botes exploradores.';
     } else if (type === 'expedicion') {
       if (isl.type !== 'brumas') reason ||= 'Las expediciones zarpan hacia el Mar de las Brumas.';
@@ -564,15 +601,15 @@ export class Game extends EventTarget {
     } else if (isl.type === 'brumas') {
       reason ||= 'En el Mar de las Brumas solo caben expediciones.';
     } else if (type === 'atacar') {
-      if (rt.colonized) reason ||= 'Es tu colonia.';
-      else if (rt.explored && (isl.type === 'libre' || isl.type === 'ruinas')) reason ||= 'Aquí no hay nada que atacar.';
+      if (rt?.colonizedBy != null) reason ||= rt.colonizedBy === this.userId ? 'Es tu colonia.' : `Es una colonia de ${view.colonistName}.`;
+      else if (view.explored && (isl.type === 'libre' || isl.type === 'ruinas')) reason ||= 'Aquí no hay nada que atacar.';
       if (!hasCombat(sent)) reason ||= 'Envía al menos una unidad de combate.';
     } else if (type === 'colonizar') {
-      const colonies = this.colonies().length;
+      const colonies = s.colonies.length;
       const max = maxColonies(s);
-      if (!rt.explored) reason ||= 'Explora la isla antes de mandar colonos.';
+      if (!view.explored) reason ||= 'Explora la isla antes de mandar colonos.';
       else if (isl.type !== 'libre') reason ||= 'Solo puedes colonizar islas deshabitadas.';
-      else if (rt.colonized) reason ||= 'Ya es tu colonia.';
+      else if (rt?.colonizedBy != null) reason ||= rt.colonizedBy === this.userId ? 'Ya es tu colonia.' : `${view.colonistName} ya la ha colonizado.`;
       else if (s.missions.some((m) => m.type === 'colonizar' && m.target === target)) reason ||= 'Ya navegan colonos hacia aquí.';
       else if (max === 0) reason ||= 'Investiga Cartografía para poder fundar colonias.';
       else if (colonies + pendingColonies >= max) reason ||= `Ya tienes ${colonies + pendingColonies}/${max} colonias. Investiga más Cartografía.`;
@@ -585,7 +622,7 @@ export class Game extends EventTarget {
     return { ok: !reason, reason, units: sent, seconds, capacity, used, cargo, ships, cost };
   }
 
-  sendMission(type, target, units, now = Date.now()) {
+  sendMission(type, target, units, now = this.now()) {
     this.#advance(now);
     const plan = this.planMission(type, target, units);
     if (!plan.ok) return this.#fail(plan.reason);
@@ -595,6 +632,7 @@ export class Game extends EventTarget {
       id: this.state.seq++,
       type,
       target,
+      targetName: this.world.island(target).name,
       units: plan.units,
       cargo: plan.cost ? { ...plan.cost } : {},
       depart: now,
@@ -606,18 +644,30 @@ export class Game extends EventTarget {
   }
 
   /** Hace dar media vuelta a una flota que aún no ha llegado. */
-  recall(id, now = Date.now()) {
+  recall(id, now = this.now()) {
     this.#advance(now);
     const m = this.state.missions.find((x) => x.id === id);
-    if (!m || m.phase !== 'ida') return;
+    if (!m || m.phase !== 'ida') return this.#fail('Esa flota ya no puede volver.');
     m.phase = 'vuelta';
     m.back = now + (now - m.depart);
     m.turn = now;
     m.recalled = true;
-    this.#flush(true);
+    return this.#done();
   }
 
-  claimQuest(id, now = Date.now()) {
+  markReportsRead() {
+    let changed = false;
+    for (const r of this.state.reports) {
+      if (!r.read) {
+        r.read = true;
+        changed = true;
+      }
+    }
+    if (changed) this.#flush(true);
+    return { ok: true };
+  }
+
+  claimQuest(id, now = this.now()) {
     this.#advance(now);
     const q = this.activeQuests().find((x) => x.id === id);
     if (!q) return this.#fail('Esa misión no está disponible.');
@@ -629,7 +679,7 @@ export class Game extends EventTarget {
     return this.#done();
   }
 
-  castPower(id, now = Date.now()) {
+  castPower(id, now = this.now()) {
     this.#advance(now);
     const p = POWERS[id];
     const s = this.state;
@@ -658,7 +708,7 @@ export class Game extends EventTarget {
     return this.#done();
   }
 
-  acceptVisitor(now = Date.now()) {
+  acceptVisitor(now = this.now()) {
     this.#advance(now);
     const v = this.state.visitor;
     if (!v) return this.#fail('Ya no hay nadie esperando.');
@@ -671,37 +721,58 @@ export class Game extends EventTarget {
     return this.#done();
   }
 
-  dismissVisitor(now = Date.now()) {
+  dismissVisitor(now = this.now()) {
     this.#advance(now);
-    if (!this.state.visitor) return;
+    if (!this.state.visitor) return this.#fail('Ya no hay nadie esperando.');
     this.state.visitor = null;
     this.#scheduleVisit(now);
-    this.#flush(true);
+    return this.#done();
   }
 
-  markReportsRead() {
-    let changed = false;
-    for (const r of this.state.reports) {
-      if (!r.read) {
-        r.read = true;
-        changed = true;
-      }
+  // ── Llamadas del mundo (otros jugadores) ───────────────────────────────────
+
+  /** Lo que ve un espía en tu isla. */
+  spyReport() {
+    return {
+      units: Object.fromEntries(Object.entries(this.state.units).filter(([, n]) => n > 0)),
+      resources: Object.fromEntries(RESOURCE_KEYS.map((r) => [r, Math.floor(this.state.resources[r])])),
+      wall: this.level('muralla'),
+      town: this.level('ayuntamiento'),
+    };
+  }
+
+  /**
+   * Otro jugador ataca tu isla en el instante `t`. Defienden tus tropas en casa
+   * y la muralla; si ganan los atacantes se llevan recursos (salvo lo protegido).
+   */
+  receiveAttack({ attackerName, units, atkMul, hpMul, islandName }, t) {
+    const s = this.state;
+    const wall = wallBonus(this.level('muralla'));
+    const mine = playerCombat(s);
+    const aegis = (s.buffs.egida ?? 0) > t ? 0.5 : 0;
+    const result = battle({ units, atkMul, hpMul }, { units: { ...s.units }, atkMul: mine.atkMul, hpMul: mine.hpMul + wall.hp + aegis, extraAtk: wall.towers });
+    for (const id of PLAYER_UNITS) s.units[id] = result.def.left[id] ?? 0;
+
+    let stolen = null;
+    let cargo = 0;
+    for (const [id, n] of Object.entries(result.att.left)) cargo += n * (UNITS[id].cargo ?? 0);
+    const outcome = result.winner === 'att' ? 'derrota' : result.winner === 'def' ? 'victoria' : 'empate';
+    if (outcome === 'derrota') {
+      const bag = {};
+      const safe = protectedAmount(s);
+      for (const res of RESOURCE_KEYS) bag[res] = Math.max(0, s.resources[res] - safe);
+      stolen = takeLoot(bag, cargo);
+      for (const [res, n] of Object.entries(stolen)) s.resources[res] -= n;
     }
-    if (changed) this.#flush(true);
-  }
-
-  save() {
-    try {
-      localStorage.setItem(SAVE_KEY, JSON.stringify(this.state));
-    } catch {
-      // Sin almacenamiento disponible (modo privado, cuota…): la partida sigue en memoria.
-    }
-  }
-
-  reset() {
-    this.state = newState(Date.now());
-    this.#notes = [];
-    this.#flush(true);
+    const title = {
+      victoria: `Has rechazado el ataque de ${attackerName}`,
+      empate: `${attackerName} se retira de tu isla`,
+      derrota: `${attackerName} ha saqueado tu isla`,
+    }[outcome];
+    this.#report({ t, kind: 'defensa', outcome, title, islandName, battle: pick(result), loot: stolen, towers: wall.towers, enemy: attackerName });
+    this.#note(`⚔️ ${title}`, outcome === 'derrota' ? 'error' : 'success');
+    this.#dirty = true;
+    return { result, stolen: stolen ?? {} };
   }
 
   // ── Internos ───────────────────────────────────────────────────────────────
@@ -720,14 +791,18 @@ export class Game extends EventTarget {
     const notes = this.#notes.splice(0);
     if (changed || this.#dirty || notes.length) {
       this.#dirty = false;
-      this.save();
+      this.dirty = true;
       this.dispatchEvent(new Event('change'));
     }
     for (const n of notes) this.dispatchEvent(new CustomEvent('notify', { detail: n }));
   }
 
+  /** Aviso para el jugador. En el servidor se guarda para enseñarlo cuando se conecte. */
   #note(text, kind = 'info') {
-    this.#notes.push({ text, kind });
+    const note = { id: this.state.seq++, t: this.state.lastUpdate, text, kind };
+    this.#notes.push(note);
+    this.state.notes.push(note);
+    if (this.state.notes.length > MAX_NOTES) this.state.notes.splice(0, this.state.notes.length - MAX_NOTES);
   }
 
   #report(data) {
@@ -753,36 +828,29 @@ export class Game extends EventTarget {
     for (const [res, n] of Object.entries(bag ?? {})) this.state.resources[res] += n;
   }
 
-  #garrisonAt(isl, rt, t) {
-    const out = {};
-    const regen = hours(isl.regenHours ?? 1);
-    for (const [id, full] of Object.entries(isl.garrison ?? {})) {
-      const n = Math.min(full, (rt.garrison[id] ?? 0) + (full * Math.max(0, t - rt.garrisonAt)) / regen);
-      if (n >= 1) out[id] = Math.floor(n);
-    }
-    return out;
-  }
-
-  #stockAt(isl, rt, t) {
-    const out = {};
-    if (!isl.loot) return out;
-    const h = Math.max(0, t - rt.stockAt) / HOUR_MS;
-    for (const [res, k] of Object.entries(isl.loot.mix)) {
-      out[res] = Math.floor(Math.min(isl.loot.max * k, (rt.stock[res] ?? 0) + isl.loot.rate * k * GAME_SPEED * h));
-    }
-    return out;
-  }
-
   /** Avanza el tiempo hasta `now` procesando los sucesos en orden. */
   #advance(now) {
-    for (let guard = 0; guard < 20000; guard++) {
+    if (this.mirror) {
+      // El espejo del navegador no decide nada: solo deja correr la producción
       const ev = this.#nextEvent();
-      if (!ev || ev.t > now) break;
-      this.#accrue(ev.t);
-      ev.run(ev.t);
-      this.#dirty = true;
+      if (ev && ev.t <= now) this.due = true;
+      this.#accrue(Math.min(now, ev?.t ?? now));
+      return;
     }
-    this.#accrue(now);
+    if (this.busy) return;
+    this.busy = true;
+    try {
+      for (let guard = 0; guard < 20000; guard++) {
+        const ev = this.#nextEvent();
+        if (!ev || ev.t > now) break;
+        this.#accrue(ev.t);
+        ev.run(ev.t);
+        this.#dirty = true;
+      }
+      this.#accrue(now);
+    } finally {
+      this.busy = false;
+    }
   }
 
   #nextEvent() {
@@ -850,6 +918,7 @@ export class Game extends EventTarget {
         text: 'Marineros de todo el archipiélago lo ven brillar desde el horizonte. Tu imperio ya es leyenda.',
       });
       this.#note('🗽 ¡Has terminado el Coloso! Tu imperio será recordado para siempre.', 'success');
+      this.world.announce?.(`🗽 ${this.state.name} ha terminado el Coloso`);
     }
   }
 
@@ -881,16 +950,21 @@ export class Game extends EventTarget {
       for (const [id, n] of Object.entries(m.units)) this.state.units[id] += n;
       for (const [res, n] of Object.entries(m.cargo)) this.state.resources[res] += n;
       this.state.missions = this.state.missions.filter((x) => x !== m);
-      const isl = ISLAND_BY_ID[m.target];
       const loot = fmtBag(m.cargo);
-      this.#note(`⚓ Ha vuelto la flota de ${isl.name}${loot ? `: ${loot}` : ''}`, 'success');
+      this.#note(`⚓ Ha vuelto la flota de ${m.targetName}${loot ? `: ${loot}` : ''}`, 'success');
       return;
     }
 
-    if (m.type === 'explorar') this.#arriveExplore(m, t);
-    else if (m.type === 'atacar') this.#arriveAttack(m, t);
-    else if (m.type === 'colonizar') this.#arriveColonize(m, t);
-    else if (m.type === 'expedicion') this.#arriveExpedition(m, t);
+    const isl = this.world.island(m.target);
+    if (!isl) {
+      // La isla ha desaparecido del mundo: la flota vuelve sin más
+    } else if (isl.type === 'jugador') {
+      if (m.type === 'explorar') this.#arriveSpy(m, isl, t);
+      else this.#arrivePlayerAttack(m, isl, t);
+    } else if (m.type === 'explorar') this.#arriveExplore(m, isl, t);
+    else if (m.type === 'atacar') this.#arriveAttack(m, isl, t);
+    else if (m.type === 'colonizar') this.#arriveColonize(m, isl, t);
+    else if (m.type === 'expedicion') this.#arriveExpedition(m, isl, t);
 
     if (count(m.units) > 0) {
       m.phase = 'vuelta';
@@ -901,48 +975,90 @@ export class Game extends EventTarget {
     }
   }
 
-  #intel(isl, rt, t) {
-    rt.intel = { t, garrison: this.#garrisonAt(isl, rt, t), stock: this.#stockAt(isl, rt, t) };
+  #know(id, data) {
+    this.state.known[id] = { ...this.state.known[id], explored: true, ...data };
   }
 
-  #arriveExplore(m, t) {
-    const isl = ISLAND_BY_ID[m.target];
-    const rt = this.state.islands[isl.id];
-    const first = !rt.explored;
-    rt.explored = true;
-    this.#intel(isl, rt, t);
+  #intel(isl, rt, t) {
+    const intel = { t, garrison: garrisonAt(isl, rt, t), stock: stockAt(isl, rt, t) };
+    this.#know(isl.id, { intel });
+    return intel;
+  }
+
+  #arriveExplore(m, isl, t) {
+    const rt = this.world.islandState(isl.id);
+    const first = !this.state.known[isl.id]?.explored;
+    const intel = this.#intel(isl, rt, t);
     let text = `${ISLAND_TYPES[isl.type].icon} Es ${ISLAND_TYPES[isl.type].name.toLowerCase()}.`;
+    let loot = null;
     if (isl.type === 'ruinas' && !rt.looted) {
       rt.looted = true;
+      this.world.touch?.(isl.id);
       this.state.stats.treasures++;
       for (const [res, n] of Object.entries(isl.treasure)) m.cargo[res] = (m.cargo[res] ?? 0) + n;
+      loot = { ...isl.treasure };
       text += ' ¡Entre los escombros había un tesoro!';
+    } else if (isl.type === 'ruinas') {
+      text += ' Alguien se llevó ya el tesoro.';
     } else if (isl.type === 'libre') {
-      text += ` Tierra fértil: una colonia aquí produciría ${RESOURCES[isl.specialty].icon} ${RESOURCES[isl.specialty].name.toLowerCase()}.`;
+      text += rt.colonizedBy != null
+        ? ` Ya es una colonia de ${this.world.playerInfo(rt.colonizedBy)?.name ?? 'otro imperio'}.`
+        : ` Tierra fértil: una colonia aquí produciría ${RESOURCES[isl.specialty].icon} ${RESOURCES[isl.specialty].name.toLowerCase()}.`;
     }
+    this.#report({ t, kind: 'exploracion', island: isl.id, islandName: isl.name, title: `${first ? 'Descubierta' : 'Explorada'}: ${isl.name}`, text, intel, loot });
+    this.#note(`🔭 ${isl.name}: ${ISLAND_TYPES[isl.type].name}`, 'success');
+  }
+
+  #arriveSpy(m, isl, t) {
+    const info = this.world.spyPlayer?.(isl.owner, t);
+    if (!info) {
+      this.#report({ t, kind: 'exploracion', island: isl.id, islandName: isl.name, title: `Sin noticias de ${isl.name}`, text: 'El bote no ha podido acercarse.' });
+      return;
+    }
+    const intel = { t, garrison: info.units, stock: info.resources, wall: info.wall, town: info.town };
+    this.#know(isl.id, { intel });
     this.#report({
       t,
       kind: 'exploracion',
       island: isl.id,
-      title: `${first ? 'Descubierta' : 'Explorada'}: ${isl.name}`,
-      text,
-      intel: rt.intel,
-      loot: isl.type === 'ruinas' ? { ...m.cargo } : null,
+      islandName: isl.name,
+      title: `Espionaje: ${isl.name}`,
+      text: `Ciudad de ${info.name}. Ayuntamiento nivel ${info.town}, muralla nivel ${info.wall}.`,
+      intel,
     });
-    this.#note(`🔭 ${isl.name}: ${ISLAND_TYPES[isl.type].name}`, 'success');
+    this.#note(`🔭 Tus espías vuelven de ${isl.name}`, 'success');
   }
 
-  #arriveAttack(m, t) {
-    const isl = ISLAND_BY_ID[m.target];
-    const rt = this.state.islands[isl.id];
-    rt.explored = true;
+  #arrivePlayerAttack(m, isl, t) {
+    const { atkMul, hpMul } = playerCombat(this.state);
+    const res = this.world.attackPlayer?.(isl.owner, { attackerName: this.state.name, units: m.units, atkMul, hpMul, islandName: this.homeIsland?.name }, t);
+    if (!res) {
+      this.#report({ t, kind: 'ataque', island: isl.id, islandName: isl.name, title: `No hay nadie en ${isl.name}`, text: 'La ciudad está vacía. Tu flota vuelve a casa.' });
+      return;
+    }
+    const { result, stolen } = res;
+    m.units = result.att.left;
+    for (const [r, n] of Object.entries(stolen)) m.cargo[r] = (m.cargo[r] ?? 0) + n;
+    const outcome = result.winner === 'att' ? 'victoria' : result.winner === 'def' ? 'derrota' : 'empate';
+    if (outcome === 'victoria') {
+      this.state.stats.victories++;
+      this.state.stats.pvpWins++;
+    }
+    const enemy = this.world.playerInfo(isl.owner)?.name ?? isl.name;
+    const title = { victoria: `Has saqueado ${isl.name}`, derrota: `Derrota en ${isl.name}`, empate: `Retirada de ${isl.name}` }[outcome];
+    this.#report({ t, kind: 'ataque', island: isl.id, islandName: isl.name, outcome, title, battle: pick(result), loot: stolen, enemy, pvp: true });
+    this.#note(`⚔️ ${title}${fmtBag(stolen) ? ` · botín ${fmtBag(stolen)}` : ''}`, outcome === 'victoria' ? 'success' : 'error');
+  }
+
+  #arriveAttack(m, isl, t) {
+    const rt = this.world.islandState(isl.id);
     if (isl.type === 'ruinas' && !rt.looted) {
       rt.looted = true;
       this.state.stats.treasures++;
       for (const [res, n] of Object.entries(isl.treasure)) m.cargo[res] = (m.cargo[res] ?? 0) + n;
     }
-    const garrison = this.#garrisonAt(isl, rt, t);
-    const stock = this.#stockAt(isl, rt, t);
+    const garrison = garrisonAt(isl, rt, t);
+    const stock = stockAt(isl, rt, t);
     const { atkMul, hpMul } = playerCombat(this.state);
     const siege = Object.entries(m.units).reduce((s, [id, n]) => s + (UNITS[id].siege ?? 0) * n, 0);
     const wall = Math.max(0, (isl.wall ?? 0) - siege);
@@ -964,6 +1080,7 @@ export class Game extends EventTarget {
       rt.stock = stock;
       rt.stockAt = t;
     }
+    this.world.touch?.(isl.id);
     this.#intel(isl, rt, t);
 
     const outcome = result.winner === 'att' ? 'victoria' : result.winner === 'def' ? 'derrota' : 'empate';
@@ -973,7 +1090,7 @@ export class Game extends EventTarget {
       empate: `Retirada en ${isl.name}`,
     }[outcome];
     if (isl.type === 'ruinas') loot = { ...m.cargo };
-    this.#report({ t, kind: 'ataque', island: isl.id, outcome, title, battle: pick(result), loot, wall });
+    this.#report({ t, kind: 'ataque', island: isl.id, islandName: isl.name, outcome, title, battle: pick(result), loot, wall });
     this.#note(
       outcome === 'victoria' ? `⚔️ ${title}${loot && fmtBag(loot) ? ` · botín ${fmtBag(loot)}` : ''}` : `⚔️ ${title}`,
       outcome === 'victoria' ? 'success' : 'error',
@@ -982,11 +1099,34 @@ export class Game extends EventTarget {
     if (isl.type === 'kraken' && outcome === 'victoria') {
       this.state.stats.kraken++;
       this.#note('🐙 ¡Has derrotado al Kraken! Los mares son tuyos.', 'success');
+      this.world.announce?.(`🐙 ${this.state.name} ha derrotado al Kraken de ${isl.name}`);
     }
   }
 
+  #arriveColonize(m, isl, t) {
+    const ok = this.state.colonies.length < maxColonies(this.state) && this.world.colonize?.(isl.id, this.userId);
+    if (!ok) {
+      this.#report({ t, kind: 'colonia', island: isl.id, islandName: isl.name, title: `Colonia fallida: ${isl.name}`, text: 'Los colonos no han podido instalarse y vuelven con los recursos.' });
+      return;
+    }
+    this.state.colonies.push({ id: isl.id, name: isl.name, specialty: isl.specialty, yield: isl.yield });
+    m.units.mercante -= 1;
+    if (!m.units.mercante) delete m.units.mercante;
+    m.cargo = {};
+    const r = RESOURCES[isl.specialty];
+    this.#report({
+      t,
+      kind: 'colonia',
+      island: isl.id,
+      islandName: isl.name,
+      title: `Nueva colonia: ${isl.name}`,
+      text: `Los colonos se han quedado con su barco. La colonia producirá ${r.icon} ${r.name.toLowerCase()} para tu imperio.`,
+    });
+    this.#note(`🚩 Has fundado una colonia en ${isl.name}`, 'success');
+  }
+
   /** Expedición al Mar de las Brumas: un poco de todo, como en OGame. */
-  #arriveExpedition(m, t) {
+  #arriveExpedition(m, isl, t) {
     const s = this.state;
     s.stats.expeditions++;
     let capacity = 0;
@@ -996,7 +1136,7 @@ export class Game extends EventTarget {
       power += n * UNITS[id].atk;
     }
     const roll = Math.random();
-    const report = { t, kind: 'expedicion', island: m.target, outcome: null };
+    const report = { t, kind: 'expedicion', island: isl.id, islandName: isl.name, outcome: null };
     const add = (bag) => {
       for (const [res, n] of Object.entries(bag)) m.cargo[res] = (m.cargo[res] ?? 0) + n;
     };
@@ -1049,11 +1189,10 @@ export class Game extends EventTarget {
       }
       Object.assign(report, { title: '¡Una serpiente marina!', text: 'Un monstruo surge de las profundidades y se lleva parte de la flota.', lostUnits: lost, outcome: 'derrota' });
     } else if (roll < 0.97) {
-      const hidden = ISLANDS.filter((i) => !s.islands[i.id].explored).slice(0, 3);
-      for (const isl of hidden) {
-        s.islands[isl.id].explored = true;
-        this.#intel(isl, s.islands[isl.id], t);
-      }
+      const hidden = (this.world.islandsNear?.(this.state.home, 600) ?? [])
+        .filter((i) => i.type !== 'jugador' && i.type !== 'brumas' && !s.known[i.id]?.explored)
+        .slice(0, 3);
+      for (const other of hidden) this.#intel(other, this.world.islandState(other.id), t);
       Object.assign(report, {
         title: 'Cartas náuticas',
         text: hidden.length ? `Un viejo navegante os vende sus cartas: ahora conoces ${hidden.map((i) => i.name).join(', ')}.` : 'Un viejo navegante os vende sus cartas, pero ya conocías todo lo que aparece en ellas.',
@@ -1065,28 +1204,6 @@ export class Game extends EventTarget {
     }
     this.#report(report);
     this.#note(`🧭 Expedición: ${report.title}`, report.outcome === 'derrota' ? 'error' : 'success');
-  }
-
-  #arriveColonize(m, t) {
-    const isl = ISLAND_BY_ID[m.target];
-    const rt = this.state.islands[isl.id];
-    if (rt.colonized || this.colonies().length >= maxColonies(this.state)) {
-      this.#report({ t, kind: 'colonia', island: isl.id, title: `Colonia fallida: ${isl.name}`, text: 'Los colonos no han podido instalarse y vuelven con los recursos.' });
-      return;
-    }
-    rt.colonized = true;
-    m.units.mercante -= 1;
-    if (!m.units.mercante) delete m.units.mercante;
-    m.cargo = {};
-    const r = RESOURCES[isl.specialty];
-    this.#report({
-      t,
-      kind: 'colonia',
-      island: isl.id,
-      title: `Nueva colonia: ${isl.name}`,
-      text: `Los colonos se han quedado con su barco. La colonia producirá ${r.icon} ${r.name.toLowerCase()} para tu imperio.`,
-    });
-    this.#note(`🚩 Has fundado una colonia en ${isl.name}`, 'success');
   }
 
   // ── Piratas ────────────────────────────────────────────────────────────────
@@ -1209,6 +1326,28 @@ export class Game extends EventTarget {
   }
 }
 
+// ── Islas neutrales: guarnición y botín que se regeneran con el tiempo ──────
+
+export function garrisonAt(isl, rt, t) {
+  const out = {};
+  const regen = hours(isl.regenHours ?? 1);
+  for (const [id, full] of Object.entries(isl.garrison ?? {})) {
+    const n = Math.min(full, (rt.garrison[id] ?? 0) + (full * Math.max(0, t - rt.garrisonAt)) / regen);
+    if (n >= 1) out[id] = Math.floor(n);
+  }
+  return out;
+}
+
+export function stockAt(isl, rt, t) {
+  const out = {};
+  if (!isl.loot) return out;
+  const h = Math.max(0, t - rt.stockAt) / HOUR_MS;
+  for (const [res, k] of Object.entries(isl.loot.mix)) {
+    out[res] = Math.floor(Math.min(isl.loot.max * k, (rt.stock[res] ?? 0) + isl.loot.rate * k * universe.speed * h));
+  }
+  return out;
+}
+
 /** Reparte `capacity` entre los recursos de `stock` (como mucho `share` de cada uno). */
 function takeLoot(stock, capacity, share = LOOT_SHARE) {
   const avail = {};
@@ -1235,17 +1374,8 @@ function pick(result) {
 }
 
 function fmtBag(bag) {
-  return Object.entries(bag)
+  return Object.entries(bag ?? {})
     .filter(([, n]) => n > 0)
     .map(([res, n]) => `${RESOURCES[res].icon} ${Math.floor(n).toLocaleString('es-ES')}`)
     .join(' ');
-}
-
-function diff(after, before) {
-  const out = {};
-  for (const res of RESOURCE_KEYS) {
-    const d = Math.floor(after[res] - before[res]);
-    if (d > 0) out[res] = d;
-  }
-  return out;
 }

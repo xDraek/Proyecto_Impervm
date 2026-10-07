@@ -1,48 +1,41 @@
 import { play } from '../audio.js';
-import { GAME_SPEED } from '../config.js';
-import {
-  BUILDINGS,
-  BUILDING_KEYS,
-  ISLANDS,
-  ISLAND_BY_ID,
-  ISLAND_TYPES,
-  MISSION_TYPES,
-  PLAYER_UNITS,
-  POWERS,
-  RESEARCH,
-  RESOURCES,
-  RESOURCE_KEYS,
-  UNITS,
-  VISITORS,
-} from '../game/data.js';
+import { clock, universe } from '../config.js';
+import { BUILDINGS, BUILDING_KEYS, ISLAND_TYPES, MISSION_TYPES, PLAYER_UNITS, POWERS, RESEARCH, RESOURCES, RESOURCE_KEYS, UNITS, VISITORS } from '../game/data.js';
 import { HOUR_MS, canAfford, multiplyCost } from '../game/rules.js';
+import { api } from '../net/api.js';
 import { buildingPanel } from './buildingPanel.js';
-import { bag, costItems, fmtNum, fmtTime, unitList } from './format.js';
+import { bag, costItems, escapeHtml, fmtNum, fmtTime, unitList } from './format.js';
 import { fleetFor, islandPanel, readFleet } from './islandPanel.js';
 import { questsHtml, rankingHtml } from './modals.js';
 import { reportsHtml } from './reports.js';
 
 const $ = (sel) => document.querySelector(sel);
+const CHAT_KEY = 'imperium.chatRead';
 
 /**
  * Interfaz HTML sobre la escena 3D. Cada parte se regenera solo cuando cambia
  * su HTML (tras un cambio en la partida); lo que corre con el reloj (recursos,
  * barras, cuentas atrás, botones que dependen de lo que tienes) se refresca en
  * el sitio con atributos data-*, para no perder clics ni lo que estés tecleando.
+ *
+ * Las acciones van al servidor (`game` es un ClientGame): devuelven promesas.
  */
 export class Hud {
-  constructor(game, { onSelect, onView, settings }) {
+  constructor(game, { onSelect, onView, settings, onLogout }) {
     this.game = game;
     this.onSelect = onSelect;
     this.onView = onView;
     this.settings = settings;
     this.modalKind = null;
+    this.ranking = null;
     this.claimable = game.claimableQuests();
     this.selected = null;
     this.view = 'isla';
     this.panelView = null;
     this.panelId = null;
     this.cache = {};
+    this.chatMessages = [];
+    this.chatLast = 0;
 
     this.panel = $('#panel');
     this.sidebar = $('#sidebar');
@@ -52,6 +45,8 @@ export class Hud {
     this.viewBtn = $('#view-btn');
     this.reportsBtn = $('#reports-btn');
     this.questsBtn = $('#quests-btn');
+    this.chatBtn = $('#chat-btn');
+    this.chatEl = $('#chat');
     this.favorEl = $('#favor');
     this.visitorEl = $('#visitor');
     this.menu = $('#menu');
@@ -75,28 +70,31 @@ export class Hud {
     this.questsBtn.addEventListener('click', () => this.openModal('quests'));
     $('#rank-btn').addEventListener('click', () => this.openModal('ranking'));
     this.favorEl.addEventListener('click', () => this.onSelect('templo'));
-    this.modal.addEventListener('click', (e) => {
+    this.modal.addEventListener('click', async (e) => {
       if (e.target === this.modal || e.target.closest('[data-action="close-modal"]')) this.closeModal();
       const claim = e.target.closest('[data-action="claim"]');
-      if (claim && !claim.disabled) {
-        const res = game.claimQuest(claim.dataset.id);
-        if (res.ok) play('coins');
-        else this.toast(res.reason, 'error');
-      }
+      if (claim && !claim.disabled) await this.#run(claim, () => game.claimQuest(claim.dataset.id), null, 'coins');
     });
-    this.visitorEl.addEventListener('click', (e) => {
+    this.visitorEl.addEventListener('click', async (e) => {
       const btn = e.target.closest('[data-action]');
       if (!btn || btn.disabled) return;
-      if (btn.dataset.action === 'accept') {
-        const res = game.acceptVisitor();
-        if (res.ok) play('coins');
-        else this.toast(res.reason, 'error');
-      } else {
-        game.dismissVisitor();
-      }
+      if (btn.dataset.action === 'accept') await this.#run(btn, () => game.acceptVisitor(), null, 'coins');
+      else await this.#run(btn, () => game.dismissVisitor(), null, null);
     });
 
+    // Chat
+    this.chatBtn.addEventListener('click', () => this.toggleChat());
+    this.chatEl.querySelector('[data-action="close-chat"]').addEventListener('click', () => this.toggleChat(false));
+    this.chatEl.querySelector('.chat-form').addEventListener('submit', (e) => this.#sendChat(e));
+    try {
+      this.chatRead = Number(localStorage.getItem(CHAT_KEY)) || 0;
+    } catch {
+      this.chatRead = 0;
+    }
+    this.#pollChat();
+
     // Menú de opciones
+    this.menu.querySelector('.menu-user').innerHTML = `⚜ <b>${escapeHtml(game.username ?? '')}</b><div class="muted small">${escapeHtml(game.homeIsland?.name ?? '')}</div>`;
     $('#menu-btn').addEventListener('click', (e) => {
       e.stopPropagation();
       this.menu.hidden = !this.menu.hidden;
@@ -110,17 +108,12 @@ export class Hud {
       if (e.target.name === 'sound') settings.setSound(e.target.checked);
       if (e.target.name === 'daynight') settings.setDayNight(e.target.checked);
     });
-    this.menu.querySelector('[data-action="reset"]').addEventListener('click', () => {
-      this.menu.hidden = true;
-      if (confirm('¿Reiniciar la partida? Perderás todo el progreso.')) {
-        game.reset();
-        this.onSelect(null);
-        this.toast('Nueva partida iniciada.');
-      }
-    });
+    this.menu.querySelector('[data-action="logout"]').addEventListener('click', () => onLogout());
 
     game.addEventListener('notify', (e) => this.toast(e.detail.text, e.detail.kind));
     game.addEventListener('change', () => this.render());
+    game.addEventListener('offline', () => ($('#offline').hidden = false));
+    game.addEventListener('online', () => ($('#offline').hidden = true));
 
     // Los paneles empiezan justo debajo de la barra superior, mida lo que mida
     const topbar = $('#topbar');
@@ -162,10 +155,20 @@ export class Hud {
     this.game.markReportsRead();
   }
 
-  openModal(kind) {
+  async openModal(kind) {
     this.modalKind = kind;
     this.cache.modal = '';
     this.modal.hidden = false;
+    if (kind === 'ranking') {
+      this.modal.innerHTML = '<div class="modal-card narrow"><p class="muted">Cargando la clasificación…</p></div>';
+      try {
+        this.ranking = await this.game.fetchRanking();
+      } catch (err) {
+        this.modal.innerHTML = `<div class="modal-card narrow"><p class="muted">${escapeHtml(err.message)}</p></div>`;
+        return;
+      }
+      if (this.modalKind !== 'ranking') return;
+    }
     this.#renderModal();
   }
 
@@ -177,7 +180,7 @@ export class Hud {
 
   #renderModal() {
     if (this.modalKind === 'quests') this.#setHtml(this.modal, 'modal', questsHtml(this.game));
-    else if (this.modalKind === 'ranking') this.#setHtml(this.modal, 'modal', rankingHtml(this.game));
+    else if (this.modalKind === 'ranking' && this.ranking) this.#setHtml(this.modal, 'modal', rankingHtml(this.ranking));
   }
 
   /** Regenera lo que dependa de la partida (solo si su HTML cambia). */
@@ -215,6 +218,28 @@ export class Hud {
     this.#refreshLive(this.alert);
     this.#refreshLive(this.visitorEl);
     this.panelView?.refresh?.(this.panel);
+  }
+
+  /**
+   * Lanza una acción en el servidor con el botón desactivado mientras tanto y
+   * avisa del resultado.
+   */
+  async #run(btn, action, okText, sound = 'build') {
+    if (btn) btn.disabled = true;
+    let res;
+    try {
+      res = await action();
+    } finally {
+      if (btn?.isConnected) btn.disabled = false;
+    }
+    if (!res?.ok) {
+      this.toast(res?.reason ?? 'No se ha podido.', 'error');
+      play('error');
+      return res;
+    }
+    if (sound) play(sound);
+    if (okText) this.toast(typeof okText === 'function' ? okText(res) : okText, 'success');
+    return res;
   }
 
   // ── Recursos ──────────────────────────────────────────────────────────────
@@ -308,14 +333,26 @@ export class Hud {
       html = `<h2>Edificios</h2><ul class="list">${items}</ul>
         <div class="army-block"><h2>Ejército</h2>${army ? `<ul class="army">${army}</ul>` : '<p class="muted small">Sin tropas en casa</p>'}${away}</div>`;
     } else {
-      const items = ISLANDS.map((isl) => {
-        const v = game.island(isl.id);
-        const t = ISLAND_TYPES[isl.type];
-        const icon = v.colonized ? '🚩' : v.explored ? t.icon : '❔';
-        const tag = v.inbound.length ? '⛵' : v.explored && isl.tier && !v.colonized ? `Nv ${isl.tier}` : '';
-        const cls = [isl.id === this.selected && 'active', !v.explored && 'empty'].filter(Boolean).join(' ');
-        return `<li data-id="${isl.id}" class="${cls}" title="${isl.name}"><span class="b-icon">${icon}</span><span class="b-name">${isl.name}</span><span class="b-lvl">${tag || '·'}</span></li>`;
-      }).join('');
+      // Las islas que ves, de la más cercana a la más lejana
+      const home = game.state.home;
+      const views = game.world
+        .islands()
+        .filter((i) => i.id !== home)
+        .map((i) => game.island(i.id))
+        .sort((a, b) => a.dist - b.dist)
+        .slice(0, 40);
+      const items = views
+        .map((v) => {
+          const t = ISLAND_TYPES[v.type];
+          let icon = v.explored ? t.icon : '❔';
+          if (v.colonized) icon = '🚩';
+          let tag = v.inbound.length ? '⛵' : v.explored && v.tier && !v.colonized ? `Nv ${v.tier}` : '';
+          if (v.type === 'jugador') tag = `${fmtNum(v.score)}`;
+          const cls = [v.id === this.selected && 'active', !v.explored && 'empty', v.type === 'jugador' && 'player'].filter(Boolean).join(' ');
+          const name = v.type === 'jugador' ? `${v.name} · ${v.ownerName}` : v.name;
+          return `<li data-id="${v.id}" class="${cls}" title="${escapeHtml(name)}"><span class="b-icon">${icon}</span><span class="b-name">${escapeHtml(name)}</span><span class="b-lvl">${tag || '·'}</span></li>`;
+        })
+        .join('');
       html = `<h2>Archipiélago</h2><ul class="list">${items}</ul>
         <div class="army-block">
           <p class="muted small">⛵ Flotas: ${game.missions.length}/${game.fleetSlots()} · 🚩 Colonias: ${game.colonies().length}/${game.maxColonies()}</p>
@@ -328,7 +365,7 @@ export class Hud {
 
   #renderPanel() {
     const id = this.selected;
-    if (!id) {
+    if (!id || (!BUILDINGS[id] && !this.game.world.island(id))) {
       this.panel.hidden = true;
       this.panelView = null;
       this.panelId = null;
@@ -374,7 +411,7 @@ export class Hud {
   /** Actualiza en el sitio los elementos con atributos data-* "vivos". */
   #refreshLive(root) {
     if (!root || root.hidden) return;
-    const now = Date.now();
+    const now = clock.now();
     const have = this.game.resources;
     for (const el of root.querySelectorAll('[data-until]')) {
       const text = fmtTime((Number(el.dataset.until) - now) / 1000);
@@ -391,6 +428,7 @@ export class Hud {
       if (el.innerHTML !== html) el.innerHTML = html;
     }
     for (const el of root.querySelectorAll('[data-need]')) {
+      if (el.dataset.pending) continue;
       const cost = multiplyCost(JSON.parse(el.dataset.need), this.#countOf(root, el.dataset.count));
       el.disabled = el.dataset.blocked === '1' || !canAfford(have, cost);
     }
@@ -405,32 +443,23 @@ export class Hud {
     }
   }
 
-  #onPanelClick(e) {
+  async #onPanelClick(e) {
     const btn = e.target.closest('[data-action]');
     if (!btn || btn.disabled) return;
     const game = this.game;
     const root = this.panel;
     const action = btn.dataset.action;
-    const report = (res, okText, sound = 'build') => {
-      if (!res?.ok) {
-        this.toast(res?.reason ?? 'No se ha podido.', 'error');
-        play('error');
-        return;
-      }
-      play(sound);
-      if (okText) this.toast(okText, 'success');
-    };
 
     switch (action) {
       case 'close':
         this.onSelect(null);
         break;
       case 'upgrade':
-        report(game.upgrade(this.selected));
+        await this.#run(btn, () => game.upgrade(this.selected));
         break;
       case 'research': {
         const r = RESEARCH[btn.dataset.id];
-        report(game.research(btn.dataset.id), `${r.icon} Los sabios investigan ${r.name}`);
+        await this.#run(btn, () => game.research(btn.dataset.id), `${r.icon} Los sabios investigan ${r.name}`);
         break;
       }
       case 'max': {
@@ -442,12 +471,11 @@ export class Hud {
       case 'train': {
         const id = btn.dataset.unit;
         const n = this.#countOf(root, `n-${id}`);
-        report(game.train(id, n), `${UNITS[id].icon} ${n} × ${UNITS[id].name} en camino`);
+        await this.#run(btn, () => game.train(id, n), `${UNITS[id].icon} ${n} × ${UNITS[id].name} en camino`);
         break;
       }
       case 'cancel-train':
-        game.cancelTraining(btn.dataset.building, Number(btn.dataset.index));
-        this.toast('Entrenamiento cancelado. Recursos devueltos.');
+        await this.#run(btn, () => game.cancelTraining(btn.dataset.building, Number(btn.dataset.index)), 'Entrenamiento cancelado. Recursos devueltos.', null);
         break;
       case 'trade-max': {
         const from = root.querySelector('[name="t-from"]').value;
@@ -459,8 +487,7 @@ export class Hud {
         const from = root.querySelector('[name="t-from"]').value;
         const to = root.querySelector('[name="t-to"]').value;
         const amount = Number(root.querySelector('[name="t-amount"]').value);
-        const res = game.trade(from, to, amount);
-        report(res, res.ok ? `⚖️ Cambiados ${RESOURCES[from].icon} ${fmtNum(res.paid)} por ${RESOURCES[to].icon} ${fmtNum(res.got)}` : null, 'coins');
+        await this.#run(btn, () => game.trade(from, to, amount), (res) => `⚖️ Cambiados ${RESOURCES[from].icon} ${fmtNum(res.paid)} por ${RESOURCES[to].icon} ${fmtNum(res.got)}`, 'coins');
         break;
       }
       case 'open-map':
@@ -474,17 +501,17 @@ export class Hud {
       }
       case 'mission': {
         const type = btn.dataset.type;
+        const target = this.selected;
         const units = fleetFor(game, type, readFleet(root));
-        const isl = ISLAND_BY_ID[this.selected];
-        const res = game.sendMission(type, this.selected, units);
-        if (res.ok) for (const input of root.querySelectorAll('input[name^="f-"]')) input.value = '';
-        report(res, `${MISSION_TYPES[type].icon} La flota zarpa hacia ${isl.name}`, 'sail');
+        const name = game.world.island(target)?.name ?? 'la isla';
+        const res = await this.#run(btn, () => game.sendMission(type, target, units), `${MISSION_TYPES[type].icon} La flota zarpa hacia ${name}`, 'sail');
+        if (res?.ok) for (const input of this.panel.querySelectorAll('input[name^="f-"]')) input.value = '';
         break;
       }
       case 'power': {
         const p = POWERS[btn.dataset.id];
-        report(game.castPower(btn.dataset.id), null, 'magic');
-        if (btn.dataset.id === 'rayo') this.toast(`${p.icon} ¡Un rayo parte los mástiles piratas!`, 'success');
+        const res = await this.#run(btn, () => game.castPower(btn.dataset.id), null, 'magic');
+        if (res?.ok && btn.dataset.id === 'rayo') this.toast(`${p.icon} ¡Un rayo parte los mástiles piratas!`, 'success');
         break;
       }
     }
@@ -523,11 +550,10 @@ export class Hud {
     for (const [id, p] of Object.entries(POWERS)) {
       const until = game.buffUntil(id);
       if (!until) continue;
-      const start = until - (p.duration * HOUR_MS) / GAME_SPEED;
+      const start = until - (p.duration * HOUR_MS) / universe.speed;
       rows.push(row({ icon: p.icon, title: p.name, start, end: until, select: 'templo' }));
     }
     for (const m of game.missions) {
-      const isl = ISLAND_BY_ID[m.target];
       const t = MISSION_TYPES[m.type];
       const going = m.phase === 'ida';
       const start = going ? m.depart : (m.turn ?? (m.recalled ? (m.back + m.depart) / 2 : m.arrive));
@@ -535,7 +561,7 @@ export class Hud {
       rows.push(
         row({
           icon: going ? t.icon : '⚓',
-          title: `${going ? t.name : 'Vuelta de'} ${isl.name}`,
+          title: `${going ? t.name : 'Vuelta de'} ${escapeHtml(m.targetName ?? game.world.island(m.target)?.name ?? '')}`,
           start,
           end,
           select: m.target,
@@ -547,13 +573,12 @@ export class Hud {
     this.dock.hidden = !rows.length;
   }
 
-  #onDockClick(e) {
+  async #onDockClick(e) {
     const btn = e.target.closest('[data-action]');
     if (btn) {
       const action = btn.dataset.action;
       if (action === 'recall') {
-        this.game.recall(Number(btn.dataset.mission));
-        this.toast('La flota da media vuelta.');
+        await this.#run(btn, () => this.game.recall(Number(btn.dataset.mission)), 'La flota da media vuelta.', 'sail');
         return;
       }
       if (!btn.dataset.armed) {
@@ -565,27 +590,31 @@ export class Hud {
         }, 3000);
         return;
       }
-      if (action === 'cancel-build') this.game.cancel();
-      if (action === 'cancel-research') this.game.cancelResearch();
-      this.toast('Cancelado. Recursos devueltos.');
+      if (action === 'cancel-build') await this.#run(btn, () => this.game.cancel(), 'Obra cancelada. Recursos devueltos.', null);
+      if (action === 'cancel-research') await this.#run(btn, () => this.game.cancelResearch(), 'Investigación cancelada. Recursos devueltos.', null);
       return;
     }
     const rowEl = e.target.closest('[data-select]');
     if (rowEl) this.onSelect(rowEl.dataset.select);
   }
 
-  // ── Aviso de piratas ──────────────────────────────────────────────────────
+  // ── Avisos: piratas y ataques de otros jugadores ──────────────────────────
 
   #renderAlert() {
     const raid = this.game.raid;
-    this.alert.hidden = !raid;
-    if (!raid) {
+    const incoming = this.game.incoming ?? [];
+    this.alert.hidden = !raid && !incoming.length;
+    if (this.alert.hidden) {
       this.cache.alert = '';
       return;
     }
-    const html = `<span class="alert-icon">🏴‍☠️</span>
-      <div><b>¡Piratas a la vista!</b> Llegan en <span data-until="${raid.arrival}"></span>
-      <div class="small">${unitList(raid.army)} · Defiende con tropas en casa y la muralla</div></div>`;
+    const lines = [];
+    if (raid) lines.push(`<div><b>¡Piratas a la vista!</b> Llegan en <span data-until="${raid.arrival}"></span> · ${unitList(raid.army)}</div>`);
+    for (const m of incoming.slice(0, 3)) {
+      lines.push(`<div><b>¡Ataque de ${escapeHtml(m.from)}!</b> ${fmtNum(m.size)} unidades desde ${escapeHtml(m.fromIsland ?? '')} · llegan en <span data-until="${m.arrive}"></span></div>`);
+    }
+    const html = `<span class="alert-icon">${incoming.length ? '⚔️' : '🏴‍☠️'}</span>
+      <div>${lines.join('')}<div class="small">Defiende con tropas en casa, la muralla y la Égida del templo</div></div>`;
     this.#setHtml(this.alert, 'alert', html);
   }
 
@@ -604,6 +633,80 @@ export class Hud {
       <button class="primary small auto" data-action="accept" data-need='${JSON.stringify(v.give)}' data-blocked="0">Aceptar</button>
       <button class="ghost small" data-action="dismiss">No</button>`;
     this.#setHtml(this.visitorEl, 'visitor', html);
+  }
+
+  // ── Chat ──────────────────────────────────────────────────────────────────
+
+  toggleChat(open = this.chatEl.hidden) {
+    this.chatEl.hidden = !open;
+    if (open) {
+      this.#markChatRead();
+      this.chatEl.querySelector('input').focus();
+      this.#renderChat(true);
+    }
+  }
+
+  async #pollChat() {
+    await this.#fetchChat();
+    setTimeout(() => this.#pollChat(), this.chatEl.hidden ? 15_000 : 3_000);
+  }
+
+  async #fetchChat(scroll = false) {
+    try {
+      const { messages } = await api('GET', `/api/chat?after=${this.chatLast}`);
+      if (messages.length) {
+        this.chatMessages.push(...messages);
+        if (this.chatMessages.length > 100) this.chatMessages.splice(0, this.chatMessages.length - 100);
+        this.chatLast = messages.at(-1).id;
+        this.#renderChat(scroll);
+      }
+    } catch {
+      // se reintenta en la siguiente vuelta
+    }
+  }
+
+  #renderChat(scroll = false) {
+    const log = this.chatEl.querySelector('.chat-log');
+    const atBottom = log.scrollTop + log.clientHeight >= log.scrollHeight - 30;
+    log.innerHTML = this.chatMessages
+      .map((m) => {
+        const time = new Date(m.t).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
+        return m.system
+          ? `<div class="msg system"><span>${escapeHtml(m.text)}</span><time>${time}</time></div>`
+          : `<div class="msg${m.name === this.game.username ? ' mine' : ''}"><b>${escapeHtml(m.name)}</b> <span>${escapeHtml(m.text)}</span><time>${time}</time></div>`;
+      })
+      .join('');
+    if (scroll || atBottom) log.scrollTop = log.scrollHeight;
+    if (!this.chatEl.hidden) this.#markChatRead();
+    const unread = this.chatMessages.filter((m) => m.id > this.chatRead && !m.system && m.name !== this.game.username).length;
+    const badge = this.chatBtn.querySelector('.badge');
+    badge.hidden = !unread;
+    badge.textContent = unread > 9 ? '9+' : unread;
+  }
+
+  #markChatRead() {
+    this.chatRead = this.chatLast;
+    try {
+      localStorage.setItem(CHAT_KEY, String(this.chatRead));
+    } catch {
+      // sin almacenamiento
+    }
+    this.chatBtn.querySelector('.badge').hidden = true;
+  }
+
+  async #sendChat(e) {
+    e.preventDefault();
+    const input = e.target.querySelector('input');
+    const text = input.value.trim();
+    if (!text) return;
+    input.value = '';
+    try {
+      await api('POST', '/api/chat', { text });
+      await this.#fetchChat(true);
+    } catch (err) {
+      input.value = text;
+      this.toast(err.message, 'error');
+    }
   }
 
   #setHtml(el, key, html) {

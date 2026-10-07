@@ -1,12 +1,35 @@
 import { ISLAND_TYPES, MISSION_TYPES, PLAYER_UNITS, RESOURCES, UNITS } from '../game/data.js';
 import { colonyYield } from '../game/rules.js';
-import { bag, costList, fmtNum, fmtTime, unitList } from './format.js';
+import { NEWBIE_POINTS } from '../game/Game.js';
+import { bag, costList, escapeHtml, fmtAgo, fmtNum, fmtTime, unitList } from './format.js';
 
 // Panel de una isla del archipiélago: lo que se sabe de ella y el formulario
 // para mandar una flota (explorar, atacar o colonizar).
 
+function playerSection(game, view) {
+  const lines = [
+    `<div class="info-row"><span>⚜ Gobernante</span><b>${escapeHtml(view.ownerName)}</b></div>`,
+    `<div class="info-row"><span>🏆 Puntos</span><b>${fmtNum(view.score)}</b></div>`,
+    `<div class="info-row"><span>🏛️ Ayuntamiento</span><b>Nivel ${view.townLevel}</b></div>`,
+  ];
+  if (view.protected) lines.push(`<p class="hint ok">🛡️ Protección de novato: con menos de ${NEWBIE_POINTS} puntos nadie puede atacar esta ciudad.</p>`);
+  const intel = view.intel;
+  const spy = intel
+    ? `<h4>Informe de tus espías <span class="muted small">(${fmtAgo(intel.t)})</span></h4>
+      <div class="info-row"><span>Tropas en casa</span><span>${unitList(intel.garrison)}</span></div>
+      <div class="info-row"><span>Recursos</span><span>${bag(intel.stock)}</span></div>
+      <div class="info-row"><span>🏰 Muralla</span><b>Nivel ${intel.wall ?? 0}</b></div>`
+    : '<p class="desc small">Manda un bote explorador para espiar sus tropas y sus recursos antes de atacar.</p>';
+  return `<p class="desc">La ciudad de otro jugador. Si la atacas y ganas, te llevas lo que quepa en tus barcos (salvo lo que esconde su almacén).</p>${lines.join('')}${spy}`;
+}
+
 function infoSection(game, view) {
   const t = ISLAND_TYPES[view.type];
+  if (view.type === 'jugador') return playerSection(game, view);
+  if (view.colonizedBy != null && !view.colonized) {
+    const r = RESOURCES[view.specialty];
+    return `<p class="desc">Colonia de <b>${escapeHtml(view.colonistName)}</b>. Produce ${r.icon} ${r.name.toLowerCase()} para su imperio.</p>`;
+  }
   if (view.colonized) {
     const r = RESOURCES[view.specialty];
     return `<p class="desc">Tus colonos trabajan la isla y mandan sus cosechas a la capital.</p>
@@ -75,11 +98,15 @@ function fleetForm(game, view) {
   const types = [];
   if (view.type === 'brumas') types.push('expedicion');
   else types.push('explorar');
-  if (view.type !== 'brumas' && !view.colonized && (!view.explored || ['barbaros', 'piratas', 'kraken'].includes(view.type))) types.push('atacar');
-  if (view.type === 'libre' && view.explored && !view.colonized) types.push('colonizar');
+  const hostile = ['barbaros', 'piratas', 'kraken', 'jugador'].includes(view.type);
+  if (view.type !== 'brumas' && view.colonizedBy == null && (!view.explored || hostile)) types.push('atacar');
+  if (view.type === 'libre' && view.explored && view.colonizedBy == null) types.push('colonizar');
 
   const buttons = types
-    .map((t) => `<button class="${t === 'atacar' ? 'danger' : 'primary'} small" data-action="mission" data-type="${t}">${MISSION_TYPES[t].icon} ${MISSION_TYPES[t].name}</button>`)
+    .map((t) => {
+      const label = t === 'explorar' && view.type === 'jugador' ? 'Espiar' : MISSION_TYPES[t].name;
+      return `<button class="${t === 'atacar' ? 'danger' : 'primary'} small" data-action="mission" data-type="${t}">${MISSION_TYPES[t].icon} ${label}</button>`;
+    })
     .join('');
   const colony = types.includes('colonizar')
     ? `<div class="hint">Los colonos viajan en un mercante y se quedan con él. Llevan:</div>${costList(game.planMission('colonizar', view.id, { mercante: 1 }).cost ?? {}, game.resources)}`
@@ -140,13 +167,17 @@ export function islandPanel(hud, id) {
   const game = hud.game;
   const view = game.island(id);
   const t = ISLAND_TYPES[view.type];
-  const icon = view.colonized ? '🚩' : view.explored ? t.icon : '❔';
-  const sub = view.colonized ? 'Tu colonia' : view.explored ? `${t.name}${view.tier ? ` · Nv ${view.tier}` : ''}` : 'Isla desconocida';
+  let icon = view.colonized || view.colonizedBy != null ? '🚩' : view.explored ? t.icon : '❔';
+  let sub = view.colonized ? 'Tu colonia' : view.explored ? `${t.name}${view.tier ? ` · Nv ${view.tier}` : ''}` : 'Isla desconocida';
+  if (view.type === 'jugador') {
+    icon = '🏰';
+    sub = `Ciudad de ${escapeHtml(view.ownerName)}`;
+  }
   const html = `
     <div class="panel-head">
       <span class="panel-icon">${icon}</span>
       <div>
-        <h3>${view.name}</h3>
+        <h3>${escapeHtml(view.name)}</h3>
         <div class="panel-lvl">${sub} · a ${fmtNum(view.dist)} leguas</div>
       </div>
       <button class="icon-btn" data-action="close" title="Cerrar">✕</button>

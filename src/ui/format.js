@@ -1,3 +1,4 @@
+import { clock } from '../config.js';
 import { RESOURCES, UNITS } from '../game/data.js';
 
 const nf = new Intl.NumberFormat('es-ES', { maximumFractionDigits: 0 });
@@ -25,7 +26,7 @@ export function fmtTime(seconds) {
 }
 
 export function fmtAgo(ms) {
-  const s = Math.max(0, (Date.now() - ms) / 1000);
+  const s = Math.max(0, (clock.now() - ms) / 1000);
   if (s < 60) return 'hace un momento';
   if (s < 3600) return `hace ${Math.floor(s / 60)} min`;
   if (s < 86400) return `hace ${Math.floor(s / 3600)} h`;

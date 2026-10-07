@@ -1,9 +1,8 @@
-import { GAME_SPEED } from '../config.js';
+import { universe } from '../config.js';
 import {
   BASE_PRODUCTION,
   BUILDINGS,
   COLONY_COST,
-  ISLANDS,
   PLAYER_UNITS,
   RESEARCH,
   RESEARCH_COST_FACTOR,
@@ -60,7 +59,7 @@ export function costFor(id, level) {
 export function buildSeconds(state, id, level) {
   const raw = BUILDINGS[id].baseTime * TIME_FACTOR ** (level - 1);
   const speed = (1 + TOWN_SPEEDUP * lvl(state, 'ayuntamiento')) * (1 + 0.08 * lvl(state, 'arquitectura'));
-  return Math.max(1, Math.round(raw / speed / GAME_SPEED));
+  return Math.max(1, Math.round(raw / speed / universe.speed));
 }
 
 export function townSpeedup(townLevel) {
@@ -76,7 +75,7 @@ export function researchCost(id, level) {
 export function researchSeconds(state, id, level) {
   const raw = RESEARCH[id].baseTime * RESEARCH_TIME_FACTOR ** (level - 1);
   const speed = 1 + 0.1 * Math.max(0, lvl(state, 'academia') - 1);
-  return Math.max(1, Math.round(raw / speed / GAME_SPEED));
+  return Math.max(1, Math.round(raw / speed / universe.speed));
 }
 
 export function researchMax(id) {
@@ -88,7 +87,7 @@ export function researchMax(id) {
 export function unitSeconds(state, id) {
   const u = UNITS[id];
   const speed = 1 + 0.1 * Math.max(0, lvl(state, u.building) - 1);
-  return Math.max(1, Math.round(u.time / speed / GAME_SPEED));
+  return Math.max(1, Math.round(u.time / speed / universe.speed));
 }
 
 /** Multiplicadores de combate de tus tropas. */
@@ -121,7 +120,7 @@ export function fleetSpeedBonus(state) {
 
 /** Segundos de viaje (solo ida) hasta una isla con una flota a cierta velocidad. */
 export function travelSeconds(state, dist, speed) {
-  return Math.max(1, Math.round((40 + dist * 7) / speed / fleetSpeedBonus(state) / GAME_SPEED));
+  return Math.max(1, Math.round((40 + dist * 7) / speed / fleetSpeedBonus(state) / universe.speed));
 }
 
 // ── Economía ─────────────────────────────────────────────────────────────────
@@ -130,7 +129,7 @@ export function travelSeconds(state, dist, speed) {
 export function producerOutput(id, level) {
   const b = BUILDINGS[id];
   if (!b.produces || level <= 0) return 0;
-  return b.baseProduction * level * 1.1 ** level * GAME_SPEED;
+  return b.baseProduction * level * 1.1 ** level * universe.speed;
 }
 
 export function researchBonus(state, res) {
@@ -138,7 +137,7 @@ export function researchBonus(state, res) {
 }
 
 export function colonyYield(island) {
-  return island.yield * GAME_SPEED;
+  return island.yield * universe.speed;
 }
 
 /** Todas las unidades que mantienes: en casa y en misiones. */
@@ -154,7 +153,7 @@ export function totalUnits(state) {
 export function upkeepPerHour(state) {
   let total = 0;
   for (const [id, n] of Object.entries(totalUnits(state))) total += n * (UNITS[id].upkeep ?? 0);
-  return total * GAME_SPEED;
+  return total * universe.speed;
 }
 
 /** Multiplicador de toda la producción: Coloso y Cosecha abundante. */
@@ -176,16 +175,14 @@ export function economy(state, t = state.lastUpdate) {
   const colonies = {};
   const gross = {};
   for (const res of RESOURCE_KEYS) {
-    base[res] = BASE_PRODUCTION[res] * GAME_SPEED;
+    base[res] = BASE_PRODUCTION[res] * universe.speed;
     buildings[res] = 0;
     colonies[res] = 0;
   }
   for (const [id, b] of Object.entries(BUILDINGS)) {
     if (b.produces) buildings[b.produces] += producerOutput(id, state.buildings[id] ?? 0);
   }
-  for (const isl of ISLANDS) {
-    if (state.islands[isl.id]?.colonized) colonies[isl.specialty] += colonyYield(isl);
-  }
+  for (const col of state.colonies ?? []) colonies[col.specialty] += colonyYield(col);
   for (const res of RESOURCE_KEYS) {
     research[res] = (base[res] + buildings[res]) * researchBonus(state, res);
     gross[res] = (base[res] + buildings[res] + research[res] + colonies[res]) * bonus;
@@ -205,7 +202,7 @@ export function protectedAmount(state) {
 // ── Templo ───────────────────────────────────────────────────────────────────
 
 export function favorRate(state) {
-  return 6 * lvl(state, 'templo') * GAME_SPEED;
+  return 6 * lvl(state, 'templo') * universe.speed;
 }
 
 export function favorMax(state) {
@@ -218,22 +215,6 @@ export function favorMax(state) {
 /** Un punto por cada 100 recursos invertidos, como en OGame (allí son 1000). */
 export function scoreOf(spent) {
   return Math.floor(spent / 100);
-}
-
-export function rivalScore(rival, gameHours) {
-  return Math.floor(rival.base + rival.rate * Math.max(0, gameHours) ** 0.85);
-}
-
-/** Suma de todos los costes pagados por los edificios y las investigaciones actuales. */
-export function investedIn(state) {
-  let total = 0;
-  for (const [id, n] of Object.entries(state.buildings)) {
-    for (let l = (BUILDINGS[id].startLevel ?? 0) + 1; l <= n; l++) total += sum(costFor(id, l));
-  }
-  for (const [id, n] of Object.entries(state.research ?? {})) {
-    for (let l = 1; l <= n; l++) total += sum(researchCost(id, l));
-  }
-  return total;
 }
 
 export function sum(cost) {

@@ -444,8 +444,7 @@ export const RESEARCH_KEYS = Object.keys(RESEARCH);
 export const RESEARCH_COST_FACTOR = 1.9;
 
 // ── Archipiélago ─────────────────────────────────────────────────────────────
-// angle/dist: posición respecto a tu isla (0° = hacia la cámara inicial).
-// loot: botín acumulado { max total, rate por hora, mix de recursos }.
+// Las islas se generan por sectores en game/world.js.
 
 export const ISLAND_TYPES = {
   barbaros: { name: 'Campamento bárbaro', icon: '🪓' },
@@ -454,58 +453,8 @@ export const ISLAND_TYPES = {
   libre: { name: 'Isla deshabitada', icon: '🌴' },
   kraken: { name: 'Guarida del Kraken', icon: '🐙' },
   brumas: { name: 'Mar abierto', icon: '🌫️' },
+  jugador: { name: 'Ciudad', icon: '🏰' },
 };
-
-export const ISLANDS = [
-  {
-    id: 'gaviotas', name: 'Isla de las Gaviotas', angle: 18, dist: 68, size: 6, type: 'barbaros', tier: 1,
-    garrison: { barbaro: 8 }, regenHours: 6, loot: { max: 1500, rate: 150, mix: { madera: 0.5, comida: 0.5 } },
-  },
-  {
-    id: 'faro', name: 'Cayo del Faro', angle: 72, dist: 82, size: 4.5, type: 'ruinas',
-    treasure: { piedra: 600, cristal: 300, oro: 150 },
-  },
-  { id: 'esmeralda', name: 'Cayo Esmeralda', angle: 122, dist: 74, size: 7, type: 'libre', specialty: 'madera', yield: 150 },
-  {
-    id: 'cuervo', name: 'Roca del Cuervo', angle: 165, dist: 92, size: 5.5, type: 'barbaros', tier: 2,
-    garrison: { barbaro: 18, arquero: 6 }, regenHours: 6, loot: { max: 3200, rate: 260, mix: { madera: 0.3, piedra: 0.3, comida: 0.4 } },
-  },
-  { id: 'ancla', name: 'Islote del Ancla', angle: 212, dist: 84, size: 6, type: 'libre', specialty: 'comida', yield: 160 },
-  {
-    id: 'bruma', name: 'Isla Brumosa', angle: 268, dist: 80, size: 6.5, type: 'barbaros', tier: 2,
-    garrison: { barbaro: 14, arquero: 10 }, regenHours: 6, loot: { max: 3000, rate: 240, mix: { piedra: 0.4, hierro: 0.3, comida: 0.3 } },
-  },
-  { id: 'salitre', name: 'Monte Salitre', angle: 318, dist: 96, size: 8, type: 'libre', specialty: 'piedra', yield: 130 },
-  {
-    id: 'ceniza', name: 'Isla Ceniza', angle: 350, dist: 128, size: 5, type: 'ruinas',
-    treasure: { hierro: 1200, cristal: 800, oro: 500 },
-  },
-  {
-    id: 'penon', name: 'Peñón Rojo', angle: 52, dist: 138, size: 7, type: 'barbaros', tier: 3,
-    garrison: { barbaro: 40, arquero: 22 }, regenHours: 8, loot: { max: 7000, rate: 450, mix: { madera: 0.25, piedra: 0.25, hierro: 0.25, cristal: 0.25 } },
-  },
-  { id: 'dorada', name: 'Bahía Dorada', angle: 140, dist: 142, size: 7.5, type: 'libre', specialty: 'oro', yield: 70 },
-  {
-    id: 'tormenta', name: 'Cabo Tormenta', angle: 194, dist: 152, size: 8, type: 'piratas', tier: 4,
-    garrison: { pirata: 45, corsario: 6 }, wall: 0.2, regenHours: 10,
-    loot: { max: 14000, rate: 700, mix: { hierro: 0.3, cristal: 0.3, oro: 0.4 } },
-  },
-  { id: 'triton', name: 'Arrecife del Tritón', angle: 246, dist: 166, size: 6, type: 'libre', specialty: 'cristal', yield: 90 },
-  {
-    id: 'calavera', name: 'Isla Calavera', angle: 298, dist: 178, size: 9, type: 'piratas', tier: 5,
-    garrison: { pirata: 90, corsario: 14 }, wall: 0.3, regenHours: 12,
-    loot: { max: 24000, rate: 1000, mix: { madera: 0.2, hierro: 0.3, cristal: 0.2, oro: 0.3 } },
-  },
-  { id: 'herrumbre', name: 'Isla Herrumbre', angle: 8, dist: 190, size: 6.5, type: 'libre', specialty: 'hierro', yield: 110 },
-  { id: 'brumas', name: 'Mar de las Brumas', angle: 236, dist: 245, size: 5, type: 'brumas' },
-  {
-    id: 'kraken', name: 'Fosa del Kraken', angle: 98, dist: 222, size: 8, type: 'kraken', tier: 7,
-    garrison: { kraken: 1, corsario: 10 }, wall: 0.4, regenHours: 36,
-    loot: { max: 60000, rate: 1200, mix: { hierro: 0.2, cristal: 0.3, oro: 0.5 } },
-  },
-];
-
-export const ISLAND_BY_ID = Object.fromEntries(ISLANDS.map((i) => [i.id, i]));
 
 /** Recursos que viajan en el mercante para fundar una colonia (se multiplican por colonia). */
 export const COLONY_COST = { madera: 1500, piedra: 1000, comida: 800, oro: 300 };
@@ -559,21 +508,6 @@ export const POWERS = {
 };
 
 export const POWER_KEYS = Object.keys(POWERS);
-
-// ── Clasificación ────────────────────────────────────────────────────────────
-// Imperios rivales: sus puntos crecen con las horas de juego (base + rate·h^0,85).
-
-export const RIVALS = [
-  { name: 'Talasocracia de Nerea', base: 40, rate: 38 },
-  { name: 'Liga de Corinto', base: 120, rate: 26 },
-  { name: 'Reino de Tálasa', base: 60, rate: 21 },
-  { name: 'Casa Velar', base: 200, rate: 14 },
-  { name: 'Dominio de Kérkyra', base: 30, rate: 17 },
-  { name: 'Imperio Escarlata', base: 90, rate: 11 },
-  { name: 'Hermandad del Coral', base: 20, rate: 8 },
-  { name: 'Señorío de Ítaca', base: 15, rate: 5 },
-  { name: 'Tribu del Cuervo', base: 10, rate: 3 },
-];
 
 // ── Misiones (objetivos con recompensa) ──────────────────────────────────────
 // goal(game) → [actual, objetivo]. Se muestran en orden, unas pocas a la vez.

@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { CSS2DObject, CSS2DRenderer } from 'three/addons/renderers/CSS2DRenderer.js';
-import { BUILDINGS, BUILDING_KEYS, ISLANDS, ISLAND_TYPES, LAND_UNITS, SHIP_UNITS } from '../game/data.js';
+import { BUILDINGS, BUILDING_KEYS, ISLAND_TYPES, LAND_UNITS, SHIP_UNITS } from '../game/data.js';
 import {
   C,
   box,
@@ -18,8 +18,10 @@ import {
   windowMaterial,
 } from './models.js';
 import { createIslandBase, createIslandFeature, islandLook, islandRadius, shoreRadius } from './islands.js';
+import { escapeHtml } from '../ui/format.js';
 import { mountainGeometry, paintByNormal, plateauGeometry, polar, rng } from './util.js';
-import { createWater } from './water.js';
+import { createWater, setShores } from './water.js';
+import { clock } from '../config.js';
 
 const HORIZON = '#cfe8f7';
 const WATER_Y = -0.7;
@@ -96,12 +98,14 @@ export class World {
   /**
    * @param {HTMLElement} container
    * @param {import('../game/Game.js').Game} game
-   * @param {{ onSelect: (id: string|null) => void }} handlers
+   * @param {{ onSelect?: (id: string|null) => void, showcase?: boolean }} options
+   *   showcase: escaparate de la pantalla principal (la cámara gira sola y no se puede tocar nada)
    */
-  constructor(container, game, { onSelect }) {
+  constructor(container, game, { onSelect = () => {}, showcase = false } = {}) {
     this.container = container;
     this.game = game;
     this.onSelect = onSelect;
+    this.showcase = showcase;
     this.slots = {};
     this.islands = {};
     this.fleets = new Map();
@@ -118,13 +122,32 @@ export class World {
     this.#setupScene();
     this.#buildIsland();
     this.#buildSlots();
-    this.#buildArchipelago();
+    this.#buildHomeLabel();
+    this.#syncArchipelago();
     this.#buildClouds();
     this.#buildLife();
     this.#setupInput();
     this.sync();
 
     game.addEventListener('change', () => this.sync());
+    // Han aparecido o desaparecido islas en el mapa (por ejemplo, un vecino nuevo)
+    game.addEventListener('world', () => {
+      this.#syncArchipelago();
+      this.sync();
+    });
+    if (showcase) {
+      this.controls.autoRotate = true;
+      this.controls.autoRotateSpeed = 0.35;
+      this.controls.enableZoom = false;
+      this.controls.enableRotate = false;
+      for (const slot of Object.values(this.slots)) slot.label.visible = false;
+    }
+  }
+
+  /** Posición de una isla del mundo relativa a la tuya (tu isla está en el origen). */
+  #relPos(isl) {
+    const home = this.game.homeIsland;
+    return new THREE.Vector3(isl.x - (home?.x ?? 0), 0, isl.z - (home?.z ?? 0));
   }
 
   /** Centro de un edificio o isla en el mundo. */
@@ -234,15 +257,10 @@ export class World {
     sun.shadow.normalBias = 0.03;
     scene.add(sun, sun.target);
     this.skyKey = null;
-    this.#updateSky(Date.now());
+    this.#updateSky(clock.now());
 
     // Mar estilizado: olas en la GPU, agua clara y espuma junto a cada orilla
-    const shores = [{ x: 0, z: 0, r: HOME_SHORE }];
-    for (const isl of ISLANDS) {
-      const p = polar(isl.dist, isl.angle);
-      shores.push({ x: p.x, z: p.z, r: shoreRadius(isl) });
-    }
-    this.water = createWater(shores, WATER_Y);
+    this.water = createWater([{ x: 0, z: 0, r: HOME_SHORE }], WATER_Y);
     this.waterTime = this.water.userData.uniforms.uTime;
     scene.add(this.water);
   }
@@ -455,10 +473,22 @@ export class World {
     this.scene.add(this.hoverRing);
   }
 
-  #buildArchipelago() {
-    const hitMat = new THREE.MeshBasicMaterial({ colorWrite: false, depthWrite: false });
-    for (const isl of ISLANDS) {
-      const pos = polar(isl.dist, isl.angle);
+  /** Crea las islas que acaban de aparecer en tu mapa y quita las que ya no están. */
+  #syncArchipelago() {
+    const hitMat = (this.hitMat ??= new THREE.MeshBasicMaterial({ colorWrite: false, depthWrite: false }));
+    const home = this.game.state.home;
+    const visible = this.game.world.islands().filter((i) => i.id !== home);
+    const ids = new Set(visible.map((i) => i.id));
+    for (const [id, entry] of Object.entries(this.islands)) {
+      if (ids.has(id)) continue;
+      this.scene.remove(entry.group, entry.label);
+      disposeTree(entry.group);
+      this.hitTargets = this.hitTargets.filter((h) => h !== entry.hit);
+      delete this.islands[id];
+    }
+    for (const isl of visible) {
+      if (this.islands[isl.id]) continue;
+      const pos = this.#relPos(isl);
       const radius = islandRadius(isl);
       const group = new THREE.Group();
       group.position.copy(pos);
@@ -473,20 +503,26 @@ export class World {
 
       const el = document.createElement('div');
       el.className = 'label isl';
-      el.innerHTML = `<span class="label-name">${isl.name}</span><span class="label-lvl"></span>`;
+      el.innerHTML = `<span class="label-name">${escapeHtml(isl.name)}</span><span class="label-lvl"></span>`;
       const label = new CSS2DObject(el);
       // Debajo de la isla en pantalla, para no taparla
       label.position.set(pos.x, 0, pos.z + radius * 1.35 + 3);
-      label.visible = false;
+      label.visible = this.view === 'mapa';
       this.scene.add(label);
 
-      this.islands[isl.id] = { isl, pos, radius, group, feature: null, look: null, label, el };
+      this.islands[isl.id] = { isl, pos, radius, group, hit, feature: null, look: null, label, el };
     }
+    // Espuma en las orillas más cercanas (el mar admite un número limitado)
+    const shores = Object.values(this.islands)
+      .map((e) => ({ x: e.pos.x, z: e.pos.z, r: shoreRadius(e.isl), d: e.pos.length() }))
+      .sort((a, b) => a.d - b.d);
+    setShores(this.water, [{ x: 0, z: 0, r: HOME_SHORE }, ...shores]);
+  }
 
-    // Etiqueta de tu isla en el mapa
+  #buildHomeLabel() {
     const el = document.createElement('div');
     el.className = 'label isl home';
-    el.innerHTML = '<span class="label-name">⚜ Tu isla</span>';
+    el.innerHTML = `<span class="label-name">⚜ ${escapeHtml(this.game.homeIsland?.name ?? 'Tu isla')}</span>`;
     this.homeLabel = new CSS2DObject(el);
     this.homeLabel.position.set(0, 0, ISLAND_R + 9);
     this.homeLabel.visible = false;
@@ -575,6 +611,7 @@ export class World {
   }
 
   #setupInput() {
+    if (this.showcase) return;
     const el = this.renderer.domElement;
     const raycaster = new THREE.Raycaster();
     const ndc = new THREE.Vector2();
@@ -757,6 +794,7 @@ export class World {
   #syncIslands() {
     for (const [id, entry] of Object.entries(this.islands)) {
       const view = this.game.island(id);
+      if (!view) continue;
       const look = islandLook(view);
       if (entry.look !== look) {
         entry.look = look;
@@ -764,35 +802,42 @@ export class World {
           entry.group.remove(entry.feature);
           disposeTree(entry.feature);
         }
-        entry.feature = createIslandFeature(entry.isl, look);
+        entry.feature = createIslandFeature({ ...entry.isl, colonizedBy: view.colonizedBy }, look);
         entry.group.add(entry.feature);
       }
       const t = ISLAND_TYPES[entry.isl.type];
       let status = !view.explored ? '❔ Inexplorada' : `${t.icon} ${t.name}`;
-      if (view.colonized) status = '🚩 Tu colonia';
-      if (view.explored && view.tier && !view.colonized) status += ` · Nv ${view.tier}`;
+      if (view.type === 'jugador') status = `🏰 ${view.ownerName} · ${view.score} pts${view.protected ? ' · 🛡️' : ''}`;
+      else if (view.colonized) status = '🚩 Tu colonia';
+      else if (view.colonizedBy != null) status = `🚩 Colonia de ${view.colonistName}`;
+      else if (view.explored && view.tier) status += ` · Nv ${view.tier}`;
       if (view.inbound.length) status += ' · ⛵';
       entry.el.querySelector('.label-lvl').textContent = status;
-      entry.el.classList.toggle('colony', view.colonized);
+      entry.el.classList.toggle('colony', !!view.colonized);
+      entry.el.classList.toggle('player', view.type === 'jugador');
       entry.el.classList.toggle('unknown', !view.explored);
     }
   }
 
+  /** Ruta desde tu puerto: rodea tu isla y sale en línea recta hacia el destino. */
   #routeTo(target) {
     const entry = this.islands[target];
+    const pos = entry ? entry.pos : new THREE.Vector3(0, 0, 200);
+    const dist = pos.length();
     const a0 = GATE_ANGLE;
-    const a1 = entry.isl.angle;
-    let delta = ((a1 - a0 + 540) % 360) - 180;
+    const a1 = THREE.MathUtils.radToDeg(Math.atan2(pos.x, pos.z));
+    const delta = ((a1 - a0 + 540) % 360) - 180;
     const points = [polar(26, a0), polar(HARBOR_R, a0)];
     const steps = Math.ceil(Math.abs(delta) / 15);
     for (let i = 1; i <= steps; i++) points.push(polar(HARBOR_R, a0 + (delta * i) / steps));
-    points.push(polar(entry.isl.dist - entry.radius * 1.35 - 2, a1));
+    points.push(polar(Math.max(HARBOR_R + 5, dist - (entry?.radius ?? 10) * 1.35 - 2), a1));
     return new Route(points);
   }
 
   #syncFleets() {
     const missions = this.game.missions;
-    const alive = new Set(missions.map((m) => m.id));
+    const incoming = this.game.incoming ?? [];
+    const alive = new Set([...missions.map((m) => m.id), ...incoming.map((m) => `in-${m.id}`)]);
     for (const [id, f] of this.fleets) {
       if (alive.has(id)) continue;
       for (const o of [f.group, f.line]) {
@@ -821,6 +866,27 @@ export class World {
       line.computeLineDistances();
       this.scene.add(line);
       this.fleets.set(m.id, { group, line, route });
+    }
+    for (const m of incoming) {
+      const key = `in-${m.id}`;
+      if (this.fleets.has(key)) continue;
+      // Del puerto enemigo hasta la entrada del tuyo
+      const home = this.game.homeIsland;
+      const from = new THREE.Vector3(m.x - home.x, 0, m.z - home.z);
+      const to = from.clone().setLength(ISLAND_R + 10);
+      const route = new Route([from.clone().setLength(Math.max(ISLAND_R + 20, from.length() - 25)), to]);
+      const group = new THREE.Group();
+      group.add(createShip('trirreme'));
+      const escort = createShip('mercante');
+      escort.position.set(1.6, 0, -1.8);
+      group.add(escort);
+      group.scale.setScalar(2.6);
+      this.scene.add(group);
+      const lineGeo = new THREE.BufferGeometry().setFromPoints(route.points.map((p) => p.clone().setY(0.3)));
+      const line = new THREE.Line(lineGeo, new THREE.LineDashedMaterial({ color: '#ff5a4a', dashSize: 4, gapSize: 3, transparent: true, opacity: 0.85 }));
+      line.computeLineDistances();
+      this.scene.add(line);
+      this.fleets.set(key, { group, line, route, incoming: m });
     }
   }
 
@@ -873,7 +939,7 @@ export class World {
   // ── Bucle ─────────────────────────────────────────────────────────────────
 
   update(dt, t) {
-    const now = Date.now();
+    const now = clock.now();
 
     // Cambio de vista: interpolar cámara y objetivo
     if (this.camTween) {
@@ -953,6 +1019,16 @@ export class World {
       f.route.at(u, pos, dir);
       if (back) dir.negate();
       f.group.position.set(pos.x, WATER_Y + Math.sin(t * 1.4 + m.id) * 0.12, pos.z);
+      f.group.rotation.y = Math.atan2(dir.x, dir.z);
+      f.group.scale.setScalar(shipScale);
+      f.line.visible = this.view === 'mapa';
+    }
+
+    for (const f of this.fleets.values()) {
+      if (!f.incoming) continue;
+      const m = f.incoming;
+      f.route.at((now - m.depart) / (m.arrive - m.depart), pos, dir);
+      f.group.position.set(pos.x, WATER_Y + Math.sin(t * 1.3) * 0.12, pos.z);
       f.group.rotation.y = Math.atan2(dir.x, dir.z);
       f.group.scale.setScalar(shipScale);
       f.line.visible = this.view === 'mapa';

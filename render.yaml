@@ -1,0 +1,33 @@
+# Despliegue en Render.com con un Blueprint (New > Blueprint y elige este repo).
+# Crea el servidor del juego y una base de datos Postgres gratuita.
+#
+# Ojo con el plan gratuito de Render:
+# - El servidor se duerme tras 15 minutos sin visitas y tarda un poco en despertar.
+#   No se pierde nada: el mundo se guarda en la base de datos y, al despertar, se
+#   pone al día con todo lo que ha pasado mientras tanto.
+# - La base de datos gratuita caduca a los 30 días. Para algo duradero, crea una
+#   en Neon o Supabase (gratis) y pon su URL en DATABASE_URL en vez de usar esta.
+services:
+  - type: web
+    name: imperium
+    runtime: node
+    plan: free
+    # --include=dev instala Vite, que hace falta para compilar el cliente
+    buildCommand: npm install --include=dev && npm run build
+    startCommand: npm start
+    healthCheckPath: /api/stats
+    envVars:
+      - key: NODE_VERSION
+        value: 22
+      - key: GAME_SPEED
+        value: 1
+      - key: AUTH_SECRET
+        generateValue: true
+      - key: DATABASE_URL
+        fromDatabase:
+          name: imperium-db
+          property: connectionString
+
+databases:
+  - name: imperium-db
+    plan: free

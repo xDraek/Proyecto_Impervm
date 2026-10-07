@@ -1,5 +1,5 @@
 import { QUESTS } from '../game/data.js';
-import { bag, fmtNum } from './format.js';
+import { bag, escapeHtml, fmtNum } from './format.js';
 
 // Ventanas de misiones y de clasificación.
 
@@ -35,17 +35,15 @@ export function questsHtml(game) {
   </div>`;
 }
 
-export function rankingHtml(game) {
-  const rows = game
-    .ranking()
-    .map(
-      (r) => `<tr class="${r.player ? 'me' : ''}"><td>${r.rank === 1 ? '🥇' : r.rank === 2 ? '🥈' : r.rank === 3 ? '🥉' : r.rank}</td>
-        <td>${r.player ? '⚜ ' : ''}${r.name}</td><td>${fmtNum(r.points)}</td></tr>`,
-    )
-    .join('');
+export function rankingHtml({ top, me, total }) {
+  const medal = (n) => (n === 1 ? '🥇' : n === 2 ? '🥈' : n === 3 ? '🥉' : n);
+  const row = (r) => `<tr class="${r.me ? 'me' : ''}"><td>${medal(r.rank)}</td>
+    <td>${r.me ? '⚜ ' : ''}${escapeHtml(r.name)}<div class="muted small">${escapeHtml(r.city)}${r.colonies ? ` · 🚩 ${r.colonies}` : ''}${r.coloso ? ` · 🗽 ${r.coloso}` : ''}</div></td>
+    <td>${fmtNum(r.points)}</td></tr>`;
+  const rows = top.map(row).join('');
+  const mine = me && !top.some((r) => r.me) ? row({ ...me, me: true }) : '';
   return `<div class="modal-card narrow">
-    ${head('🏆', 'Clasificación', 'Un punto por cada 100 recursos invertidos en edificios, investigaciones y tropas')}
-    <table class="ranking"><thead><tr><th>#</th><th>Imperio</th><th>Puntos</th></tr></thead><tbody>${rows}</tbody></table>
-    <p class="muted small">Los imperios rivales también crecen mientras no juegas.</p>
+    ${head('🏆', 'Clasificación', `${fmtNum(total)} imperios · un punto por cada 100 recursos invertidos`)}
+    <table class="ranking"><thead><tr><th>#</th><th>Imperio</th><th>Puntos</th></tr></thead><tbody>${rows}${mine}</tbody></table>
   </div>`;
 }

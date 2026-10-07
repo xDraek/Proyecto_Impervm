@@ -293,9 +293,8 @@ function refreshTemple(game, root) {
 
 function townSection(game) {
   const eco = game.economy();
-  const rank = game.ranking().find((r) => r.player);
   return `<h4>Tu imperio</h4>
-    <div class="info-row"><span>🏆 Puntos</span><b>${fmtNum(rank.points)} · puesto ${rank.rank}</b></div>
+    <div class="info-row"><span>🏆 Puntos</span><b>${fmtNum(game.score())}${game.isProtected() ? ' · 🛡️ protección de novato' : ''}</b></div>
     <div class="info-row"><span>🚩 Colonias</span><b>${game.colonies().length} / ${game.maxColonies()}</b></div>
     <div class="info-row"><span>🥖 Mantenimiento de tropas</span><b>${fmtNum(eco.upkeep)}/h</b></div>
     <div class="info-row"><span>🏴‍☠️ Amenaza pirata</span><b>${game.level('ayuntamiento') >= 3 ? `Nv ${game.raidTier()}` : 'Ninguna aún'}</b></div>`;

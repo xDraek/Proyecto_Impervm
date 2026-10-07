@@ -1,9 +1,13 @@
-const params = new URLSearchParams(location.search);
+// Ajustes compartidos por el navegador y el servidor.
 
-// Multiplicador de velocidad del universo (producción y tiempos de obra).
-// Útil para probar: http://localhost:5173/?speed=50
-export const GAME_SPEED = Math.max(1, Number(params.get('speed')) || 1);
+/**
+ * Velocidad del universo (producción, obras, viajes…). La decide el servidor
+ * (variable GAME_SPEED) y el navegador la recibe al conectarse.
+ */
+export const universe = { speed: 1 };
 
-// ?save=prueba usa otra partida guardada, para probar sin tocar la de verdad
-const slot = params.get('save');
-export const SAVE_KEY = slot ? `imperium.save.${slot}` : 'imperium.save.v1';
+/** Reloj del juego. En el navegador se corrige con la hora del servidor. */
+export const clock = {
+  offset: 0,
+  now: () => Date.now() + clock.offset,
+};

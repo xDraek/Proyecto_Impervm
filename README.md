@@ -1,65 +1,77 @@
 # Imperium
 
-Juego de estrategia y gestión de imperio en el navegador, al estilo de OGame o Ikariam, con un archipiélago en 3D hecho con [Three.js](https://threejs.org/).
+Juego de estrategia multijugador en el navegador, al estilo de Ikariam u OGame: cada jugador funda su ciudad en un archipiélago 3D compartido (hecho con [Three.js](https://threejs.org/)), la hace crecer, explora, comercia y ataca a otros jugadores. El servidor es el árbitro de todo y el mundo sigue vivo aunque nadie esté conectado.
 
-## Arrancar
+## Arrancar en tu ordenador
 
 ```bash
 npm install
 npm run dev
 ```
 
-Abre `http://localhost:5173`. Para probar más rápido: `http://localhost:5173/?speed=50` (multiplica la producción y acorta obras, investigaciones, reclutas y viajes). Con `?save=prueba` se usa otra partida guardada, así puedes trastear sin tocar la tuya.
+Abre `http://localhost:5173`, crea una cuenta y a jugar. `npm run dev` arranca el servidor del juego con Vite dentro (recarga en caliente) y guarda el mundo en `server/data/world.json`. Para ver a otros jugadores, crea otra cuenta en otra ventana privada.
+
+Para probar más rápido: `GAME_SPEED=50 npm run dev` (en PowerShell: `$env:GAME_SPEED=50; npm run dev`).
+
+## Subirlo a la nube
+
+El juego es un único servidor Node que sirve la página y la API, más una base de datos Postgres.
+
+### Render (gratis)
+
+1. Sube el repositorio a GitHub.
+2. En [Render](https://render.com): **New → Blueprint** y elige el repositorio. El archivo `render.yaml` crea el servidor y una base de datos.
+3. Cuando termine, abre la dirección que te da Render.
+
+En el plan gratuito, el servidor se duerme tras 15 minutos sin visitas y tarda un poco en despertar; al hacerlo se pone al día con todo lo que pasó. La base de datos gratuita de Render caduca a los 30 días: para algo duradero, crea una gratis en [Neon](https://neon.tech) o [Supabase](https://supabase.com) y pon su dirección en la variable `DATABASE_URL`.
+
+### Otras nubes
+
+Hay un `Dockerfile` para cualquier servicio que acepte contenedores (Railway, Fly.io, un VPS…). Variables de entorno:
+
+| Variable | Para qué |
+| --- | --- |
+| `DATABASE_URL` | Postgres donde se guarda el mundo. Sin ella se usa un archivo local (no sirve en la nube: se borra en cada despliegue). |
+| `AUTH_SECRET` | Clave para firmar las sesiones. Pon una larga y aleatoria. |
+| `GAME_SPEED` | Velocidad del universo (1 = normal). |
+| `PORT` | Puerto (las nubes lo ponen solas). |
+
+El servidor guarda el mundo en memoria y lo vuelca a la base de datos cada 10 segundos, así que debe haber **una sola instancia**.
 
 ## Cómo se juega
 
-- Tu isla produce **madera, piedra, comida, hierro, cristal y oro** en tiempo real, también con la pestaña cerrada. Pasa el ratón por un recurso para ver de dónde sale.
-- **14 edificios**: ayuntamiento, aserradero, cantera, granja, mina de cristal, fundición, mercado, almacén, academia, templo, cuartel, puerto, muralla y el **Coloso**, una maravilla de 10 niveles que da +5 % de producción por nivel y es el gran objetivo final. Solo hay una obra a la vez; si la cancelas, recuperas los recursos.
-- **Templo y poderes divinos** (como en Grepolis): el templo genera favor para invocar la Cosecha abundante, la Inspiración, el Viento favorable, la Égida o la Ira de los dioses contra los piratas.
-- **Misiones** 📋: una cadena de objetivos con recompensa que guía la partida de principio a fin.
-- **Clasificación** 🏆: un punto por cada 100 recursos invertidos, contra nueve imperios rivales que también crecen.
-- **Visitantes**: de vez en cuando llegan mercaderes con buenos tratos, mercenarios, peregrinos o restos de un naufragio.
-- **Academia**: 13 investigaciones con niveles (producción, obras más rápidas, almacén, ataque, vida, navegación, cartografía…). Algunas desbloquean unidades.
-- **Cuartel y puerto**: 5 tropas de tierra (lancero, arquero, espadachín, caballero, catapulta) y 4 barcos (bote explorador, mercante, trirreme, galeón). Las tropas comen: si te quedas sin comida hay hambruna y la producción cae a la mitad.
-- **Mercado**: además de oro, cambia unos recursos por otros. El cambio mejora con su nivel y con Comercio.
-- **Archipiélago** (botón 🗺️ o tecla `M`): 15 islas que hay que descubrir con botes exploradores.
-  - Campamentos bárbaros y fortalezas piratas que puedes saquear. Se rearman con el tiempo.
-  - Ruinas con un tesoro para el primero que llegue.
-  - Islas deshabitadas que puedes **colonizar** (hace falta Cartografía y un mercante) para que produzcan para ti.
-  - La Fosa del Kraken, el reto final.
-  - El Mar de las Brumas, adonde se mandan **expediciones** (como en OGame): pecios, barcos abandonados, tesoros, emboscadas piratas, serpientes marinas, cartas náuticas…
-- Las flotas tardan en ir y volver; se ven navegando por el mapa y se pueden retirar mientras van de ida. Los barcos mercantes cargan el botín.
-- **Piratas**: desde el ayuntamiento nivel 3 tu isla sufre asaltos cada pocas horas. Se avistan con 20 minutos de antelación. Defienden las tropas que estén en casa y la muralla (más vida y torres que disparan). Si pierdes, se llevan parte de tus recursos, salvo lo que el almacén esconde.
-- Los **informes** 📜 guardan cada combate, exploración y colonia.
-- Ambiente: mar con espuma en las orillas, ciclo de día y noche con ventanas que se encienden, aldeanos, gaviotas y sonido sintetizado (oleaje, gaviotas, efectos). Desde ⚙ se pueden quitar el sonido y el ciclo de día y noche, o reiniciar la partida.
-- La partida se guarda sola en `localStorage`.
+- Al crear la cuenta eliges tu nombre y el de tu ciudad. Cada jugador nuevo abre un **sector** del archipiélago: su isla en el centro y una docena de islas neutrales alrededor. Los sectores se colocan en espiral, así que tus vecinos son los que se registraron cerca de ti.
+- Tu isla produce **madera, piedra, comida, hierro, cristal y oro** en tiempo real, también con la pestaña cerrada.
+- **14 edificios**, entre ellos el templo y el **Coloso**, una maravilla de 10 niveles que es el gran objetivo final.
+- **Academia** con 13 investigaciones, **cuartel y puerto** con 5 tropas y 4 barcos. Las tropas comen: sin comida hay hambruna.
+- **Mapa compartido** (🗺️ o tecla `M`): campamentos bárbaros y fortalezas piratas que se rearman, ruinas con un tesoro para el primero que llegue, islas libres para **colonizar** (la primera flota que llega se la queda), el Kraken y el Mar de las Brumas para las **expediciones**.
+- **Otros jugadores**: espía sus ciudades con botes exploradores y atácalas para llevarte sus recursos (salvo lo que esconde su almacén). Si alguien viene a por ti, lo verás llegar. Con menos de 100 puntos tienes **protección de novato**: nadie te ataca y tú no atacas a otros jugadores.
+- **Piratas** de vez en cuando, **visitantes**, **poderes divinos**, **misiones** con recompensa, **chat** 💬 de todo el archipiélago y **clasificación** 🏆.
 
 ## Estructura
 
 ```
+server/
+  index.js             servidor HTTP: API, límites de peticiones, archivos del juego
+  WorldServer.js       el mundo en memoria: jugadores, islas, ataques, chat, clasificación
+  store.js             guardado en Postgres (DATABASE_URL) o en un archivo local
+  auth.js              contraseñas (scrypt) y sesiones firmadas
 src/
-  config.js            velocidad del universo y clave de guardado
-  audio.js             sonido sintetizado con Web Audio
-  game/data.js         recursos, edificios, unidades, investigaciones, islas, poderes, misiones y rivales
-  game/rules.js        fórmulas: costes, tiempos, economía, capacidad, viajes
+  config.js            velocidad del universo y reloj compartido
+  game/data.js         recursos, edificios, unidades, investigaciones, poderes, misiones
+  game/rules.js        fórmulas: costes, tiempos, economía, viajes
   game/combat.js       combate por asaltos
-  game/Game.js         estado, bucle de sucesos, colas, flotas, piratas, guardado
-  scene/World.js       escena 3D: tu isla, el archipiélago, flotas, cámara, selección
-  scene/models.js      modelos low-poly de edificios, tropas y barcos
-  scene/islands.js     islas del archipiélago según lo que sabes de ellas
-  scene/water.js       mar con olas, aguas claras y espuma en las orillas (shader)
-  scene/util.js        utilidades de geometría y azar con semilla
-  ui/Hud.js            barra de recursos, listas, actividad, avisos e informes
-  ui/buildingPanel.js  panel de cada edificio (academia, cuartel, puerto, mercado…)
-  ui/islandPanel.js    panel de una isla y formulario de flotas
-  ui/reports.js        informes de combate
-  ui/modals.js         misiones y clasificación
+  game/world.js        generación de sectores e islas
+  game/Game.js         la partida de un jugador (árbitro en el servidor, espejo en el navegador)
+  net/                 conexión con el servidor (ClientGame, ClientWorld, api)
+  scene/               escena 3D: tu isla, el archipiélago, mar, barcos
+  ui/                  pantalla principal, interfaz, paneles, informes, chat
 ```
 
-En la consola del navegador está disponible `window.__IMPERIUM__` (`game`, `world`, `hud`, `select`, `setView`) para depurar.
+En la consola del navegador, ya dentro de la partida, está `window.__IMPERIUM__` (`game`, `world`, `hud`, `select`, `setView`).
 
 ## Próximos pasos posibles
 
-- Servidor con cuentas y partida persistente (lo que hace que OGame sea multijugador).
-- Gestionar las colonias como ciudades propias, con sus edificios.
-- Rutas comerciales entre islas y diplomacia con otros imperios.
+- Alianzas, mensajes privados y comercio entre jugadores.
+- Varias ciudades por jugador (las colonias como ciudades completas).
+- Recuperar la contraseña por correo.

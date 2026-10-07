@@ -1,5 +1,5 @@
-import { ISLAND_BY_ID, UNITS } from '../game/data.js';
-import { bag, fmtAgo, fmtNum, unitList } from './format.js';
+import { UNITS } from '../game/data.js';
+import { bag, escapeHtml, fmtAgo, fmtNum, unitList } from './format.js';
 
 // Informes de combate, exploración y colonias.
 
@@ -19,12 +19,12 @@ function sideTable(title, side) {
 
 function reportBody(r) {
   const parts = [];
-  if (r.text) parts.push(`<p>${r.text}</p>`);
+  if (r.text) parts.push(`<p>${escapeHtml(r.text)}</p>`);
   if (r.battle) {
     // En los asaltos piratas (y emboscadas de expedición) los piratas atacan
     const defending = r.kind === 'defensa' || r.defending;
-    const attTitle = defending ? 'Piratas' : 'Tu ejército';
-    const defTitle = defending ? (r.kind === 'defensa' ? 'Tus defensores' : 'Tu flota') : 'Defensores';
+    const attTitle = defending ? (r.enemy ? escapeHtml(r.enemy) : 'Piratas') : 'Tu ejército';
+    const defTitle = defending ? (r.kind === 'defensa' ? 'Tus defensores' : 'Tu flota') : r.enemy ? escapeHtml(r.enemy) : 'Defensores';
     parts.push(`<div class="battle">${sideTable(attTitle, r.battle.att)}${sideTable(defTitle, r.battle.def)}</div>`);
     const notes = [`${r.battle.rounds} ${r.battle.rounds === 1 ? 'asalto' : 'asaltos'}`];
     if (r.towers) notes.push(`las torres dispararon ${fmtNum(r.towers)} por asalto`);
@@ -48,11 +48,11 @@ export function reportsHtml(reports) {
   const items = reports.length
     ? reports
         .map((r) => {
-          const where = r.island ? ISLAND_BY_ID[r.island]?.name : 'Tu isla';
+          const where = escapeHtml(r.islandName ?? (r.island ? 'Una isla' : 'Tu isla'));
           return `<details class="report ${r.outcome ?? ''} ${r.read ? '' : 'unread'}">
             <summary>
               <span class="r-icon">${KIND_ICON[r.kind] ?? '📜'}</span>
-              <span class="r-title">${r.title}</span>
+              <span class="r-title">${escapeHtml(r.title)}</span>
               <span class="r-meta">${where} · ${fmtAgo(r.t)}</span>
             </summary>
             <div class="r-body">${reportBody(r)}</div>

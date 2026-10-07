@@ -3,14 +3,47 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Imperium</title>
+    <title>Imperium · Juego de estrategia en el navegador</title>
+    <meta name="description" content="Funda tu ciudad en un archipiélago vivo, comercia, investiga, explora y conquista junto a miles de jugadores." />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
   </head>
-  <body>
+  <body class="landing-mode">
     <div id="app">
       <div id="scene"></div>
+
+      <section id="landing" hidden>
+        <div class="landing-hero">
+          <h1 class="landing-brand">⚜ Imperium</h1>
+          <p class="tagline">Funda tu ciudad en un archipiélago vivo. Comercia, investiga, explora la niebla y conquista a tus vecinos… o levanta el Coloso antes que nadie.</p>
+          <ul class="features">
+            <li><span>🏛️</span><div><b>14 edificios y 13 investigaciones</b>Tu isla crece en 3D mientras juegas, también con la pestaña cerrada.</div></li>
+            <li><span>⚔️</span><div><b>Un mundo compartido</b>Espía y saquea a otros jugadores, defiéndete de ellos y de los piratas.</div></li>
+            <li><span>🧭</span><div><b>Mares por descubrir</b>Campamentos bárbaros, ruinas con tesoros, colonias y el temible Kraken.</div></li>
+            <li><span>🛕</span><div><b>Favor de los dioses</b>Poderes divinos, misiones, visitantes y expediciones a la niebla.</div></li>
+          </ul>
+          <button class="ghost" data-action="go-register">Empieza gratis →</button>
+        </div>
+        <div class="landing-panel">
+          <div class="auth">
+            <div class="tabs">
+              <button type="button" data-tab="login">Entrar</button>
+              <button type="button" data-tab="register">Crear cuenta</button>
+            </div>
+            <form id="auth-form" autocomplete="on">
+              <label>Nombre de jugador <input name="username" autocomplete="username" required minlength="3" maxlength="20" /></label>
+              <label class="reg">Nombre de tu ciudad <input name="city" maxlength="20" placeholder="Si lo dejas vacío, tu nombre" /></label>
+              <label>Contraseña <input name="password" type="password" autocomplete="current-password" required minlength="6" maxlength="100" /></label>
+              <label class="reg">Repite la contraseña <input name="password2" type="password" autocomplete="new-password" maxlength="100" /></label>
+              <button class="primary" type="submit">Entrar</button>
+              <div class="form-error" role="alert"></div>
+            </form>
+          </div>
+          <div id="world-stats" class="world-stats"></div>
+        </div>
+      </section>
+
       <header id="topbar">
         <div class="brand">⚜ Imperium</div>
         <div id="resources"></div>
@@ -18,22 +51,31 @@
           <button id="favor" class="pill" title="Favor de los dioses" hidden></button>
           <button id="view-btn" class="tab-btn" title="Cambiar entre tu isla y el archipiélago (M)">🗺️ <span>Mapa</span></button>
           <button id="quests-btn" class="icon-btn" title="Misiones">📋<span class="badge" hidden></span></button>
+          <button id="chat-btn" class="icon-btn" title="Chat del archipiélago">💬<span class="badge" hidden></span></button>
           <button id="rank-btn" class="icon-btn" title="Clasificación">🏆</button>
           <button id="reports-btn" class="icon-btn" title="Informes">📜<span class="badge" hidden></span></button>
           <button id="menu-btn" class="icon-btn" title="Opciones">⚙</button>
         </div>
       </header>
       <div id="menu" class="menu" hidden>
+        <div class="menu-user"></div>
         <label><input type="checkbox" name="sound" /> 🔊 Sonido</label>
         <label><input type="checkbox" name="daynight" /> 🌗 Día y noche</label>
-        <button class="ghost small" data-action="reset">Reiniciar partida…</button>
+        <button class="ghost small" data-action="logout">Cerrar sesión</button>
       </div>
       <div id="banners">
+        <div id="offline" hidden>📡 Sin conexión con el servidor. Reintentando…</div>
         <button id="alert" hidden></button>
         <div id="visitor" hidden></div>
       </div>
       <aside id="sidebar"></aside>
       <section id="panel" hidden></section>
+      <section id="chat" hidden>
+        <div class="panel-head"><span class="panel-icon">💬</span><div><h3>Chat</h3><div class="panel-lvl">Todo el archipiélago lo lee</div></div>
+          <button class="icon-btn" data-action="close-chat" title="Cerrar">✕</button></div>
+        <div class="chat-log"></div>
+        <form class="chat-form"><input name="text" maxlength="300" placeholder="Escribe un mensaje…" autocomplete="off" /><button class="primary small auto">Enviar</button></form>
+      </section>
       <div id="dock" hidden></div>
       <div id="modal" hidden></div>
       <div id="toasts"></div>
