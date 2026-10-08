@@ -7,6 +7,7 @@ import { buildingPanel } from './buildingPanel.js';
 import { bag, costItems, escapeHtml, fmtNum, fmtTime, unitList } from './format.js';
 import { fleetFor, islandPanel, readFleet, readPayload, readOpts } from './islandPanel.js';
 import { questsHtml, rankingHtml } from './modals.js';
+import { openGuide } from './guide.js';
 import { Tutorial } from './tutorial.js';
 import { WorldMap } from './worldMap.js';
 import { reportsHtml, playReplay } from './reports.js';
@@ -144,6 +145,7 @@ export class Hud {
       e.stopPropagation();
       this.menu.hidden = !this.menu.hidden;
       this.menu.querySelector('[name="sound"]').checked = settings.sound();
+      this.menu.querySelector('[name="music"]').checked = settings.music();
       this.menu.querySelector('[name="daynight"]').checked = settings.dayNight();
       this.menu.querySelector('[name="notify"]').checked = settings.notify();
     });
@@ -152,8 +154,13 @@ export class Hud {
     });
     this.menu.addEventListener('change', (e) => {
       if (e.target.name === 'sound') settings.setSound(e.target.checked);
+      if (e.target.name === 'music') settings.setMusic(e.target.checked);
       if (e.target.name === 'daynight') settings.setDayNight(e.target.checked);
       if (e.target.name === 'notify') settings.setNotify(e.target.checked).then((on) => (e.target.checked = on));
+    });
+    this.menu.querySelector('[data-action="guide"]').addEventListener('click', () => {
+      this.menu.hidden = true;
+      openGuide(this);
     });
     this.menu.querySelector('[data-action="vacation"]').addEventListener('click', () => {
       this.menu.hidden = true;
@@ -398,6 +405,10 @@ export class Hud {
     this.eventEl.classList.toggle('active', !!ev.event);
     const title = ev.event ? `${ev.event.name}: ${ev.event.text}\nTermina en ${left}. Clic para ver el calendario.` : `Mares tranquilos. La próxima temporada puede empezar en ${left}.\nClic para ver el calendario.`;
     if (this.eventEl.title !== title) this.eventEl.title = title;
+  }
+
+  openGuide() {
+    openGuide(this);
   }
 
   openEvents() {

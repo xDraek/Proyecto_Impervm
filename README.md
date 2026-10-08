@@ -52,6 +52,8 @@ El servidor guarda el mundo en memoria y lo vuelca a la base de datos cada 10 se
 - **Encargos diarios** 📜: cada día tres tareas distintas (invertir, entrenar, saquear, explorar, comerciar…) con recompensa, y premio extra por cumplir las tres.
 - **Competición semanal** 🏅: cada semana se premia a los tres mejores en saqueo, militar y construcción (solo cuenta lo hecho esa semana). Los ganadores quedan en el salón de la fama, en la pestaña «Semana» de la clasificación.
 - **Efectos de combate**: humo, fuego y destellos en la isla donde se libra una batalla (también en tu muralla cuando te atacan).
+- **Guía del juego** 📖 (desde ⚙ o con la tecla `?`): todos los sistemas explicados, con buscador.
+- **Música ambiental** 🎵: una lira que improvisa sobre una escala pentatónica, generada en el navegador (se apaga desde ⚙).
 - **Tutorial**: un consejero guía a los jugadores nuevos por sus primeros pasos (se puede saltar).
 - **Clima**: cada media hora puede estar despejado, nublado, lloviendo o haber tormenta con relámpagos y truenos (igual para todos). Alrededor de tu isla faenan pesqueros, saltan delfines y los carros de bueyes suben por la avenida.
 - Tu ciudad crece a la vista: barrios que se llenan de casas con el ayuntamiento, campos, ovejas, farolas que se encienden de noche y una playa con barcas y cabañas.

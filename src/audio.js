@@ -3,6 +3,7 @@
 // contexto se crea en el primer clic o tecla.
 
 const MUTE_KEY = 'imperium.muted';
+const MUSIC_KEY = 'imperium.music';
 
 let ctx = null;
 let master = null;
@@ -27,6 +28,7 @@ function ensure() {
   master.gain.value = muted ? 0 : 0.6;
   master.connect(ctx.destination);
   startAmbience();
+  if (musicOn()) startMusic();
   return ctx;
 }
 
@@ -110,6 +112,125 @@ function gull() {
     osc.connect(g).connect(master);
     osc.start(start);
     osc.stop(start + 0.2);
+  }
+}
+
+// ── Música: una lira que improvisa sobre una escala pentatónica ──────────────
+// Sin archivos: cada nota se sintetiza al momento, así que nunca se repite igual.
+
+const SCALE = [146.83, 164.81, 196.0, 220.0, 246.94, 293.66, 329.63, 392.0, 440.0, 493.88, 587.33]; // re mi sol la si…
+const BEAT = 60 / 66; // negras a 66 por minuto
+let music = null;
+
+export function musicOn() {
+  try {
+    return localStorage.getItem(MUSIC_KEY) !== '0';
+  } catch {
+    return true;
+  }
+}
+
+export function setMusic(on) {
+  try {
+    localStorage.setItem(MUSIC_KEY, on ? '1' : '0');
+  } catch {
+    // sin almacenamiento: solo esta sesión
+  }
+  if (on) {
+    ensure();
+    startMusic();
+  } else stopMusic();
+}
+
+/** Cuerda pulsada: ataque rápido, cola larga y un poco de brillo que se apaga. */
+function pluck(freq, start, vol = 0.05, dur = 2.4) {
+  const osc = ctx.createOscillator();
+  osc.type = 'triangle';
+  osc.frequency.value = freq;
+  const harm = ctx.createOscillator();
+  harm.type = 'sine';
+  harm.frequency.value = freq * 2;
+  const filter = ctx.createBiquadFilter();
+  filter.type = 'lowpass';
+  filter.frequency.setValueAtTime(3200, start);
+  filter.frequency.exponentialRampToValueAtTime(700, start + dur);
+  const g = ctx.createGain();
+  g.gain.setValueAtTime(0.0001, start);
+  g.gain.exponentialRampToValueAtTime(vol, start + 0.01);
+  g.gain.exponentialRampToValueAtTime(0.0001, start + dur);
+  const hg = ctx.createGain();
+  hg.gain.value = 0.25;
+  osc.connect(filter);
+  harm.connect(hg).connect(filter);
+  filter.connect(g).connect(music.out);
+  for (const o of [osc, harm]) {
+    o.start(start);
+    o.stop(start + dur + 0.05);
+  }
+}
+
+function startMusic() {
+  if (!ctx || music) return;
+  const out = ctx.createGain();
+  out.gain.value = 0;
+  out.gain.setTargetAtTime(0.9, ctx.currentTime, 2);
+  out.connect(master);
+  // Un bordón muy suave (re y la) que respira despacio
+  const drone = [];
+  for (const f of [73.42, 110.0]) {
+    const o = ctx.createOscillator();
+    o.type = 'sine';
+    o.frequency.value = f;
+    const g = ctx.createGain();
+    g.gain.value = 0.012;
+    const lfo = ctx.createOscillator();
+    lfo.frequency.value = 0.05 + Math.random() * 0.05;
+    const lg = ctx.createGain();
+    lg.gain.value = 0.008;
+    lfo.connect(lg).connect(g.gain);
+    o.connect(g).connect(out);
+    o.start();
+    lfo.start();
+    drone.push(o, lfo);
+  }
+  music = { out, drone, next: ctx.currentTime + 0.5, note: 5, bar: 0 };
+  music.timer = setInterval(scheduleMusic, 200);
+}
+
+function stopMusic() {
+  if (!music) return;
+  const m = music;
+  music = null;
+  clearInterval(m.timer);
+  m.out.gain.setTargetAtTime(0, ctx.currentTime, 0.6);
+  setTimeout(() => {
+    for (const o of m.drone) o.stop();
+    m.out.disconnect();
+  }, 3000);
+}
+
+/** Programa las notas del próximo segundo: un paseo por la escala con silencios y algún arpegio. */
+function scheduleMusic() {
+  if (!music) return;
+  if (document.hidden) {
+    music.next = ctx.currentTime + 0.5;
+    return;
+  }
+  while (music.next < ctx.currentTime + 1.2) {
+    const t = music.next;
+    const beat = music.bar % 8;
+    if (beat === 0 && Math.random() < 0.6) {
+      // Arpegio de tres notas al empezar algunos compases
+      const root = [0, 2, 3][Math.floor(Math.random() * 3)];
+      [0, 2, 4].forEach((k, i) => pluck(SCALE[root + k], t + i * BEAT * 0.33, 0.035, 3));
+    } else if (Math.random() < 0.72) {
+      const step = [-2, -1, -1, 1, 1, 2, 0][Math.floor(Math.random() * 7)];
+      music.note = Math.max(3, Math.min(SCALE.length - 1, music.note + step));
+      pluck(SCALE[music.note], t, 0.045);
+      if (Math.random() < 0.2) pluck(SCALE[Math.max(0, music.note - 5)], t, 0.025, 3);
+    }
+    music.next += BEAT * (Math.random() < 0.25 ? 2 : 1);
+    music.bar++;
   }
 }
 

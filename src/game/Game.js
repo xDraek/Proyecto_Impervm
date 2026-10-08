@@ -1536,6 +1536,18 @@ export class Game extends EventTarget {
   }
 
   #arrivePlayerAttack(m, isl, t) {
+    // Lo que valía al zarpar puede haber cambiado por el camino
+    const rel = this.world.relation?.(this.userId, isl.owner);
+    const away = this.world.playerInfo?.(isl.owner)?.vacation;
+    if (rel === 'aliado' || rel === 'pacto' || away) {
+      const why = away
+        ? `${this.world.playerInfo(isl.owner).name} se ha ido de vacaciones: su isla no se puede atacar.`
+        : rel === 'aliado'
+          ? 'Ahora sois aliados: tu flota se da la vuelta sin combatir.'
+          : 'Vuestras alianzas han firmado un pacto de no agresión: tu flota se da la vuelta.';
+      this.#report({ t, kind: 'ataque', island: isl.id, islandName: isl.name, title: `Ataque cancelado en ${isl.name}`, text: why });
+      return;
+    }
     const { atkMul, hpMul } = playerCombat(this.state);
     const hero = m.hero ? { atk: this.heroBonus('ataque'), cargo: 1 + this.heroBonus('botin') } : { atk: 0, cargo: 1 };
     const war = this.world.relation?.(this.userId, isl.owner) === 'guerra';

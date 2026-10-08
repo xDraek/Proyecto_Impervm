@@ -2891,3 +2891,34 @@ input[type='text'] {
   color: var(--bad);
   border: 1px solid rgba(255, 122, 107, 0.55);
 }
+
+/* ── Guía del juego ──────────────────────────────────────────────────────── */
+
+.guide-search {
+  width: 100%;
+  margin: 10px 0;
+  padding: 9px 12px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: rgba(0, 0, 0, 0.3);
+  color: var(--text);
+  font: inherit;
+}
+
+.guide-topic {
+  margin: 6px 0;
+  padding: 8px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--panel-border);
+}
+
+.guide-topic summary {
+  cursor: pointer;
+  font-weight: 600;
+  color: var(--gold);
+}
+
+.guide-body p {
+  margin: 8px 0;
+  line-height: 1.5;
+}

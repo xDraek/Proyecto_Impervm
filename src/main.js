@@ -1,5 +1,5 @@
 import './style.css';
-import { isMuted, play, setAmbienceLevel, setMuted, unlockAudio } from './audio.js';
+import { isMuted, musicOn, play, setAmbienceLevel, setMusic, setMuted, unlockAudio } from './audio.js';
 import { clock, universe } from './config.js';
 import { BUILDINGS } from './game/data.js';
 import { Game, newState } from './game/Game.js';
@@ -104,6 +104,8 @@ function startGame(game) {
       setMuted(!on);
       if (on) unlockAudio();
     },
+    music: () => musicOn(),
+    setMusic: (on) => setMusic(on),
     notify: () => notifyOn(),
     /** Activa los avisos del navegador (pide permiso). Devuelve si han quedado activos. */
     setNotify: async (on) => {
@@ -145,6 +147,7 @@ function startGame(game) {
       else select(null);
     }
     if (e.key === 'm' || e.key === 'M') setView(world.view === 'isla' ? 'mapa' : 'isla');
+    if (e.key === '?') hud.openGuide();
   });
 
   document.addEventListener('click', (e) => {
