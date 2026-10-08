@@ -96,6 +96,7 @@ const ACTIONS = {
   dismissVisitor: (g) => g.dismissVisitor(),
   markReportsRead: (g) => g.markReportsRead(),
   upgradeColony: (g, [id]) => (typeof id === 'string' ? g.upgradeColony(id) : bad()),
+  donateWonder: (g, [id, bag]) => (typeof id === 'string' ? g.donateWonder(id, resources(bag)) : bad()),
   startVacation: (g) => g.startVacation(),
   endVacation: (g) => g.endVacation(),
 };

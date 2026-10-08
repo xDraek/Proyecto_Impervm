@@ -118,7 +118,7 @@ export class WorldMap {
     this.canvas.width = Math.round(this.w * dpr);
     this.canvas.height = Math.round(this.h * dpr);
     this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    if (!this.scale) this.scale = this.w / 2800;
+    if (!this.scale) this.scale = Math.min(this.w, this.h) / 1500;
     this.#draw();
   }
 

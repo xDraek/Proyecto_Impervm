@@ -2,7 +2,8 @@ import { clock, universe } from '../src/config.js';
 import { RESOURCES } from '../src/game/data.js';
 import { count } from '../src/game/combat.js';
 import { Game, newState } from '../src/game/Game.js';
-import { playerCombat, worldEventAt } from '../src/game/rules.js';
+import { WONDERS } from '../src/game/data.js';
+import { playerCombat, wonderLevel, wonderOf, worldEventAt } from '../src/game/rules.js';
 import { footprint, freshIslandState, generateContinent, generateSector, homeIsland, sectorCenter, sectorVertices } from '../src/game/world.js';
 import { hashPassword, newSecret, verifyPassword } from './auth.js';
 
@@ -76,6 +77,7 @@ export class WorldServer {
     for (const a of Object.values(this.meta.alliances)) for (const uid of a.members) this.memberOf.set(uid, a.id);
     // Mundos de antes de los continentes: se añaden donde quepan
     for (let s = 0; s < this.meta.sectors; s++) this.#addContinents(s, clock.now());
+    this.#refreshWonders();
     // Ponerse al día con lo que pasó mientras el servidor estuvo apagado
     this.tick();
     await this.persist(true);
@@ -304,6 +306,57 @@ export class WorldServer {
     rt.colonizedBy = userId;
     this.touch(id);
     return true;
+  }
+
+  // ── Maravillas de los continentes ──────────────────────────────────────────
+
+  /** Bonos de las maravillas de los continentes donde hay colonias de la lista. */
+  wonderBonusFor(colonies) {
+    const out = {};
+    const seen = new Set();
+    for (const c of colonies) {
+      const land = this.islands.get(c.id)?.land;
+      if (!land || seen.has(land)) continue;
+      seen.add(land);
+      const cont = this.islands.get(land);
+      const level = wonderLevel(this.islandStates.get(land)?.wonder?.progress);
+      if (!cont || !level) continue;
+      const w = WONDERS[wonderOf(cont)];
+      out[w.stat] = (out[w.stat] ?? 0) + level * w.per;
+    }
+    return out;
+  }
+
+  /** Recalcula el bono de quienes tienen colonia en un continente (o de todos). */
+  #refreshWonders(continentId = null, now = clock.now()) {
+    for (const game of this.games.values()) {
+      if (continentId && !game.state.colonies.some((c) => this.islands.get(c.id)?.land === continentId)) continue;
+      const next = this.wonderBonusFor(game.state.colonies);
+      if (JSON.stringify(next) === JSON.stringify(game.state.wonderBonus ?? {})) continue;
+      game.update(now); // que la producción hasta ahora vaya con el bono anterior
+      game.state.wonderBonus = next;
+      game.dirty = true;
+      this.pendingPush.add(game.userId);
+    }
+  }
+
+  donateWonder(id, userId, amount, now) {
+    const rt = this.islandStates.get(id);
+    const cont = this.islands.get(id);
+    if (!rt || !cont) return;
+    rt.wonder ??= { progress: 0, donors: {} };
+    const before = wonderLevel(rt.wonder.progress);
+    rt.wonder.progress += amount;
+    rt.wonder.donors[userId] = (rt.wonder.donors[userId] ?? 0) + amount;
+    this.touch(id);
+    const after = wonderLevel(rt.wonder.progress);
+    if (after > before) {
+      const w = WONDERS[wonderOf(cont)];
+      this.announce(`${w.icon} ${w.name} de ${cont.name} sube a nivel ${after}`);
+      this.#refreshWonders(id, now);
+    }
+    // Que todos los que miran el continente vean el progreso
+    for (const game of this.games.values()) if (game.state.colonies.some((c) => this.islands.get(c.id)?.land === id)) this.pendingPush.add(game.userId);
   }
 
   spyPlayer(ownerId, t) {

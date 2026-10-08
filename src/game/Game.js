@@ -22,6 +22,9 @@ import {
   UNITS,
   VACATION,
   VISITORS,
+  WONDERS,
+  WONDER_LEVELS,
+  WONDER_RESOURCES,
 } from './data.js';
 import { battle, count, hasCombat } from './combat.js';
 import {
@@ -46,6 +49,8 @@ import {
   researchSeconds,
   scoreOf,
   storageCapacity,
+  wonderLevel,
+  wonderOf,
   worldEventAt,
   sum,
   tradeRate,
@@ -103,7 +108,7 @@ export function newState({ now = clock.now(), home, name }) {
     notes: [],
     favor: 0,
     buffs: {},
-    stats: { spent: 0, victories: 0, raidsRepelled: 0, expeditions: 0, powers: 0, treasures: 0, kraken: 0, pvpWins: 0, trades: 0, transports: 0, kills: 0, loot: 0, conquests: 0 },
+    stats: { spent: 0, victories: 0, raidsRepelled: 0, expeditions: 0, powers: 0, treasures: 0, kraken: 0, pvpWins: 0, trades: 0, transports: 0, kills: 0, loot: 0, conquests: 0, donated: 0 },
     daily: { last: null, streak: 0, best: 0 },
     hero: null,
     quests: { claimed: [] },
@@ -506,6 +511,36 @@ export class Game extends EventTarget {
     return this.state.colonies.find((c) => c.id === id) ?? null;
   }
 
+  /** Si tienes alguna colonia en el continente `id`. */
+  hasColonyOn(id) {
+    return this.state.colonies.some((c) => this.world.island(c.id)?.land === id);
+  }
+
+  /** Aportar recursos a la maravilla de un continente donde tienes colonia. */
+  donateWonder(id, bag, now = this.now()) {
+    this.#advance(now);
+    const isl = this.world.island(id);
+    if (!isl || isl.type !== 'continente') return this.#fail('Eso no es un continente.');
+    if (!this.hasColonyOn(id)) return this.#fail('Necesitas una colonia en este continente para ayudar a levantar su maravilla.');
+    const gift = {};
+    for (const r of WONDER_RESOURCES) {
+      const n = Math.floor(Number(bag?.[r]) || 0);
+      if (n > 0) gift[r] = n;
+    }
+    const total = sum(gift);
+    if (!total) return this.#fail('Elige cuánta madera, piedra o cristal aportas.');
+    if (!canAfford(this.state.resources, gift)) return this.#fail('No tienes tantos recursos.');
+    const rt = this.world.islandState(id);
+    if (wonderLevel(rt?.wonder?.progress) >= WONDER_LEVELS.length) return this.#fail('La maravilla ya está terminada.');
+    const left = WONDER_LEVELS.at(-1) - (rt?.wonder?.progress ?? 0);
+    if (total > left) return this.#fail(`Solo faltan ${left.toLocaleString('es-ES')} recursos para terminarla.`);
+    this.#pay(gift);
+    this.state.stats.donated = (this.state.stats.donated ?? 0) + total;
+    this.world.donateWonder?.(id, this.userId, total, now);
+    this.#note(`${WONDERS[wonderOf(isl)].icon} Aportas ${fmtBag(gift)} a la maravilla`, 'success');
+    return this.#done();
+  }
+
   /** Ampliar una colonia: cuesta recursos y tarda un rato; solo una a la vez. */
   upgradeColony(id, now = this.now()) {
     this.#advance(now);
@@ -557,6 +592,11 @@ export class Game extends EventTarget {
         relation: this.world.relation?.(this.userId, isl.owner) ?? null,
       });
       return view;
+    }
+    if (isl.type === 'continente') {
+      const progress = rt?.wonder?.progress ?? 0;
+      const level = wonderLevel(progress);
+      view.wonder = { id: wonderOf(isl), level, progress, next: WONDER_LEVELS[level] ?? null, donors: rt?.wonder?.donors ?? {}, member: this.hasColonyOn(id) };
     }
     const colonizedBy = rt?.colonizedBy ?? null;
     Object.assign(view, {
@@ -1559,6 +1599,7 @@ export class Game extends EventTarget {
     const specialty = Object.entries(isl.loot?.mix ?? { hierro: 1 }).sort((a, b) => b[1] - a[1])[0][0];
     const colonyYieldBase = Math.round(60 + (isl.tier ?? 4) * 30);
     this.state.colonies.push({ id: isl.id, name: isl.name, specialty, yield: colonyYieldBase, conquered: true });
+    this.state.wonderBonus = this.world.wonderBonusFor?.(this.state.colonies) ?? this.state.wonderBonus;
     this.state.stats.conquests = (this.state.stats.conquests ?? 0) + 1;
     m.units.mercante -= 1;
     if (!m.units.mercante) delete m.units.mercante;
@@ -1583,6 +1624,7 @@ export class Game extends EventTarget {
       return;
     }
     this.state.colonies.push({ id: isl.id, name: isl.name, specialty: isl.specialty, yield: isl.yield });
+    this.state.wonderBonus = this.world.wonderBonusFor?.(this.state.colonies) ?? this.state.wonderBonus;
     m.units.mercante -= 1;
     if (!m.units.mercante) delete m.units.mercante;
     m.cargo = {};

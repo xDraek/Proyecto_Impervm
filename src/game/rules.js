@@ -10,6 +10,9 @@ import {
   RESOURCES,
   RESOURCE_KEYS,
   UNITS,
+  WONDERS,
+  WONDER_KEYS,
+  WONDER_LEVELS,
   WORLD_EVENTS,
   WORLD_EVENT_CHANCE,
   WORLD_EVENT_HOURS,
@@ -78,7 +81,7 @@ export function researchCost(id, level) {
 
 export function researchSeconds(state, id, level) {
   const raw = RESEARCH[id].baseTime * RESEARCH_TIME_FACTOR ** (level - 1);
-  const speed = 1 + 0.1 * Math.max(0, lvl(state, 'academia') - 1);
+  const speed = (1 + 0.1 * Math.max(0, lvl(state, 'academia') - 1)) * (1 + wonderBonus(state, 'investigacion'));
   return Math.max(1, Math.round(raw / speed / universe.speed));
 }
 
@@ -98,7 +101,7 @@ export function unitSeconds(state, id) {
 /** Multiplicadores de combate de tus tropas. */
 export function playerCombat(state) {
   return {
-    atkMul: 1 + 0.1 * lvl(state, 'herreria') + 0.03 * lvl(state, 'forja'),
+    atkMul: 1 + 0.1 * lvl(state, 'herreria') + 0.03 * lvl(state, 'forja') + wonderBonus(state, 'ataque'),
     hpMul: 1 + 0.1 * lvl(state, 'armaduras'),
   };
 }
@@ -126,7 +129,7 @@ export function colonyCost(colonies) {
 }
 
 export function fleetSpeedBonus(state) {
-  return 1 + 0.1 * lvl(state, 'navegacion') + 0.04 * lvl(state, 'faro');
+  return 1 + 0.1 * lvl(state, 'navegacion') + 0.04 * lvl(state, 'faro') + wonderBonus(state, 'velocidad');
 }
 
 /** Segundos de viaje (solo ida) hasta una isla con una flota a cierta velocidad. */
@@ -159,6 +162,26 @@ export function colonyUpgrade(level) {
     cost: Object.fromEntries(Object.entries(multiplyCost(COLONY.upgradeCost, COLONY.costFactor ** (level - 1))).map(([r, n]) => [r, Math.round(n / 10) * 10])),
     seconds: Math.max(1, Math.round((COLONY.upgradeMinutes * 60 * COLONY.timeFactor ** (level - 1)) / universe.speed)),
   };
+}
+
+// ── Maravillas ──────────────────────────────────────────────────────────────
+
+/** Qué maravilla tiene un continente (los antiguos no la traen guardada). */
+export function wonderOf(continent) {
+  if (continent.wonder && WONDERS[continent.wonder]) return continent.wonder;
+  let h = 0;
+  for (const ch of String(continent.id)) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+  return WONDER_KEYS[h % WONDER_KEYS.length];
+}
+
+/** Nivel de una maravilla según lo aportado. */
+export function wonderLevel(progress = 0) {
+  return WONDER_LEVELS.filter((n) => progress >= n).length;
+}
+
+/** Bono de las maravillas para un jugador (lo guarda el servidor en el estado). */
+function wonderBonus(state, stat) {
+  return state.wonderBonus?.[stat] ?? 0;
 }
 
 // ── Eventos del archipiélago ─────────────────────────────────────────────────
@@ -245,7 +268,8 @@ export function economy(state, t = state.lastUpdate) {
   for (const res of RESOURCE_KEYS) {
     research[res] = (base[res] + buildings[res]) * researchBonus(state, res);
     eventBonus[res] = event?.prod?.[res] ?? 0;
-    gross[res] = (base[res] + buildings[res] + research[res] + colonies[res]) * bonus * (1 + eventBonus[res]);
+    const wonder = res === 'comida' ? wonderBonus(state, 'comida') : 0;
+    gross[res] = (base[res] + buildings[res] + research[res] + colonies[res]) * bonus * (1 + eventBonus[res] + wonder);
   }
   const upkeep = upkeepPerHour(state);
   const net = { ...gross, comida: gross.comida - upkeep };

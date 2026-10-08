@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { C, box, createShip, createSoldier, cyl, gableRoof, mat, mesh } from './models.js';
+import { C, box, createShip, createSoldier, cyl, gableRoof, mat, mesh, smokeColumn } from './models.js';
+import { wonderLevel, wonderOf } from '../game/rules.js';
 import { Batch, bakeStatic, hashString, mountainGeometry, paintByNormal, plateauGeometry, polar, rng } from './util.js';
 
 // Islas del archipiélago. La base (relieve, playa, árboles) no cambia; lo que hay
@@ -185,9 +186,10 @@ function continentBase(isl, R, rand, seed) {
   const well = new THREE.Group();
   well.add(cyl(2.0, 2.0, 0.06, 14, '#c9b48a'), cyl(0.5, 0.55, 0.5, 10, C.stone), box(0.08, 1.0, 0.08, C.woodDark, -0.45, 0, 0), box(0.08, 1.0, 0.08, C.woodDark, 0.45, 0, 0));
   well.add(gableRoof(1.1, 0.4, 0.8, C.roofRed, 0, 1.0, 0));
-  well.position.y = ISLAND_TOP;
+  // El pozo, junto a la plaza de la maravilla (que va en el centro)
+  well.position.set(7.5, ISLAND_TOP, 5);
   decor.add(well);
-  busy.push({ p: new THREE.Vector3(0, ISLAND_TOP, 0), r: 3 });
+  busy.push({ p: new THREE.Vector3(0, ISLAND_TOP, 0), r: 9 }, { p: well.position.clone(), r: 2.5 });
 
   // Un lago con juncos
   for (let tries = 0; tries < 40; tries++) {
@@ -299,6 +301,7 @@ function tree(color, palm) {
 /** Estado visual de la isla según lo que sabe el jugador. */
 export function islandLook(view) {
   if (view.type === 'brumas') return 'brumas';
+  if (view.type === 'continente') return `maravilla-${view.wonder?.level ?? 0}`;
   if (view.type === 'jugador') return `ciudad-${view.townLevel >= 6 ? 3 : view.townLevel >= 3 ? 2 : 1}`;
   if (view.type === 'ciudadela' && view.colonizedBy != null) return view.colonized ? 'ciudadela-propia' : 'ciudadela-otro';
   if (view.colonized) return 'colonia';
@@ -332,7 +335,8 @@ export function createIslandFeature(isl, look) {
     kraken: () => lair(g, R, rand),
     brumas: () => fogBank(g, R, rand),
   };
-  builders[look]?.();
+  if (look.startsWith('maravilla-')) wonderModel(g, wonderOf(isl), Number(look.slice(10)));
+  else builders[look]?.();
   return bakeStatic(g);
 }
 
@@ -707,6 +711,94 @@ function citadel(g, R, rand, owner = null) {
   flag.position.set(1.9, 3.0, 0);
   flag.userData.wave = true;
   g.add(flag);
+}
+
+/** La maravilla de un continente: crece con cada nivel. */
+function wonderModel(g, type, level) {
+  g.add(cyl(4.4, 4.6, 0.08, 24, '#d8cdb5'));
+  const steps = Math.min(3, 1 + level);
+  for (let i = 0; i < steps; i++) g.add(box(5.4 - i * 0.9, 0.28, 5.4 - i * 0.9, i % 2 ? C.wallDark : C.wall, 0, 0.08 + i * 0.28, 0));
+  const top = 0.08 + steps * 0.28;
+  if (level === 0) {
+    // Solo los cimientos, con andamios y bloques esperando
+    for (const [x, z] of [[-1.6, -1.6], [1.6, -1.6], [-1.6, 1.6], [1.6, 1.6]]) g.add(box(0.1, 1.6, 0.1, C.woodLight, x, top, z));
+    g.add(box(3.4, 0.08, 0.1, C.woodLight, 0, top + 1.4, -1.6), box(3.4, 0.08, 0.1, C.woodLight, 0, top + 1.4, 1.6));
+    for (let i = 0; i < 6; i++) g.add(box(0.5, 0.35, 0.5, C.stone, -2.6 + (i % 3) * 0.6, 0.08, 2.9 + Math.floor(i / 3) * 0.6));
+    return;
+  }
+  const gold = level >= 5 ? C.gold : null;
+  const h = 1.0 + level * 0.3;
+  if (type === 'poseidon') {
+    // Templo de columnas con un estanque y el tridente dorado
+    const n = 6 + level * 2;
+    for (let i = 0; i < n; i++) {
+      const a = (i / n) * Math.PI * 2;
+      g.add(cyl(0.13, 0.15, h, 8, C.white, Math.sin(a) * 1.8, top, Math.cos(a) * 1.8));
+    }
+    g.add(cyl(2.15, 2.15, 0.25, 16, C.wallDark, 0, top + h, 0));
+    const roof = mesh(new THREE.ConeGeometry(2.3, 1.0 + level * 0.1, 16), gold ?? C.roofBlue);
+    roof.position.y = top + h + 0.25 + (1.0 + level * 0.1) / 2;
+    g.add(roof);
+    const pool = mesh(new THREE.CylinderGeometry(1.2, 1.2, 0.06, 16), '#4a9fc8');
+    pool.position.y = top + 0.03;
+    g.add(pool);
+    if (level >= 3) {
+      g.add(cyl(0.05, 0.05, 1.6, 6, C.gold, 0, top, 0, { metalness: 0.6, roughness: 0.3 }));
+      for (const x of [-0.25, 0, 0.25]) g.add(box(0.06, 0.4, 0.06, C.gold, x, top + 1.5, 0, { metalness: 0.6, roughness: 0.3 }));
+      g.add(box(0.6, 0.06, 0.06, C.gold, 0, top + 1.5, 0, { metalness: 0.6, roughness: 0.3 }));
+    }
+  } else if (type === 'hefesto') {
+    // Gran forja con chimeneas humeantes y un yunque de bronce
+    g.add(box(3.2, h + 0.4, 2.6, C.stoneDark, 0, top, -0.2));
+    g.add(box(1.0, 0.8, 0.05, '#ff8a2a', 0, top + 0.1, 1.11, { emissive: '#ff5a00', emissiveIntensity: 1.6 }));
+    const chimneys = Math.min(3, 1 + Math.floor(level / 2));
+    for (let i = 0; i < chimneys; i++) {
+      const x = -1.0 + i * 1.0;
+      g.add(box(0.5, h + 1.8, 0.5, C.stone, x, top, -1.0));
+      g.add(smokeColumn(x, top + h + 2.0, -1.0, i * 1.3));
+    }
+    g.add(box(0.8, 0.5, 0.5, '#8a6a3a', 0, top, 2.0, { metalness: 0.5, roughness: 0.45 }));
+    g.add(box(1.2, 0.2, 0.5, gold ?? '#a5762e', 0, top + 0.5, 2.0, { metalness: 0.5, roughness: 0.45 }));
+  } else if (type === 'demeter') {
+    // Jardines en terrazas con árboles y una fuente
+    for (let i = 0; i < Math.min(4, level + 1); i++) {
+      const s = 3.6 - i * 0.8;
+      g.add(box(s, 0.35, s, '#5f9a4a', 0, top + i * 0.35, 0));
+      for (let k = 0; k < 4; k++) {
+        const a = (k / 4) * Math.PI * 2 + i;
+        const tree = mesh(new THREE.DodecahedronGeometry(0.28), k % 2 ? '#3f8a3a' : '#e86a8a');
+        tree.position.set(Math.sin(a) * (s / 2 - 0.25), top + i * 0.35 + 0.55, Math.cos(a) * (s / 2 - 0.25));
+        g.add(tree);
+      }
+    }
+    const t = top + Math.min(4, level + 1) * 0.35;
+    g.add(cyl(0.45, 0.55, 0.3, 12, C.white, 0, t, 0));
+    g.add(cyl(0.08, 0.1, 0.8, 6, C.white, 0, t + 0.3, 0));
+    g.add(mesh(new THREE.SphereGeometry(0.22, 8, 6), gold ?? '#e3c25a'));
+    g.children.at(-1).position.set(0, t + 1.2, 0);
+  } else {
+    // Biblioteca con columnata, cúpula y la lechuza de Atenea
+    g.add(box(3.2, h, 2.2, C.wall, 0, top, -0.2));
+    for (let i = 0; i < 6; i++) g.add(cyl(0.12, 0.14, h, 8, C.white, -1.4 + i * 0.56, top, 1.15));
+    g.add(box(3.4, 0.2, 2.8, C.wallDark, 0, top + h, 0.05));
+    const dome = mesh(new THREE.SphereGeometry(1.1, 14, 8, 0, Math.PI * 2, 0, Math.PI / 2), gold ?? C.roofBlue);
+    dome.position.y = top + h + 0.2;
+    g.add(dome);
+    if (level >= 3) {
+      const owl = mesh(new THREE.SphereGeometry(0.22, 8, 6), C.gold, { metalness: 0.6, roughness: 0.3 });
+      owl.position.set(0, top + h + 1.45, 0);
+      g.add(owl);
+      for (const x of [-0.1, 0.1]) g.add(box(0.06, 0.12, 0.06, C.gold, x, top + h + 1.6, 0));
+    }
+  }
+  // Estandartes en las esquinas de la plaza, uno por nivel
+  for (let i = 0; i < level; i++) {
+    const a = (i / 5) * Math.PI * 2 + 0.6;
+    g.add(cyl(0.04, 0.04, 2.2, 5, C.dark, Math.sin(a) * 3.8, 0, Math.cos(a) * 3.8));
+    const flag = box(0.5, 0.7, 0.02, C.cloth[i % 4], 0, 0, 0);
+    flag.position.set(Math.sin(a) * 3.8 + 0.25, 1.5, Math.cos(a) * 3.8);
+    g.add(flag);
+  }
 }
 
 function lair(g, R, rand) {

@@ -7,6 +7,7 @@ import { buildingPanel } from './buildingPanel.js';
 import { bag, costItems, escapeHtml, fmtNum, fmtTime, unitList } from './format.js';
 import { fleetFor, islandPanel, readFleet, readPayload, readOpts } from './islandPanel.js';
 import { questsHtml, rankingHtml } from './modals.js';
+import { Tutorial } from './tutorial.js';
 import { WorldMap } from './worldMap.js';
 import { reportsHtml, playReplay } from './reports.js';
 import { Social } from './social.js';
@@ -181,6 +182,7 @@ export class Hud {
     }).observe(topbar);
 
     this.render();
+    if (!game.showcase) this.tutorial = new Tutorial(this);
   }
 
   select(id) {
@@ -581,6 +583,16 @@ export class Hud {
       case 'upgrade':
         await this.#run(btn, () => game.upgrade(this.selected));
         break;
+      case 'donate': {
+        const bag = {};
+        for (const input of root.querySelectorAll('input[name^="w-"]')) {
+          const n = Math.floor(Number(input.value) || 0);
+          if (n > 0) bag[input.name.slice(2)] = n;
+        }
+        const res = await this.#run(btn, () => game.donateWonder(this.selected, bag), '🏛️ ¡Gracias! Tu aporte ya está en la obra', 'coins');
+        if (res?.ok) for (const input of root.querySelectorAll('input[name^="w-"]')) input.value = '';
+        break;
+      }
       case 'colony-upgrade':
         await this.#run(btn, () => game.upgradeColony(this.selected), '🔨 Los colonos se ponen manos a la obra');
         break;

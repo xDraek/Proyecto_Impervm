@@ -221,6 +221,7 @@ export function generateContinent(v, worldSeed = 1, obstacles = []) {
     z: v.z,
     size: Math.round((R / 2.4) * 10) / 10,
     shape,
+    wonder: pick(['poseidon', 'hefesto', 'demeter', 'atenea']),
     // Dónde están los asentamientos (relativo al centro), para trazar caminos y no plantar árboles encima
     sites: sites.map((s) => [s.x - v.x, s.z - v.z]),
   };

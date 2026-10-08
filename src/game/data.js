@@ -671,6 +671,7 @@ export const QUESTS = [
   { id: 'q-astillero', title: 'Carpinteros de ribera', text: 'Construye el astillero.', goal: lvl('astillero', 1), reward: { madera: 800, hierro: 200 } },
   { id: 'q-faro', title: 'Una luz en la noche', text: 'Construye el faro.', goal: lvl('faro', 1), reward: { piedra: 800, cristal: 200 } },
   { id: 'q-conquista', title: 'Señor del continente', text: 'Conquista una ciudad bárbara de un continente.', goal: stat('conquests', 1), reward: { oro: 3000, hierro: 2000 } },
+  { id: 'q-maravilla', title: 'Obra de todos', text: 'Aporta 2.000 recursos a la maravilla de un continente.', goal: stat('donated', 2000), reward: { cristal: 1500, oro: 800 } },
   { id: 'q-kraken', title: 'Matador de monstruos', text: 'Derrota al Kraken.', goal: stat('kraken', 1), reward: { oro: 5000, cristal: 5000 } },
   { id: 'q-coloso1', title: 'Primera piedra', text: 'Empieza el Coloso (nivel 1).', goal: lvl('coloso', 1), reward: { oro: 2000, hierro: 2000 } },
   { id: 'q-coloso', title: 'Leyenda eterna', text: 'Termina el Coloso (nivel 10).', goal: lvl('coloso', 10), reward: { oro: 20000 } },
@@ -758,6 +759,21 @@ export const WORLD_EVENTS = {
   feria: { name: 'Gran feria del archipiélago', icon: '⚖️', text: 'El mercado cambia un 15 % mejor.', trade: 0.15 },
   bonanza: { name: 'Vientos de bonanza', icon: '⛵', text: '+15 % de todos los recursos.', prod: { madera: 0.15, piedra: 0.15, comida: 0.15, hierro: 0.15, cristal: 0.15, oro: 0.15 } },
 };
+
+// ── Maravillas de los continentes ───────────────────────────────────────────
+// Cada continente tiene una. La construyen entre todos los que tienen colonia
+// allí, y todos ellos reciben su efecto en todo su imperio.
+
+export const WONDERS = {
+  poseidon: { name: 'Templo de Poseidón', icon: '🔱', stat: 'velocidad', per: 0.05, text: (l) => `Flotas un ${l * 5} % más rápidas` },
+  hefesto: { name: 'Forja de Hefesto', icon: '⚒️', stat: 'ataque', per: 0.04, text: (l) => `+${l * 4} % de ataque de tus tropas` },
+  demeter: { name: 'Jardines de Deméter', icon: '🌾', stat: 'comida', per: 0.08, text: (l) => `+${l * 8} % de comida` },
+  atenea: { name: 'Biblioteca de Atenea', icon: '🦉', stat: 'investigacion', per: 0.08, text: (l) => `Investigaciones un ${l * 8} % más rápidas` },
+};
+export const WONDER_KEYS = Object.keys(WONDERS);
+/** Recursos aportados (en total) para llegar a cada nivel. */
+export const WONDER_LEVELS = [6000, 18000, 45000, 100000, 200000];
+export const WONDER_RESOURCES = ['madera', 'piedra', 'cristal'];
 
 // ── Modo vacaciones ─────────────────────────────────────────────────────────
 // Tu isla descansa: no produce, no come, no llegan piratas ni visitantes y

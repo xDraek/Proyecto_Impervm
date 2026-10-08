@@ -1,4 +1,4 @@
-import { COLONY, ISLAND_TYPES, MISSION_TYPES, PLAYER_UNITS, RESOURCES, RESOURCE_KEYS, UNITS } from '../game/data.js';
+import { COLONY, ISLAND_TYPES, MISSION_TYPES, PLAYER_UNITS, RESOURCES, RESOURCE_KEYS, UNITS, WONDERS, WONDER_LEVELS, WONDER_RESOURCES } from '../game/data.js';
 import { colonyUpgrade, colonyYield } from '../game/rules.js';
 import { NEWBIE_POINTS } from '../game/Game.js';
 import { bag, costList, escapeHtml, fmtAgo, fmtNum, fmtTime, unitList } from './format.js';
@@ -78,7 +78,37 @@ function continentSection(game, view) {
     })
     .join('');
   return `<p class="desc">Un pequeño continente entre los sectores del archipiélago. Tierra adentro hay ciudades bárbaras bien defendidas y valles fértiles donde fundar colonias.</p>
-    <ul class="mini-list site-list">${rows}</ul>`;
+    <ul class="mini-list site-list">${rows}</ul>
+    ${wonderSection(game, view)}`;
+}
+
+/** La maravilla del continente: su nivel, lo que falta y quién ha aportado. */
+function wonderSection(game, view) {
+  const w = view.wonder;
+  if (!w) return '';
+  const def = WONDERS[w.id];
+  const prev = WONDER_LEVELS[w.level - 1] ?? 0;
+  const pct = w.next ? Math.round(((w.progress - prev) / (w.next - prev)) * 100) : 100;
+  const donors = Object.entries(w.donors)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 5)
+    .map(([uid, n]) => `<li><span>${escapeHtml(game.world.playerInfo(Number(uid))?.name ?? (Number(uid) === game.userId ? game.username : 'Un colono'))}</span><b>${fmtNum(n)}</b></li>`)
+    .join('');
+  const form = !w.next
+    ? '<p class="hint ok">✨ La maravilla está terminada.</p>'
+    : w.member
+      ? `<div class="payload">${WONDER_RESOURCES.map((r) => `<label title="${RESOURCES[r].name}">${RESOURCES[r].icon}<input type="number" name="w-${r}" min="0" placeholder="0" inputmode="numeric" /></label>`).join('')}</div>
+        <button class="primary wide" data-action="donate">🏛️ Aportar a la maravilla</button>`
+      : '<p class="desc small">Funda una colonia en este continente (o conquista una de sus ciudades) para ayudar a levantarla y recibir su efecto.</p>';
+  return `<div class="section wonder">
+    <h4>${def.icon} ${def.name} · nivel ${w.level}/${WONDER_LEVELS.length}</h4>
+    <p class="desc small">La construyen entre todos los que tienen colonia en el continente, y todos ellos reciben su efecto en todo su imperio.</p>
+    <div class="effect"><span>Efecto</span><b class="up">${w.level ? def.text(w.level) : 'Ninguno todavía'}${w.next ? ` → ${def.text(w.level + 1)}` : ''}</b></div>
+    <div class="progress"><i style="width:${pct}%"></i></div>
+    <p class="muted small">${w.next ? `${fmtNum(w.progress)} / ${fmtNum(w.next)} recursos para el nivel ${w.level + 1}` : `${fmtNum(w.progress)} recursos aportados`}</p>
+    ${donors ? `<h5>Quién más ha aportado</h5><ul class="mini-list donors">${donors}</ul>` : ''}
+    ${form}
+  </div>`;
 }
 
 function infoSection(game, view) {

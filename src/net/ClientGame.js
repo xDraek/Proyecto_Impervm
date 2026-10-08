@@ -149,6 +149,10 @@ export class ClientGame extends Game {
     return this.#act('heroSkill', skill);
   }
 
+  donateWonder(id, bag) {
+    return this.#act('donateWonder', id, bag);
+  }
+
   upgradeColony(id) {
     return this.#act('upgradeColony', id);
   }
