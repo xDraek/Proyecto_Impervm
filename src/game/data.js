@@ -375,11 +375,11 @@ export const UNITS = {
     requires: { puerto: 4, astillero: 1 },
   },
   galeon: {
-    name: 'Galeón',
+    name: 'Quinquerreme',
     icon: '🚢',
     kind: 'barco',
     building: 'puerto',
-    description: 'Fortaleza flotante: cañones, bodega enorme y sitio para 15 soldados.',
+    description: 'Fortaleza flotante de cinco filas de remeros: torres con arqueros, catapulta en cubierta, bodega enorme y sitio para 15 soldados.',
     cost: { madera: 600, hierro: 250, cristal: 80, oro: 60 },
     time: 360,
     atk: 48,

@@ -1508,138 +1508,354 @@ export function createSoldier(id) {
   return g;
 }
 
-function hull(w, h, l, bow, color) {
-  // Casco visto desde arriba; tras girarlo, la proa apunta a +Z
+// ── Barcos de la época ──────────────────────────────────────────────────────
+// Cascos de madera con curva (más anchos en el centro y con la borda que sube hacia
+// proa y popa), franja pintada, espolón de bronce, ojos en la proa, filas de remos,
+// velas cuadradas a rayas y jarcias. Proa hacia +Z y línea de flotación en y = 0.
+
+let hullMaterial = null;
+
+/**
+ * Casco por secciones a lo largo de la eslora. `full` controla lo panzudo que es
+ * (más bajo, más redondo, como un mercante) y `rise` cuánto sube la borda en los extremos.
+ */
+function shipHull({ len, beam, depth, rise = 0.2, full = 0.6, color, band, deck = '#c9a26a', bandH = 0.08 }) {
+  hullMaterial ??= new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 0.85 });
+  const N = 14;
+  const cWood = new THREE.Color(color);
+  const cBand = new THREE.Color(band);
+  const cDeck = new THREE.Color(deck);
+  const stations = [];
+  for (let i = 0; i <= N; i++) {
+    const t = i / N;
+    const z = -len / 2 + len * t;
+    const hw = Math.max(0.004, (beam / 2) * Math.pow(Math.sin(Math.PI * t), full));
+    const top = depth * 0.38 + rise * Math.pow(2 * t - 1, 4);
+    // Media sección: borda, fin de la franja, costado, pantoque y quilla
+    const half = [
+      [hw, top],
+      [hw * 0.99, top - bandH],
+      [hw * 0.9, -depth * 0.3],
+      [hw * 0.55, -depth * 0.78],
+      [0, -depth],
+    ];
+    const ring = [...half, ...half.slice(0, 4).reverse().map(([x, y]) => [-x, y])];
+    stations.push({ z, ring, top, hw });
+  }
+  const pos = [];
+  const col = [];
+  const quad = (a, b, c, d, color) => {
+    for (const p of [a, b, c, a, c, d]) pos.push(...p);
+    for (let k = 0; k < 6; k++) col.push(color.r, color.g, color.b);
+  };
+  for (let i = 0; i < N; i++) {
+    const A = stations[i];
+    const B = stations[i + 1];
+    for (let k = 0; k < A.ring.length - 1; k++) {
+      const p = (s, j) => [s.ring[j][0], s.ring[j][1], s.z];
+      // La franja pintada va arriba, a los dos lados
+      const band0 = k === 0 || k === A.ring.length - 2;
+      quad(p(A, k), p(B, k), p(B, k + 1), p(A, k + 1), band0 ? cBand : cWood);
+    }
+    // Cubierta, un poco por debajo de la borda
+    const d = (s, x) => [x, s.top - 0.025, s.z];
+    quad(d(A, -A.hw * 0.97), d(B, -B.hw * 0.97), d(B, B.hw * 0.97), d(A, A.hw * 0.97), cDeck);
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+  geo.computeVertexNormals();
+  const m = new THREE.Mesh(geo, hullMaterial);
+  m.castShadow = true;
+  m.receiveShadow = true;
+  const station = (t) => stations[Math.round(Math.min(1, Math.max(0, t)) * N)];
+  return {
+    mesh: m,
+    /** Altura de la borda en un punto de la eslora (t de 0 en popa a 1 en proa). */
+    top: (t) => station(t).top,
+    /** Media manga a la altura z. */
+    half: (z) => station((z + len / 2) / len).hw,
+  };
+}
+
+/** Cuerda (o palo fino) entre dos puntos. */
+function rope(a, b, r = 0.007, color = '#5e4a32') {
+  const d = new THREE.Vector3().subVectors(b, a);
+  const m = mesh(new THREE.CylinderGeometry(r, r, d.length(), 4), color);
+  m.castShadow = false;
+  m.position.copy(a).addScaledVector(d, 0.5);
+  m.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), d.normalize());
+  return m;
+}
+
+/**
+ * Mástil con su verga y una vela cuadrada a rayas (o lisa), con las jarcias a proa y popa.
+ * La vela va orientada en ángulo (`brace`), como cuando se cazan las vergas al viento,
+ * para que se vea desde cualquier lado.
+ */
+function squareRig(g, { z, h, w, sh, colors = ['#f4efe6'], stripes = 7, bow, stern, y0 = 0.1, brace = 0.5 }) {
+  g.add(cyl(0.035, 0.045, h, 6, C.woodDark, 0, y0, z));
+  const top = y0 + h;
+  const rig = new THREE.Group();
+  rig.position.set(0, 0, z);
+  rig.rotation.y = brace;
+  const yard = cyl(0.025, 0.025, w + 0.25, 5, C.woodDark, 0, 0, 0);
+  yard.rotation.z = Math.PI / 2;
+  yard.position.set(0, top - 0.12, 0.04);
+  rig.add(yard);
+  // La vela, hinchada por el viento: cada franja un poco más adelante en el centro
+  for (let i = 0; i < stripes; i++) {
+    const x = -w / 2 + (w * (i + 0.5)) / stripes;
+    const belly = Math.cos((x / w) * Math.PI) * 0.08;
+    rig.add(box(w / stripes + 0.004, sh, 0.02, colors[i % colors.length], x, top - 0.14 - sh, 0.07 + belly));
+  }
+  const foot = cyl(0.02, 0.02, w + 0.1, 5, C.woodDark, 0, 0, 0);
+  foot.rotation.z = Math.PI / 2;
+  foot.position.set(0, top - 0.14 - sh, 0.08);
+  rig.add(foot);
+  // Escotas de las esquinas de la vela a la borda
+  for (const s of [-1, 1]) rig.add(rope(new THREE.Vector3(s * (w / 2), top - 0.14 - sh, 0.08), new THREE.Vector3(s * 0.3, y0 + 0.05, -0.5)));
+  g.add(rig);
+  // Estay a proa y a popa
+  const head = new THREE.Vector3(0, top, z);
+  if (bow) g.add(rope(head, bow));
+  if (stern) g.add(rope(head, stern));
+}
+
+/** Vela latina (triangular), como las de los dromones. */
+function lateenSail(g, z, h, w, color, stripe) {
+  g.add(cyl(0.04, 0.05, h, 6, C.woodDark, 0, 0.2, z));
+  const spar = cyl(0.022, 0.022, w * 1.5, 5, C.woodDark, 0, 0, 0);
+  spar.rotation.x = 1.05;
+  spar.position.set(0, h * 0.75, z);
+  g.add(spar);
   const shape = new THREE.Shape();
-  shape.moveTo(-w / 2, l / 2);
-  shape.lineTo(w / 2, l / 2);
-  shape.lineTo(w / 2, -l / 2 + bow);
-  shape.lineTo(0, -l / 2);
-  shape.lineTo(-w / 2, -l / 2 + bow);
+  shape.moveTo(0, 0);
+  shape.lineTo(-w * 0.6, h * 0.95);
+  shape.lineTo(w * 0.55, h * 0.3);
   shape.closePath();
-  const geo = new THREE.ExtrudeGeometry(shape, { depth: h, bevelEnabled: false });
-  geo.rotateX(-Math.PI / 2);
-  geo.translate(0, -h * 0.35, 0);
-  return mesh(geo, color);
+  const geo = new THREE.ExtrudeGeometry(shape, { depth: 0.02, bevelEnabled: false });
+  const s = mesh(geo, color);
+  s.rotation.y = Math.PI / 2;
+  s.position.set(0.04, 0.35, z);
+  g.add(s);
+  if (stripe) {
+    const band = box(0.025, 0.08, w * 0.5, stripe, 0.05, h * 0.55, z + 0.05);
+    band.rotation.x = -0.5;
+    g.add(band);
+  }
 }
 
-function sail(w, h, color, x, y, z) {
-  return box(w, h, 0.03, color, x, y, z + 0.06);
+/** Remos a los dos lados: `rows` filas de `n` remos entre z0 y z1, metidos en el agua. */
+function oars(g, { n, rows = 1, z0, z1, x, y, len = 0.75 }) {
+  for (let r = 0; r < rows; r++) {
+    for (let i = 0; i < n; i++) {
+      const z = z0 + ((z1 - z0) * (i + 0.5)) / n;
+      for (const s of [-1, 1]) {
+        const a = new THREE.Vector3(s * (x - r * 0.04), y + r * 0.09, z);
+        const b = new THREE.Vector3(s * (x + len * 0.85), -0.08, z - 0.06);
+        g.add(rope(a, b, 0.012, C.woodLight));
+        const blade = box(0.03, 0.12, 0.07, C.woodLight, b.x, b.y - 0.06, b.z);
+        blade.rotation.z = s * 0.5;
+        g.add(blade);
+      }
+    }
+  }
 }
 
-const SHIP_COLORS = {
-  bote: { hull: C.woodLight },
-  mercante: { hull: C.wood, sail: '#f4efe6' },
-  trirreme: { hull: C.woodDark, sail: '#b8442f' },
-  galeon: { hull: '#6b4423', sail: '#f4efe6' },
-  corsario: { hull: '#3a2a20', sail: '#26221f' },
-  brulote: { hull: '#3b2a1e', sail: '#8a2f22' },
-  dromon: { hull: '#5a3a22', sail: '#e9dcc0' },
+/** Ojo pintado a cada lado de la proa (para ver el camino y espantar el mal). */
+function bowEyes(g, z, x, y, r = 0.07) {
+  for (const s of [-1, 1]) {
+    for (const [rr, color, dx] of [[r, '#f4efe6', 0], [r * 0.6, '#2f6db3', 0.006], [r * 0.3, '#111111', 0.012]]) {
+      const e = mesh(new THREE.CylinderGeometry(rr, rr, 0.01, 10), color);
+      e.rotation.z = Math.PI / 2;
+      e.position.set(s * (x + dx), y, z);
+      e.castShadow = false;
+      g.add(e);
+    }
+  }
+}
+
+/** Espolón de bronce a ras de agua. */
+function ram(g, z, w = 0.12) {
+  const r = mesh(new THREE.ConeGeometry(w, 0.45, 4), '#b08a3a', { metalness: 0.55, roughness: 0.4 });
+  r.rotation.x = Math.PI / 2;
+  r.position.set(0, -0.05, z + 0.18);
+  g.add(r);
+}
+
+/** Popa curvada hacia dentro (aphlaston) o cuello de cisne (mercantes romanos). */
+function sternPost(g, z, y, swan = false, color = C.woodDark) {
+  const curl = mesh(new THREE.TorusGeometry(0.2, 0.035, 5, 9, Math.PI * 1.1), color);
+  curl.rotation.y = Math.PI / 2;
+  curl.position.set(0, y + 0.18, z + 0.12);
+  g.add(curl);
+  if (swan) {
+    const head = mesh(new THREE.SphereGeometry(0.06, 6, 5), C.gold, { metalness: 0.5, roughness: 0.4 });
+    head.position.set(0, y + 0.3, z + 0.3);
+    g.add(head);
+  }
+}
+
+/** Remos de gobierno a popa. */
+function steering(g, z, x, y) {
+  for (const s of [-1, 1]) {
+    g.add(rope(new THREE.Vector3(s * x, y + 0.15, z + 0.2), new THREE.Vector3(s * (x + 0.12), -0.15, z - 0.35), 0.018, C.woodDark));
+    g.add(box(0.03, 0.2, 0.12, C.woodDark, s * (x + 0.12), -0.25, z - 0.38));
+  }
+}
+
+/** Escudos redondos colgados de la borda. */
+function railShields(g, n, z0, z1, x, y, colors) {
+  for (let i = 0; i < n; i++) {
+    const z = z0 + ((z1 - z0) * (i + 0.5)) / n;
+    for (const s of [-1, 1]) {
+      const sh = mesh(new THREE.CylinderGeometry(0.1, 0.1, 0.02, 10), colors[i % colors.length]);
+      sh.rotation.z = Math.PI / 2;
+      sh.position.set(s * x, y, z);
+      g.add(sh);
+    }
+  }
+}
+
+/** Cabezas de los remeros asomando por la cubierta. */
+function rowers(g, n, z0, z1, x, y) {
+  for (let i = 0; i < n; i++) {
+    const z = z0 + ((z1 - z0) * (i + 0.5)) / n;
+    for (const s of [-1, 1]) {
+      const h = mesh(new THREE.SphereGeometry(0.045, 6, 4), i % 3 ? '#5a3a22' : '#3a2a1e');
+      h.position.set(s * x, y, z);
+      h.castShadow = false;
+      g.add(h);
+    }
+  }
+}
+
+function addFlag(g, x, y, z, color, w = 0.4, h = 0.25) {
+  const flag = box(w, h, 0.02, color, 0, 0, 0);
+  flag.geometry.translate(w / 2, 0, 0);
+  flag.position.set(x, y, z);
+  flag.userData.wave = true;
+  g.add(flag);
+}
+
+const SHIPS = {
+  bote(g) {
+    // Barca de remos con su remero
+    const hull = shipHull({ len: 1.15, beam: 0.48, depth: 0.24, rise: 0.08, full: 0.55, color: '#b98a52', band: '#2f6db3', bandH: 0.05 });
+    g.add(hull.mesh);
+    oars(g, { n: 1, z0: -0.1, z1: 0.1, x: 0.2, y: 0.08, len: 0.45 });
+    const man = figure({ color: '#c9b48a', hair: '#3a2a1e', arms: ['adelante', 'adelante'] });
+    man.scale.setScalar(0.5);
+    man.position.set(0, -0.02, -0.05);
+    g.add(man);
+    g.add(box(0.14, 0.1, 0.12, '#c9b48a', 0, 0.02, 0.3), amphora(0.08, -0.02, -0.38, '#b9643a', 0.35));
+  },
+  mercante(g) {
+    // Corbita: barriga ancha, popa en cuello de cisne, vela cuadrada y ánforas en cubierta
+    const hull = shipHull({ len: 2.3, beam: 1.0, depth: 0.5, rise: 0.22, full: 0.4, color: '#9a6a3c', band: '#c4552d' });
+    g.add(hull.mesh);
+    sternPost(g, -1.15, hull.top(0), true, '#9a6a3c');
+    squareRig(g, { z: 0.15, h: 1.75, w: 1.15, sh: 0.85, colors: ['#efe4cc', '#e2d4b4'], stripes: 6, bow: new THREE.Vector3(0, 0.35, 1.1), stern: new THREE.Vector3(0, 0.45, -1.0) });
+    // Caseta de popa con tejado de terracota
+    g.add(box(0.5, 0.28, 0.4, C.wall, 0, hull.top(0.25) - 0.05, -0.7), hipRoof(0.58, 0.48, 0.16, C.roofRed, 0, hull.top(0.25) + 0.23, -0.7));
+    for (let i = 0; i < 6; i++) g.add(amphora(-0.25 + (i % 3) * 0.25, hull.top(0.5) - 0.05, 0.45 + Math.floor(i / 3) * 0.22, i % 2 ? '#b9643a' : '#a5542f', 0.45));
+    steering(g, -0.85, hull.half(-0.85) + 0.03, hull.top(0.1));
+  },
+  trirreme(g) {
+    // Trirreme: casco largo y fino, tres filas de remos, espolón, ojos en la proa y vela a rayas
+    const hull = shipHull({ len: 3.0, beam: 0.72, depth: 0.42, rise: 0.3, full: 0.75, color: '#c8a070', band: '#2b2620' });
+    g.add(hull.mesh);
+    ram(g, 1.5);
+    bowEyes(g, 1.18, hull.half(1.18) + 0.005, hull.top(0.9) - 0.12);
+    sternPost(g, -1.5, hull.top(0));
+    const bowCurl = mesh(new THREE.TorusGeometry(0.1, 0.03, 4, 7, Math.PI), C.woodDark);
+    bowCurl.rotation.y = -Math.PI / 2;
+    bowCurl.position.set(0, hull.top(1) + 0.06, 1.42);
+    g.add(bowCurl);
+    // Pasarela de los remeros (sobresale por los costados)
+    for (const s of [-1, 1]) g.add(box(0.08, 0.06, 2.0, '#8b5a2b', s * 0.36, hull.top(0.5) - 0.12, 0));
+    oars(g, { n: 9, rows: 3, z0: -0.95, z1: 1.0, x: 0.38, y: hull.top(0.5) - 0.2, len: 0.7 });
+    rowers(g, 8, -0.85, 0.9, 0.22, hull.top(0.5) + 0.0);
+    squareRig(g, { z: 0.1, h: 1.6, w: 1.15, sh: 0.8, colors: ['#f4efe6', '#2f5fa8'], stripes: 9, bow: new THREE.Vector3(0, hull.top(1), 1.4), stern: new THREE.Vector3(0, hull.top(0) + 0.1, -1.35) });
+    steering(g, -1.15, hull.half(-1.15) + 0.03, hull.top(0.1));
+  },
+  galeon(g) {
+    // Quinquerreme: gran barco de guerra con torres, catapulta, escudos en la borda y dos filas de remos
+    const hull = shipHull({ len: 3.4, beam: 1.15, depth: 0.6, rise: 0.3, full: 0.6, color: '#7a5230', band: '#a8231a' });
+    g.add(hull.mesh);
+    ram(g, 1.7, 0.16);
+    bowEyes(g, 1.3, hull.half(1.3) + 0.005, hull.top(0.9) - 0.15, 0.09);
+    sternPost(g, -1.7, hull.top(0));
+    oars(g, { n: 10, rows: 2, z0: -1.1, z1: 1.1, x: 0.56, y: hull.top(0.5) - 0.22, len: 0.75 });
+    railShields(g, 6, -1.0, 1.0, 0.58, hull.top(0.5) - 0.02, ['#c9a24a', '#a8231a', '#f4efe6']);
+    // Torres de madera a proa y popa
+    for (const z of [0.95, -1.05]) {
+      g.add(box(0.55, 0.45, 0.5, '#8b5a2b', 0, hull.top(0.5) - 0.06, z));
+      for (const [x, zz] of [[-0.2, -0.18], [0.2, -0.18], [-0.2, 0.18], [0.2, 0.18]]) g.add(box(0.1, 0.1, 0.1, '#8b5a2b', x, hull.top(0.5) + 0.39, z + zz));
+    }
+    // Catapulta en cubierta
+    g.add(box(0.3, 0.08, 0.4, C.wood, 0.25, hull.top(0.5) - 0.05, 0.4));
+    const arm = box(0.04, 0.04, 0.45, C.woodLight, 0, 0, 0);
+    arm.position.set(0.25, hull.top(0.5) + 0.15, 0.4);
+    arm.rotation.x = 0.6;
+    g.add(arm);
+    squareRig(g, { z: -0.1, h: 2.2, w: 1.5, sh: 1.0, colors: ['#efe4cc', '#efe4cc', '#a8231a'], stripes: 9, bow: new THREE.Vector3(0, hull.top(1), 1.6), stern: new THREE.Vector3(0, hull.top(0) + 0.1, -1.6) });
+    addFlag(g, 0, hull.top(0.5) + 2.35, -0.1, '#a8231a');
+    steering(g, -1.3, hull.half(-1.3) + 0.03, hull.top(0.1));
+  },
+  corsario(g) {
+    // Hemiolia pirata: casco oscuro, una fila de remos y vela negra con una calavera
+    const hull = shipHull({ len: 2.2, beam: 0.85, depth: 0.45, rise: 0.25, full: 0.65, color: '#3a2a20', band: '#7a1f1a' });
+    g.add(hull.mesh);
+    ram(g, 1.1, 0.1);
+    bowEyes(g, 0.85, hull.half(0.85) + 0.005, hull.top(0.9) - 0.1, 0.06);
+    sternPost(g, -1.1, hull.top(0), false, '#2b2017');
+    oars(g, { n: 6, z0: -0.7, z1: 0.75, x: 0.42, y: hull.top(0.5) - 0.15, len: 0.6 });
+    squareRig(g, { z: 0.15, h: 1.7, w: 1.05, sh: 0.8, colors: ['#26221f'], stripes: 5, bow: new THREE.Vector3(0, hull.top(1), 1.05), stern: new THREE.Vector3(0, hull.top(0), -1.0) });
+    g.add(cyl(0.16, 0.16, 0.02, 10, '#e8e2d0', 0, 1.25, 0.3));
+    g.children.at(-1).rotation.x = Math.PI / 2;
+    for (const s of [-1, 1]) g.add(box(0.05, 0.05, 0.02, '#26221f', s * 0.05, 1.28, 0.32));
+    addFlag(g, 0, 1.92, 0.15, '#111111');
+  },
+  brulote(g) {
+    // Brulote: barca vieja cargada de brea en llamas
+    const hull = shipHull({ len: 1.8, beam: 0.72, depth: 0.38, rise: 0.15, full: 0.55, color: '#3b2a1e', band: '#8a2f22' });
+    g.add(hull.mesh);
+    squareRig(g, { z: 0.1, h: 1.35, w: 0.8, sh: 0.6, colors: ['#8a2f22', '#6e241b'], stripes: 4, bow: new THREE.Vector3(0, hull.top(1), 0.85), stern: new THREE.Vector3(0, hull.top(0), -0.8) });
+    for (const [x, z] of [[-0.15, -0.45], [0.15, -0.45], [0, 0.55]]) {
+      g.add(cyl(0.12, 0.12, 0.25, 8, '#2b2017', x, hull.top(0.5) - 0.05, z));
+      const flame = mesh(new THREE.ConeGeometry(0.1, 0.32, 6), '#ff8a2a', { emissive: '#ff5a00', emissiveIntensity: 1.8 });
+      flame.position.set(x, hull.top(0.5) + 0.36, z);
+      flame.userData.flicker = true;
+      g.add(flame);
+    }
+  },
+  dromon(g) {
+    // Dromón: el gran barco de guerra, con dos velas latinas, dos filas de remos, castillo y sifón de fuego
+    const hull = shipHull({ len: 4.0, beam: 1.2, depth: 0.6, rise: 0.32, full: 0.6, color: '#5a3a22', band: '#2f6db3' });
+    g.add(hull.mesh);
+    ram(g, 2.0, 0.14);
+    bowEyes(g, 1.55, hull.half(1.55) + 0.005, hull.top(0.9) - 0.15, 0.09);
+    sternPost(g, -2.0, hull.top(0), false, '#3a2a20');
+    g.add(cyl(0.06, 0.09, 0.6, 6, '#b08a3a', 0, hull.top(0.95), 1.75, { metalness: 0.5 }));
+    g.children.at(-1).rotation.x = 1.2;
+    // Castillo de popa dorado
+    g.add(box(1.0, 0.35, 0.8, '#6b4423', 0, hull.top(0.15) - 0.06, -1.45), box(0.9, 0.06, 0.6, C.gold, 0, hull.top(0.15) + 0.29, -1.45));
+    oars(g, { n: 11, rows: 2, z0: -1.25, z1: 1.35, x: 0.58, y: hull.top(0.5) - 0.24, len: 0.8 });
+    railShields(g, 7, -1.1, 1.2, 0.6, hull.top(0.5) - 0.02, ['#2f6db3', '#c9a24a', '#a8231a', '#f4efe6']);
+    lateenSail(g, 0.8, 2.6, 1.4, '#efe4cc', '#2f6db3');
+    lateenSail(g, -0.55, 2.2, 1.1, '#efe4cc', '#a8231a');
+    addFlag(g, 0, 2.85, 0.8, '#2f6db3', 0.5, 0.3);
+  },
 };
 
 /** Barco (unos 2 de eslora) con la proa hacia +Z y la línea de flotación en y = 0. */
 export function createShip(type) {
   const g = new THREE.Group();
-  const col = SHIP_COLORS[type] ?? SHIP_COLORS.mercante;
-  if (type === 'bote') {
-    g.add(hull(0.45, 0.22, 1.1, 0.35, col.hull));
-    for (const s of [-1, 1]) {
-      const oar = box(0.5, 0.03, 0.05, C.woodDark, s * 0.35, 0.05, 0);
-      oar.rotation.z = s * -0.3;
-      g.add(oar);
-    }
-    g.add(box(0.12, 0.12, 0.12, C.roofRed, 0, 0.08, -0.2));
-    return g;
-  }
-  if (type === 'trirreme') {
-    g.add(hull(0.75, 0.4, 2.9, 0.7, col.hull));
-    g.add(box(0.06, 0.06, 0.5, '#8a8f96', 0, -0.05, 1.6, { metalness: 0.6 }));
-    for (let i = 0; i < 7; i++) {
-      for (const s of [-1, 1]) {
-        const oar = box(0.7, 0.025, 0.04, C.woodLight, s * 0.6, 0.02, -1.0 + i * 0.3);
-        oar.rotation.z = s * -0.35;
-        g.add(oar);
-      }
-    }
-    g.add(cyl(0.04, 0.04, 1.6, 6, C.woodDark, 0, 0.2, 0.1));
-    g.add(sail(1.0, 0.8, col.sail, 0, 0.85, 0.1));
-    return g;
-  }
-  if (type === 'brulote') {
-    // Barco pequeño cargado de barriles de brea encendidos
-    g.add(hull(0.7, 0.35, 1.8, 0.5, col.hull));
-    g.add(cyl(0.04, 0.04, 1.4, 6, C.woodDark, 0, 0.15, 0.1));
-    g.add(sail(0.8, 0.6, col.sail, 0, 0.65, 0.1));
-    for (const [x, z] of [[-0.15, -0.45], [0.15, -0.45], [0, 0.55]]) {
-      g.add(cyl(0.12, 0.12, 0.25, 8, '#2b2017', x, 0.12, z));
-      const flame = mesh(new THREE.ConeGeometry(0.1, 0.32, 6), '#ff8a2a', { emissive: '#ff5a00', emissiveIntensity: 1.8 });
-      flame.position.set(x, 0.52, z);
-      flame.userData.flicker = true;
-      g.add(flame);
-    }
-    return g;
-  }
-  if (type === 'dromon') {
-    // Gran barco de guerra: dos velas latinas, dos filas de remos y sifón de fuego en la proa
-    g.add(hull(1.2, 0.6, 4.0, 1.0, col.hull));
-    g.add(box(1.1, 0.35, 0.9, '#6b4423', 0, 0.25, -1.45));
-    g.add(box(0.9, 0.06, 0.5, C.gold, 0, 0.6, -1.45));
-    g.add(cyl(0.06, 0.09, 0.6, 6, '#8a6a3a', 0, 0.4, 1.75, { metalness: 0.5 }));
-    for (const [z, hgt, w] of [[0.8, 2.6, 1.4], [-0.6, 2.2, 1.1]]) {
-      g.add(cyl(0.05, 0.06, hgt, 6, C.woodDark, 0, 0.25, z));
-      const s = sail(w, 1.0, col.sail, 0, 0.9, z);
-      s.rotation.z = 0.25;
-      g.add(s);
-    }
-    for (let row = 0; row < 2; row++) {
-      for (let i = 0; i < 9; i++) {
-        for (const side of [-1, 1]) {
-          const oar = box(0.8, 0.025, 0.04, C.woodLight, side * (0.65 + row * 0.1), -0.02 + row * 0.12, -1.3 + i * 0.32);
-          oar.rotation.z = side * -0.35;
-          g.add(oar);
-        }
-      }
-    }
-    for (let i = 0; i < 5; i++) for (const side of [-1, 1]) g.add(cyl(0.12, 0.12, 0.04, 8, C.cloth[i % 4], side * 0.6, 0.22, -1.0 + i * 0.45));
-    const flag = box(0.5, 0.3, 0.02, C.cloth[1], 0, 0, 0);
-    flag.geometry.translate(0.25, 0, 0);
-    flag.position.set(0, 2.9, 0.8);
-    flag.userData.wave = true;
-    g.add(flag);
-    return g;
-  }
-  if (type === 'galeon') {
-    g.add(hull(1.15, 0.6, 3.3, 0.9, col.hull));
-    g.add(box(1.1, 0.45, 0.8, '#7a5230', 0, 0.25, -1.1));
-    g.add(box(0.9, 0.06, 0.5, C.gold, 0, 0.55, 1.2));
-    for (const [z, hgt] of [[0.6, 2.6], [-0.4, 2.2]]) {
-      g.add(cyl(0.05, 0.06, hgt, 6, C.woodDark, 0, 0.25, z));
-      g.add(sail(1.3, 0.8, col.sail, 0, 0.95, z), sail(1.0, 0.6, col.sail, 0, 1.85, z));
-    }
-    for (let i = 0; i < 4; i++) for (const s of [-1, 1]) g.add(box(0.05, 0.08, 0.08, C.dark, s * 0.58, 0.12, -0.6 + i * 0.4));
-    const flag = box(0.4, 0.25, 0.02, C.cloth[0], 0, 0, 0);
-    flag.geometry.translate(0.2, 0, 0);
-    flag.position.set(0, 2.85, 0.6);
-    flag.userData.wave = true;
-    g.add(flag);
-    return g;
-  }
-  // Mercante y corsario
-  g.add(hull(0.9, 0.45, 2.2, 0.6, col.hull));
-  g.add(box(0.8, 0.3, 0.55, col.hull, 0, 0.15, -0.75));
-  g.add(cyl(0.05, 0.05, 1.9, 6, C.woodDark, 0, 0.2, 0.15));
-  g.add(sail(1.1, 0.9, col.sail, 0, 0.75, 0.15));
-  if (type === 'corsario') {
-    g.add(box(0.25, 0.25, 0.02, '#f4efe6', 0, 1.05, 0.25));
-    const flag = box(0.4, 0.25, 0.02, '#111111', 0, 0, 0);
-    flag.geometry.translate(0.2, 0, 0);
-    flag.position.set(0, 2.0, 0.15);
-    flag.userData.wave = true;
-    g.add(flag);
-  } else {
-    g.add(box(0.3, 0.25, 0.3, C.woodLight, 0, 0.1, 0.55), cyl(0.12, 0.12, 0.3, 8, C.woodLight, 0.2, 0.1, -0.1));
-  }
-  return g;
+  (SHIPS[type] ?? SHIPS.mercante)(g);
+  // Lo que no se mueve, en una sola pieza: hay muchos barcos a la vez en el mar
+  return bakeStatic(g);
 }
 
 /** Andamio que rodea un edificio en obras. */
