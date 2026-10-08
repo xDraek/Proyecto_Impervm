@@ -10,6 +10,7 @@ import {
   RESOURCES,
   RESOURCE_KEYS,
   UNITS,
+  RELICS,
   WONDERS,
   WONDER_KEYS,
   WONDER_LEVELS,
@@ -101,8 +102,8 @@ export function unitSeconds(state, id) {
 /** Multiplicadores de combate de tus tropas. */
 export function playerCombat(state) {
   return {
-    atkMul: 1 + 0.1 * lvl(state, 'herreria') + 0.03 * lvl(state, 'forja') + wonderBonus(state, 'ataque'),
-    hpMul: 1 + 0.1 * lvl(state, 'armaduras'),
+    atkMul: 1 + 0.1 * lvl(state, 'herreria') + 0.03 * lvl(state, 'forja') + wonderBonus(state, 'ataque') + relicBonus(state, 'ataque'),
+    hpMul: 1 + 0.1 * lvl(state, 'armaduras') + relicBonus(state, 'defensa'),
   };
 }
 
@@ -129,7 +130,7 @@ export function colonyCost(colonies) {
 }
 
 export function fleetSpeedBonus(state) {
-  return 1 + 0.1 * lvl(state, 'navegacion') + 0.04 * lvl(state, 'faro') + wonderBonus(state, 'velocidad');
+  return 1 + 0.1 * lvl(state, 'navegacion') + 0.04 * lvl(state, 'faro') + wonderBonus(state, 'velocidad') + relicBonus(state, 'velocidad');
 }
 
 /** Segundos de viaje (solo ida) hasta una isla con una flota a cierta velocidad. */
@@ -177,6 +178,13 @@ export function wonderOf(continent) {
 /** Nivel de una maravilla según lo aportado. */
 export function wonderLevel(progress = 0) {
   return WONDER_LEVELS.filter((n) => progress >= n).length;
+}
+
+/** Bono de las reliquias equipadas para una estadística. */
+export function relicBonus(state, stat) {
+  let k = 0;
+  for (const r of state.relics ?? []) if (r.equipped && RELICS[r.id]?.stat === stat) k += RELICS[r.id].value;
+  return k;
 }
 
 /** Bono de las maravillas para un jugador (lo guarda el servidor en el estado). */
@@ -269,7 +277,8 @@ export function economy(state, t = state.lastUpdate) {
     research[res] = (base[res] + buildings[res]) * researchBonus(state, res);
     eventBonus[res] = event?.prod?.[res] ?? 0;
     const wonder = res === 'comida' ? wonderBonus(state, 'comida') : 0;
-    gross[res] = (base[res] + buildings[res] + research[res] + colonies[res]) * bonus * (1 + eventBonus[res] + wonder);
+    const relic = relicBonus(state, 'produccion') + (res === 'comida' ? relicBonus(state, 'comida') : 0) + (res === 'oro' ? relicBonus(state, 'oro') : 0);
+    gross[res] = (base[res] + buildings[res] + research[res] + colonies[res]) * bonus * (1 + eventBonus[res] + wonder + relic);
   }
   const upkeep = upkeepPerHour(state);
   const net = { ...gross, comida: gross.comida - upkeep };
@@ -286,7 +295,7 @@ export function protectedAmount(state) {
 // ── Templo ───────────────────────────────────────────────────────────────────
 
 export function favorRate(state, t = state.lastUpdate) {
-  return 6 * lvl(state, 'templo') * universe.speed * (worldEventAt(t).event?.favor ?? 1);
+  return 6 * lvl(state, 'templo') * universe.speed * (worldEventAt(t).event?.favor ?? 1) * (1 + relicBonus(state, 'favor'));
 }
 
 export function favorMax(state) {

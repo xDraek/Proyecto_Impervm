@@ -585,6 +585,13 @@ export class Hud {
       case 'upgrade':
         await this.#run(btn, () => game.upgrade(this.selected));
         break;
+      case 'relic-equip':
+        await this.#run(btn, () => game.equipRelic(btn.dataset.id, btn.dataset.on === '1'), null, 'magic');
+        break;
+      case 'relic-sell':
+        if (!confirm('¿Vender esta reliquia? No la volverás a ver.')) break;
+        await this.#run(btn, () => game.sellRelic(btn.dataset.id), null, 'coins');
+        break;
       case 'donate': {
         const bag = {};
         for (const input of root.querySelectorAll('input[name^="w-"]')) {

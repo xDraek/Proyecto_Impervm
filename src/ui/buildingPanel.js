@@ -1,4 +1,4 @@
-import { BUILDINGS, HERO, HERO_SKILLS, POWERS, POWER_KEYS, RESEARCH, RESEARCH_KEYS, RESOURCES, RESOURCE_KEYS, UNITS, UNIT_KEYS } from '../game/data.js';
+import { BUILDINGS, HERO, HERO_SKILLS, RELIC_RARITY, RELIC_SLOTS, POWERS, POWER_KEYS, RESEARCH, RESEARCH_KEYS, RESOURCES, RESOURCE_KEYS, UNITS, UNIT_KEYS } from '../game/data.js';
 import { favorMax, favorRate, producerOutput, protectedAmount, requirementName, storageCapacity, townSpeedup, wallBonus } from '../game/rules.js';
 import { costList, escapeHtml, fmtDec, fmtNum, fmtTime, unitList } from './format.js';
 
@@ -307,6 +307,26 @@ function refreshTemple(game, root) {
 
 // ── Almirante ─────────────────────────────────────────────────────────────────
 
+function relicSection(game) {
+  const relics = game.relics();
+  const equipped = relics.filter((r) => r.equipped).length;
+  const rows = relics
+    .sort((a, b) => Number(b.equipped) - Number(a.equipped))
+    .map(
+      (r) => `<div class="relic ${r.equipped ? 'on' : ''}" style="--rarity:${RELIC_RARITY[r.rarity].color}">
+        <span class="relic-icon">${r.icon}</span>
+        <div class="relic-body"><b>${r.name}</b> <span class="rarity">${RELIC_RARITY[r.rarity].name}</span><div class="small muted">${r.text}</div></div>
+        <div class="row-actions">
+          <button class="${r.equipped ? 'ghost' : 'primary'} small" data-action="relic-equip" data-id="${r.id}" data-on="${r.equipped ? 0 : 1}">${r.equipped ? 'Guardar' : 'Equipar'}</button>
+          <button class="ghost small" data-action="relic-sell" data-id="${r.id}" title="Vender por ${RELIC_RARITY[r.rarity].sell} de oro">🪙</button>
+        </div>
+      </div>`,
+    )
+    .join('');
+  return `<h4>🏺 Reliquias <span class="muted small">(${equipped}/${RELIC_SLOTS} equipadas)</span></h4>
+    ${rows || '<p class="desc small">Ninguna todavía. Se encuentran en las expediciones a la niebla, al saquear ruinas, al conquistar ciudades bárbaras… y el Kraken guarda una legendaria.</p>'}`;
+}
+
 function heroSection(game) {
   const h = game.hero;
   if (!h) {
@@ -360,7 +380,7 @@ export function buildingPanel(hud, id) {
   else if (id === 'cuartel' || id === 'puerto') extra = recruitSection(game, id);
   else if (id === 'mercado') extra = marketSection(game) + (game.level('mercado') > 0 ? hud.social.marketHtml() : '');
   else if (id === 'muralla') extra = wallSection(game);
-  else if (id === 'ayuntamiento') extra = townSection(game) + `<div class="section">${heroSection(game)}</div>`;
+  else if (id === 'ayuntamiento') extra = townSection(game) + `<div class="section">${heroSection(game)}</div><div class="section">${relicSection(game)}</div>`;
   else if (id === 'templo') extra = templeSection(game);
 
   const html = `

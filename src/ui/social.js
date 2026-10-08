@@ -327,6 +327,7 @@ export class Social {
                 <button class="ghost small" data-action="mod" data-op="mute" data-minutes="1440" data-name="${escapeHtml(p.name)}">🔇 24 h</button>
                 <button class="ghost small" data-action="mod" data-op="mute" data-minutes="0" data-name="${escapeHtml(p.name)}">🔈 Quitar silencio</button>
                 <button class="ghost small" data-action="mod" data-op="${p.banned ? 'unban' : 'ban'}" data-name="${escapeHtml(p.name)}">${p.banned ? '✅ Readmitir' : '⛔ Suspender'}</button>
+                <button class="ghost small" data-action="mod" data-op="reset" data-name="${escapeHtml(p.name)}">🔑 Contraseña temporal</button>
               </div></div>`
           : ''}
       </div>`,
@@ -408,6 +409,13 @@ export class Social {
           <input type="password" name="next2" placeholder="Repite la nueva" autocomplete="new-password" required />
           <button class="primary">Cambiar</button>
         </form>
+        <h4>🔑 Código de recuperación</h4>
+        <p class="desc small">Si olvidas la contraseña, con tu nombre y este código puedes poner otra desde la pantalla de inicio. Al generar uno nuevo, el anterior deja de valer.</p>
+        <form class="stack" data-form="recovery">
+          <input type="password" name="password" placeholder="Tu contraseña actual" autocomplete="current-password" required />
+          <button class="ghost">Generar un código nuevo</button>
+        </form>
+        <div class="recovery-code" hidden></div>
       </div>`,
     );
   }
@@ -572,6 +580,12 @@ export class Social {
           reason = prompt(`¿Por qué suspendes a ${name}?`) ?? '';
           if (!reason) return true;
         }
+        if (op === 'reset') {
+          if (!confirm(`¿Dar a ${name} una contraseña temporal? La suya dejará de valer.`)) return true;
+          const res = await this.#call('POST', '/api/admin/reset', { name });
+          if (res) prompt(`Contraseña temporal de ${name} (pásasela y que la cambie al entrar):`, res.password);
+          return true;
+        }
         const body = op === 'mute' ? { name, minutes: Number(minutes) } : { name, reason };
         const res = await this.#call('POST', `/api/admin/${op}`, body, 'Hecho');
         if (res) this.openProfile(name);
@@ -676,6 +690,14 @@ export class Social {
         }
         const res = await this.#call('POST', '/api/password', { current: data.current, next: data.next }, '🔑 Contraseña cambiada');
         if (res) this.hud.closeModal();
+      } else if (form.dataset.form === 'recovery') {
+        const res = await this.#call('POST', '/api/recovery', { password: data.password }, '🔑 Código nuevo generado: guárdalo');
+        const box = this.hud.modal.querySelector('.recovery-code');
+        if (res && box) {
+          box.hidden = false;
+          box.textContent = res.recovery;
+          form.reset();
+        }
       } else if (form.dataset.form === 'mail') {
         const res = this.draft?.circular
           ? await this.#call('POST', '/api/alliance/circular', { subject: data.subject, text: data.text }, '📜 Circular enviada a toda la alianza')

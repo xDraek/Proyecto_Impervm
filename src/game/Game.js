@@ -17,6 +17,9 @@ import {
   PLAYER_UNITS,
   POWERS,
   QUESTS,
+  RELICS,
+  RELIC_RARITY,
+  RELIC_SLOTS,
   RESEARCH,
   RESEARCH_KEYS,
   RESOURCES,
@@ -51,6 +54,7 @@ import {
   researchMax,
   researchSeconds,
   scoreOf,
+  relicBonus,
   storageCapacity,
   wonderLevel,
   wonderOf,
@@ -607,6 +611,59 @@ export class Game extends EventTarget {
     return this.#done();
   }
 
+  // ── Reliquias ──────────────────────────────────────────────────────────────
+
+  relics() {
+    return (this.state.relics ?? []).map((r) => ({ ...r, ...RELICS[r.id] }));
+  }
+
+  /** Equipar o guardar una reliquia (como mucho RELIC_SLOTS a la vez). */
+  equipRelic(id, on, now = this.now()) {
+    this.#advance(now);
+    const r = (this.state.relics ?? []).find((x) => x.id === id);
+    if (!r) return this.#fail('No tienes esa reliquia.');
+    if (on && !r.equipped && this.state.relics.filter((x) => x.equipped).length >= RELIC_SLOTS) return this.#fail(`Solo puedes llevar ${RELIC_SLOTS} reliquias a la vez.`);
+    r.equipped = !!on;
+    return this.#done();
+  }
+
+  /** Vender una reliquia a los coleccionistas del mercado. */
+  sellRelic(id, now = this.now()) {
+    this.#advance(now);
+    const r = (this.state.relics ?? []).find((x) => x.id === id);
+    if (!r) return this.#fail('No tienes esa reliquia.');
+    const price = RELIC_RARITY[RELICS[id].rarity].sell;
+    this.state.relics = this.state.relics.filter((x) => x !== r);
+    this.#gain({ oro: price });
+    this.#note(`${RELICS[id].icon} Vendes ${RELICS[id].name} por 🪙 ${price.toLocaleString('es-ES')}`, 'success');
+    return this.#done();
+  }
+
+  /** Una reliquia que aún no tienes, de la rareza que toque (o su valor en oro si ya las tienes todas). */
+  #findRelic(t, where, weights) {
+    const owned = new Set((this.state.relics ?? []).map((r) => r.id));
+    let roll = Math.random() * Object.values(weights).reduce((a, b) => a + b, 0);
+    let rarity = 'rara';
+    for (const [k, w] of Object.entries(weights)) {
+      if ((roll -= w) < 0) {
+        rarity = k;
+        break;
+      }
+    }
+    const free = Object.keys(RELICS).filter((id) => !owned.has(id));
+    const pool = free.filter((id) => RELICS[id].rarity === rarity);
+    const id = (pool.length ? pool : free)[Math.floor(Math.random() * (pool.length || free.length))];
+    if (!id) {
+      this.#gain({ oro: RELIC_RARITY[rarity].sell });
+      return;
+    }
+    const def = RELICS[id];
+    this.state.relics = [...(this.state.relics ?? []), { id, t, equipped: (this.state.relics ?? []).filter((r) => r.equipped).length < RELIC_SLOTS }];
+    this.#report({ t, kind: 'reliquia', outcome: 'victoria', title: `Reliquia ${RELIC_RARITY[def.rarity].name.toLowerCase()}: ${def.name}`, text: `${def.icon} La has encontrado ${where}. ${def.text}. Equípala o véndela desde el ayuntamiento.` });
+    this.#note(`🏺 ¡Has encontrado ${def.name}!`, 'success');
+    if (def.rarity === 'legendaria') this.world.announce?.(`🏺 ${this.state.name} ha encontrado ${def.name}`);
+  }
+
   /** Ampliar una colonia: cuesta recursos y tarda un rato; solo una a la vez. */
   upgradeColony(id, now = this.now()) {
     this.#advance(now);
@@ -847,6 +904,7 @@ export class Game extends EventTarget {
     }
     if (withHero && this.heroStatus() !== 'casa') reason ||= this.state.hero ? 'Tu almirante no está en casa o está herido.' : 'No tienes almirante.';
     if (withHero) cargo = Math.floor(cargo * (1 + this.heroBonus('botin')));
+    cargo = Math.floor(cargo * (1 + relicBonus(s, 'botin')));
     if (slots < 1) reason ||= 'Necesitas un puerto para zarpar.';
     else if (s.missions.length >= slots) reason ||= `Todas tus flotas están en el mar (${s.missions.length}/${slots}). Mejora el puerto.`;
     if (!count(sent)) reason ||= 'Elige qué unidades envías.';
@@ -1420,6 +1478,7 @@ export class Game extends EventTarget {
       this.world.touch?.(isl.id);
       this.state.stats.treasures++;
       for (const [res, n] of Object.entries(isl.treasure)) m.cargo[res] = (m.cargo[res] ?? 0) + n;
+      if (Math.random() < 0.35) this.#findRelic(t, `entre las ruinas de ${isl.name}`, { rara: 60, epica: 35, legendaria: 5 });
       loot = { ...isl.treasure };
       text += ' ¡Entre los escombros había un tesoro!';
     } else if (isl.type === 'ruinas') {
@@ -1440,7 +1499,7 @@ export class Game extends EventTarget {
       return;
     }
     // Los vigías de la muralla pueden descubrir el bote (8 % por nivel, como mucho 60 %)
-    if (Math.random() < Math.min(0.7, 0.08 * info.wall + 0.04 * (info.watch ?? 0))) {
+    if (Math.random() < Math.min(0.7, 0.08 * info.wall + 0.04 * (info.watch ?? 0)) * (1 - relicBonus(this.state, 'sigilo'))) {
       const lost = { ...m.units };
       m.units = {};
       this.#report({ t, kind: 'exploracion', island: isl.id, islandName: isl.name, outcome: 'derrota', title: `Espía descubierto en ${isl.name}`, text: 'Los vigías de la muralla han visto el bote y lo han hundido.', lostUnits: lost });
@@ -1480,7 +1539,7 @@ export class Game extends EventTarget {
     const { atkMul, hpMul } = playerCombat(this.state);
     const hero = m.hero ? { atk: this.heroBonus('ataque'), cargo: 1 + this.heroBonus('botin') } : { atk: 0, cargo: 1 };
     const war = this.world.relation?.(this.userId, isl.owner) === 'guerra';
-    const cargoMul = hero.cargo * (war ? 1 + DIPLOMACY.warLoot : 1);
+    const cargoMul = hero.cargo * (war ? 1 + DIPLOMACY.warLoot : 1) * (1 + relicBonus(this.state, 'botin'));
     // Los aliados que se han unido a este ataque combaten como un solo ejército
     const allies = this.world.jointFleets?.(`${this.userId}-${m.id}`, t) ?? [];
     const groups = [
@@ -1594,6 +1653,7 @@ export class Game extends EventTarget {
       rt.looted = true;
       this.state.stats.treasures++;
       for (const [res, n] of Object.entries(isl.treasure)) m.cargo[res] = (m.cargo[res] ?? 0) + n;
+      if (Math.random() < 0.35) this.#findRelic(t, `entre las ruinas de ${isl.name}`, { rara: 60, epica: 35, legendaria: 5 });
     }
     const garrison = garrisonAt(isl, rt, t);
     const stock = stockAt(isl, rt, t);
@@ -1614,6 +1674,7 @@ export class Game extends EventTarget {
       let capacity = 0;
       for (const [id, n] of Object.entries(m.units)) capacity += n * (UNITS[id].cargo ?? 0);
       if (m.hero) capacity = Math.floor(capacity * (1 + this.heroBonus('botin')));
+      capacity = Math.floor(capacity * (1 + relicBonus(this.state, 'botin')));
       loot = takeLoot(stock, capacity);
       for (const [res, n] of Object.entries(loot)) {
         stock[res] -= n;
@@ -1642,6 +1703,7 @@ export class Game extends EventTarget {
     if (isl.type === 'kraken' && outcome === 'victoria') {
       this.state.stats.kraken++;
       this.#note('🐙 ¡Has derrotado al Kraken! Los mares son tuyos.', 'success');
+      this.#findRelic(t, 'entre los restos del Kraken', { epica: 30, legendaria: 70 });
       this.world.announce?.(`🐙 ${this.state.name} ha derrotado al Kraken de ${isl.name}`);
     }
   }
@@ -1674,6 +1736,7 @@ export class Game extends EventTarget {
     this.state.colonies.push({ id: isl.id, name: isl.name, specialty, yield: colonyYieldBase, conquered: true });
     this.state.wonderBonus = this.world.wonderBonusFor?.(this.state.colonies) ?? this.state.wonderBonus;
     this.state.stats.conquests = (this.state.stats.conquests ?? 0) + 1;
+    if (Math.random() < 0.3) this.#findRelic(t, `en el gran salón de ${isl.name}`, { rara: 50, epica: 40, legendaria: 10 });
     m.units.mercante -= 1;
     if (!m.units.mercante) delete m.units.mercante;
     const r = RESOURCES[specialty];
@@ -1793,6 +1856,7 @@ export class Game extends EventTarget {
     }
     this.#report(report);
     this.#note(`🧭 Expedición: ${report.title}`, report.outcome === 'derrota' ? 'error' : 'success');
+    if (report.outcome !== 'derrota' && Math.random() < 0.12) this.#findRelic(t, 'en la niebla', { rara: 70, epica: 25, legendaria: 5 });
   }
 
   // ── Piratas ────────────────────────────────────────────────────────────────

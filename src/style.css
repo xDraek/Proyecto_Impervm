@@ -2813,3 +2813,64 @@ input[type='text'] {
 .quest.task.claimed {
   opacity: 0.6;
 }
+
+/* ── Recuperar la cuenta ─────────────────────────────────────────────────── */
+
+.forgot {
+  justify-self: center;
+  margin-top: 4px;
+}
+
+.recovery-card {
+  display: grid;
+  gap: 10px;
+}
+
+.recovery-card h3 {
+  margin: 0;
+}
+
+.recovery-code {
+  padding: 12px;
+  border-radius: 10px;
+  border: 1px dashed var(--gold);
+  background: rgba(242, 201, 76, 0.08);
+  font-family: ui-monospace, monospace;
+  font-size: 20px;
+  letter-spacing: 2px;
+  text-align: center;
+  color: var(--gold);
+  user-select: all;
+}
+
+/* ── Reliquias ───────────────────────────────────────────────────────────── */
+
+.relic {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  margin: 6px 0;
+  border-radius: 10px;
+  border: 1px solid color-mix(in srgb, var(--rarity) 45%, transparent);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.relic.on {
+  background: color-mix(in srgb, var(--rarity) 12%, transparent);
+  box-shadow: 0 0 12px color-mix(in srgb, var(--rarity) 30%, transparent);
+}
+
+.relic-icon {
+  font-size: 24px;
+}
+
+.relic-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.rarity {
+  font-size: 11px;
+  color: var(--rarity);
+}

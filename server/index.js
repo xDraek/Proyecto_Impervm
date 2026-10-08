@@ -98,6 +98,8 @@ const ACTIONS = {
   dismissVisitor: (g) => g.dismissVisitor(),
   markReportsRead: (g) => g.markReportsRead(),
   upgradeColony: (g, [id]) => (typeof id === 'string' ? g.upgradeColony(id) : bad()),
+  equipRelic: (g, [id, on]) => (typeof id === 'string' ? g.equipRelic(id, on === true) : bad()),
+  sellRelic: (g, [id]) => (typeof id === 'string' ? g.sellRelic(id) : bad()),
   donateWonder: (g, [id, bag]) => (typeof id === 'string' ? g.donateWonder(id, resources(bag)) : bad()),
   startVacation: (g) => g.startVacation(),
   endVacation: (g) => g.endVacation(),
@@ -188,9 +190,19 @@ async function api(req, res, url) {
     if (route === 'POST /api/register' || route === 'POST /api/login') {
       if (limited(`auth:${ip(req)}`, 10, 60_000)) return send(res, 429, { error: 'Demasiados intentos. Espera un minuto.' });
       const body = await readJson(req);
-      const uid = route === 'POST /api/register' ? await world.register(body.username, body.password, body.city) : world.login(body.username, body.password);
+      const registering = route === 'POST /api/register';
+      const uid = registering ? await world.register(body.username, body.password, body.city) : world.login(body.username, body.password);
       world.seen(uid);
-      return send(res, 200, { token: signToken(uid, world.secret) });
+      // Al crear la cuenta se entrega el código de recuperación (solo esta vez)
+      const recovery = registering ? await world.issueRecovery(uid) : undefined;
+      return send(res, 200, { token: signToken(uid, world.secret), recovery });
+    }
+    if (route === 'POST /api/recover') {
+      if (limited(`auth:${ip(req)}`, 10, 60_000)) return send(res, 429, { error: 'Demasiados intentos. Espera un minuto.' });
+      const body = await readJson(req);
+      const { id, recovery } = await world.recover(body.username, body.code, body.password);
+      world.seen(id);
+      return send(res, 200, { token: signToken(id, world.secret), recovery });
     }
 
     const uid = authUser(req);
@@ -241,12 +253,18 @@ async function api(req, res, url) {
       else if (sub === 'unban') world.ban(uid, body.name, '', false);
       else if (sub === 'delete-chat') world.deleteChat(uid, body.id);
       else if (sub === 'broadcast') world.broadcast(uid, body.text);
+      else if (sub === 'reset') return send(res, 200, { password: await world.adminResetPassword(uid, body.name) });
       else return send(res, 404, { error: 'No existe.' });
       return send(res, 200, { ok: true });
     }
 
     // Perfil y cuenta
     if (route === 'GET /api/profile') return send(res, 200, { profile: world.profile(url.searchParams.get('name')) });
+    if (route === 'POST /api/recovery') {
+      if (limited(`auth:${ip(req)}`, 10, 60_000)) return send(res, 429, { error: 'Demasiados intentos. Espera un minuto.' });
+      const { password } = await readJson(req);
+      return send(res, 200, { recovery: await world.regenerateRecovery(uid, password) });
+    }
     if (route === 'POST /api/password') {
       if (limited(`auth:${ip(req)}`, 10, 60_000)) return send(res, 429, { error: 'Demasiados intentos. Espera un minuto.' });
       const { current, next } = await readJson(req);

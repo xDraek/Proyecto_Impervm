@@ -18,10 +18,10 @@
           <h1 class="landing-brand">⚜ Imperium</h1>
           <p class="tagline">Funda tu ciudad en un archipiélago vivo. Comercia, investiga, explora la niebla y conquista a tus vecinos… o levanta el Coloso antes que nadie.</p>
           <ul class="features">
-            <li><span>🏛️</span><div><b>14 edificios y 13 investigaciones</b>Tu isla crece en 3D mientras juegas, también con la pestaña cerrada.</div></li>
-            <li><span>⚔️</span><div><b>Un mundo compartido</b>Espía y saquea a otros jugadores, defiéndete de ellos y de los piratas.</div></li>
-            <li><span>🧭</span><div><b>Mares por descubrir</b>Campamentos bárbaros, ruinas con tesoros, colonias y el temible Kraken.</div></li>
-            <li><span>🛕</span><div><b>Favor de los dioses</b>Poderes divinos, misiones, visitantes y expediciones a la niebla.</div></li>
+            <li><span>🏛️</span><div><b>19 edificios, 13 investigaciones y 13 unidades</b>Tu ciudad crece en 3D mientras juegas, también con la pestaña cerrada.</div></li>
+            <li><span>⚔️</span><div><b>Un mundo compartido</b>Alianzas, pactos y guerras, ataques conjuntos y una competición cada semana.</div></li>
+            <li><span>🗺️</span><div><b>Islas y continentes</b>Ciudades bárbaras que conquistar, maravillas que levantar entre todos y el temible Kraken.</div></li>
+            <li><span>🏺</span><div><b>Leyendas por descubrir</b>Reliquias míticas, poderes divinos, expediciones a la niebla y tormentas en alta mar.</div></li>
           </ul>
           <button class="ghost" data-action="go-register">Empieza gratis →</button>
         </div>
@@ -34,11 +34,20 @@
             <form id="auth-form" autocomplete="on">
               <label>Nombre de jugador <input name="username" autocomplete="username" required minlength="3" maxlength="20" /></label>
               <label class="reg">Nombre de tu ciudad <input name="city" maxlength="20" placeholder="Si lo dejas vacío, tu nombre" /></label>
-              <label>Contraseña <input name="password" type="password" autocomplete="current-password" required minlength="6" maxlength="100" /></label>
-              <label class="reg">Repite la contraseña <input name="password2" type="password" autocomplete="new-password" maxlength="100" /></label>
+              <label class="rec">Código de recuperación <input name="code" autocomplete="off" placeholder="XXXX-XXXX-XXXX" maxlength="20" /></label>
+              <label><span class="pw-label">Contraseña</span> <input name="password" type="password" autocomplete="current-password" required minlength="6" maxlength="100" /></label>
+              <label class="pw2">Repite la contraseña <input name="password2" type="password" autocomplete="new-password" maxlength="100" /></label>
               <button class="primary" type="submit">Entrar</button>
               <div class="form-error" role="alert"></div>
+              <button type="button" class="link small forgot" data-action="go-recover">¿Has olvidado tu contraseña?</button>
             </form>
+            <div class="recovery-card" hidden>
+              <h3>🔑 Tu código de recuperación</h3>
+              <p>Guárdalo en un sitio seguro (apúntalo o haz una captura). Es la <b>única forma</b> de recuperar tu cuenta si olvidas la contraseña, y no se vuelve a mostrar.</p>
+              <div class="recovery-code"></div>
+              <button type="button" class="ghost" data-action="copy-code">📋 Copiar</button>
+              <button type="button" class="primary" data-action="code-saved">Ya lo he guardado · entrar</button>
+            </div>
           </div>
           <div id="world-stats" class="world-stats"></div>
         </div>

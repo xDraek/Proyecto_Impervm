@@ -19,6 +19,21 @@ export function verifyPassword(password, stored) {
   return timingSafeEqual(expected, actual);
 }
 
+/** Código de recuperación legible: 12 letras y números sin los que se confunden (0/O, 1/I). */
+export function newRecoveryCode() {
+  const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  const bytes = randomBytes(12);
+  const chars = [...bytes].map((b) => alphabet[b % alphabet.length]).join('');
+  return `${chars.slice(0, 4)}-${chars.slice(4, 8)}-${chars.slice(8, 12)}`;
+}
+
+/** Para comparar códigos sin que importen mayúsculas, guiones ni espacios. */
+export function normalizeCode(code) {
+  return String(code ?? '')
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, '');
+}
+
 export function newSecret() {
   return randomBytes(32).toString('hex');
 }

@@ -5,7 +5,7 @@ import { Game, newState } from '../src/game/Game.js';
 import { CONTEST_CATEGORIES, CONTEST_DAYS, CONTEST_PRIZES, WONDERS } from '../src/game/data.js';
 import { playerCombat, wonderLevel, wonderOf, worldEventAt } from '../src/game/rules.js';
 import { footprint, freshIslandState, generateContinent, generateSector, homeIsland, sectorCenter, sectorVertices } from '../src/game/world.js';
-import { hashPassword, newSecret, verifyPassword } from './auth.js';
+import { hashPassword, newRecoveryCode, newSecret, normalizeCode, verifyPassword } from './auth.js';
 
 // El mundo de todos los jugadores, en memoria. Implementa la interfaz `world`
 // que usa Game (islas compartidas, información de otros jugadores, ataques).
@@ -163,6 +163,51 @@ export class WorldServer {
     if (!user || typeof password !== 'string' || !verifyPassword(password, user.pass)) throw new UserError('Nombre o contraseña incorrectos.');
     if (this.isBanned(id)) throw new UserError(`Esta cuenta está suspendida${this.meta.mod[id].reason ? `: ${this.meta.mod[id].reason}` : '.'}`);
     return id;
+  }
+
+  // ── Recuperar la cuenta ────────────────────────────────────────────────────
+  // Sin correo: al crear la cuenta se da un código que solo ve el jugador. Se
+  // guarda cifrado (como las contraseñas) y cada uso lo cambia por otro.
+
+  /** Un código nuevo para el jugador (el anterior deja de valer). */
+  async issueRecovery(userId) {
+    const code = newRecoveryCode();
+    this.meta.recovery ??= {};
+    this.meta.recovery[userId] = hashPassword(normalizeCode(code));
+    await this.store.save({ meta: this.meta });
+    return code;
+  }
+
+  /** Poner una contraseña nueva con el código de recuperación. */
+  async recover(username, code, next) {
+    const id = this.byName.get(String(username ?? '').trim().toLowerCase());
+    const stored = id != null ? this.meta.recovery?.[id] : null;
+    if (!stored || !verifyPassword(normalizeCode(code), stored)) throw new UserError('El nombre o el código de recuperación no son correctos.');
+    if (this.isBanned(id)) throw new UserError('Esta cuenta está suspendida.');
+    if (typeof next !== 'string' || next.length < 6 || next.length > 100) throw new UserError('La contraseña nueva debe tener al menos 6 caracteres.');
+    const user = this.users.get(id);
+    user.pass = hashPassword(next);
+    await this.store.updatePassword(id, user.pass);
+    return { id, recovery: await this.issueRecovery(id) };
+  }
+
+  /** Un código nuevo desde dentro del juego (pide la contraseña actual). */
+  async regenerateRecovery(userId, password) {
+    const user = this.users.get(userId);
+    if (typeof password !== 'string' || !verifyPassword(password, user.pass)) throw new UserError('La contraseña no es correcta.');
+    return this.issueRecovery(userId);
+  }
+
+  /** Moderación: una contraseña temporal para quien la ha perdido todo. */
+  async adminResetPassword(adminId, name) {
+    if (!this.isAdmin(adminId)) throw new UserError('Solo para moderadores.');
+    const id = this.byName.get(String(name ?? '').trim().toLowerCase());
+    if (id == null) throw new UserError('No hay ningún jugador con ese nombre.');
+    const temp = normalizeCode(newRecoveryCode()).slice(0, 10).toLowerCase();
+    const user = this.users.get(id);
+    user.pass = hashPassword(temp);
+    await this.store.updatePassword(id, user.pass);
+    return temp;
   }
 
   seen(userId) {

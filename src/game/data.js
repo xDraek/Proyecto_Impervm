@@ -696,6 +696,29 @@ export const DAILY_REWARDS = [
 // ── Logros ───────────────────────────────────────────────────────────────────
 // Se ganan solos al cumplirse y se enseñan en el perfil del jugador.
 
+// ── Reliquias ────────────────────────────────────────────────────────────────
+// Objetos legendarios que aparecen en expediciones, ruinas y conquistas. Se
+// equipan hasta RELIC_SLOTS a la vez; las que sobran se venden por oro.
+
+export const RELICS = {
+  espada: { name: 'Espada de Jasón', icon: '🗡️', rarity: 'rara', stat: 'ataque', value: 0.06, text: '+6 % de ataque de tus tropas' },
+  escudo: { name: 'Escudo de Aquiles', icon: '🛡️', rarity: 'rara', stat: 'defensa', value: 0.08, text: '+8 % de vida de tus tropas' },
+  tridente: { name: 'Tridente de bronce', icon: '🔱', rarity: 'rara', stat: 'velocidad', value: 0.08, text: 'Flotas un 8 % más rápidas' },
+  ancla: { name: 'Ancla de Poseidón', icon: '⚓', rarity: 'rara', stat: 'botin', value: 0.15, text: '+15 % de carga en tus barcos' },
+  cuerno: { name: 'Cuerno de la abundancia', icon: '📯', rarity: 'rara', stat: 'comida', value: 0.12, text: '+12 % de comida' },
+  lira: { name: 'Lira de Orfeo', icon: '🎶', rarity: 'rara', stat: 'favor', value: 0.25, text: '+25 % de favor de los dioses' },
+  hoz: { name: 'Hoz de Cronos', icon: '🌙', rarity: 'epica', stat: 'produccion', value: 0.05, text: '+5 % de toda la producción' },
+  yelmo: { name: 'Yelmo de Hades', icon: '⛑️', rarity: 'epica', stat: 'sigilo', value: 0.5, text: 'Tus espías se dejan ver la mitad de veces' },
+  mascara: { name: 'Máscara del Minotauro', icon: '🐂', rarity: 'legendaria', stat: 'ataque', value: 0.12, text: '+12 % de ataque de tus tropas' },
+  vellocino: { name: 'Vellocino de oro', icon: '🐏', rarity: 'legendaria', stat: 'oro', value: 0.3, text: '+30 % de oro' },
+};
+export const RELIC_SLOTS = 3;
+export const RELIC_RARITY = {
+  rara: { name: 'Rara', color: '#6fb6ff', sell: 1500 },
+  epica: { name: 'Épica', color: '#b07ad9', sell: 4000 },
+  legendaria: { name: 'Legendaria', color: '#f2c94c', sell: 10000 },
+};
+
 // ── Encargos diarios ─────────────────────────────────────────────────────────
 // Cada día tocan tres, elegidos entre los que puedes hacer. Las cifras crecen
 // con el ayuntamiento; cuenta lo que hagas desde que empieza el día.

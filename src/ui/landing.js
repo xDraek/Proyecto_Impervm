@@ -18,9 +18,36 @@ export function showLanding({ onLogin, message }) {
     mode = m;
     root.querySelectorAll('[data-tab]').forEach((b) => b.classList.toggle('active', b.dataset.tab === m));
     root.querySelectorAll('.reg').forEach((el) => (el.hidden = m !== 'register'));
-    form.querySelector('[name="password"]').autocomplete = m === 'register' ? 'new-password' : 'current-password';
-    form.querySelector('[type="submit"]').textContent = m === 'register' ? 'Fundar mi ciudad' : 'Entrar';
+    root.querySelectorAll('.rec').forEach((el) => (el.hidden = m !== 'recover'));
+    root.querySelectorAll('.pw2').forEach((el) => (el.hidden = m === 'login'));
+    root.querySelector('.forgot').hidden = m !== 'login';
+    root.querySelector('.pw-label').textContent = m === 'recover' ? 'Contraseña nueva' : 'Contraseña';
+    form.querySelector('[name="code"]').required = m === 'recover';
+    form.querySelector('[name="password"]').autocomplete = m === 'login' ? 'current-password' : 'new-password';
+    form.querySelector('[type="submit"]').textContent = { register: 'Fundar mi ciudad', recover: 'Cambiar la contraseña', login: 'Entrar' }[m];
     error.textContent = '';
+  };
+  root.querySelector('[data-action="go-recover"]').addEventListener('click', () => {
+    setMode('recover');
+    form.querySelector('[name="username"]').focus();
+  });
+
+  // Tras crear la cuenta (o recuperarla), el código nuevo se enseña una vez
+  const card = root.querySelector('.recovery-card');
+  const showCode = (code) => {
+    form.hidden = true;
+    root.querySelector('.auth .tabs').hidden = true;
+    card.hidden = false;
+    card.querySelector('.recovery-code').textContent = code;
+    card.querySelector('[data-action="copy-code"]').onclick = async (e) => {
+      try {
+        await navigator.clipboard.writeText(code);
+        e.target.textContent = '✔ Copiado';
+      } catch {
+        e.target.textContent = 'Cópialo a mano';
+      }
+    };
+    card.querySelector('[data-action="code-saved"]').onclick = () => onLogin();
   };
   root.querySelectorAll('[data-tab]').forEach((b) => b.addEventListener('click', () => setMode(b.dataset.tab)));
   root.querySelector('[data-action="go-register"]')?.addEventListener('click', () => {
@@ -32,7 +59,7 @@ export function showLanding({ onLogin, message }) {
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
     const data = Object.fromEntries(new FormData(form));
-    if (mode === 'register' && data.password !== data.password2) {
+    if (mode !== 'login' && data.password !== data.password2) {
       error.textContent = 'Las contraseñas no coinciden.';
       return;
     }
@@ -40,10 +67,11 @@ export function showLanding({ onLogin, message }) {
     submit.disabled = true;
     error.textContent = '';
     try {
-      const path = mode === 'register' ? '/api/register' : '/api/login';
-      const { token } = await api('POST', path, { username: data.username, password: data.password, city: data.city });
+      const path = { register: '/api/register', recover: '/api/recover', login: '/api/login' }[mode];
+      const { token, recovery } = await api('POST', path, { username: data.username, password: data.password, city: data.city, code: data.code });
       setToken(token);
-      onLogin();
+      if (recovery) showCode(recovery);
+      else onLogin();
     } catch (err) {
       error.textContent = err.message;
       submit.disabled = false;
