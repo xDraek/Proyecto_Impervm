@@ -43,7 +43,7 @@ El servidor guarda el mundo en memoria y lo vuelca a la base de datos cada 10 se
 
 - Al crear la cuenta eliges tu nombre y el de tu ciudad. Cada jugador nuevo abre un **sector** del archipiélago: su isla en el centro y una docena de islas neutrales alrededor. Los sectores se colocan en espiral, así que tus vecinos son los que se registraron cerca de ti.
 - Tu isla produce **madera, piedra, comida, hierro, cristal y oro** en tiempo real, también con la pestaña cerrada.
-- **19 edificios**, entre ellos el templo, la taberna (las tropas comen menos), la forja (más ataque), la torre de vigía, el faro (flotas más rápidas), el astillero y el **Coloso**, una maravilla de 10 niveles que es el gran objetivo final.
+- **19 edificios**, entre ellos el templo, la taberna (las tropas comen menos), la forja (más ataque), la torre de vigía, el faro (flotas más rápidas), el astillero y el **Coloso**, una maravilla que nunca deja de crecer (+5 % de producción por nivel).
 - **Academia** con 13 investigaciones, **cuartel y puerto** con 7 tropas (honderos, hoplitas…) y 6 barcos (brulotes, dromones…). Las tropas comen: sin comida hay hambruna.
 - **Continentes** 🗺️: entre cada tres sectores puede haber un pequeño continente con ciudades bárbaras amuralladas (mucho botín) y valles fértiles que colonizar. Las ciudades bárbaras se pueden **conquistar** 🏴: si tu ejército acaba con toda la guarnición, los colonos se quedan con ella y pasa a ser tuya.
 - **Maravillas** 🏛️: cada continente tiene una (Templo de Poseidón, Forja de Hefesto, Jardines de Deméter o Biblioteca de Atenea). La levantan entre todos los que tienen colonia allí aportando madera, piedra y cristal; con cada uno de sus 5 niveles todos ellos ganan más velocidad de flota, ataque, comida o investigación.

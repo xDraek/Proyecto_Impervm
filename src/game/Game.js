@@ -1451,16 +1451,10 @@ export class Game extends EventTarget {
     this.#note(`${b.icon} ${b.name} ha alcanzado el nivel ${q.level}`, 'success');
     this.#ensureRaid(t);
     this.#ensureVisits(t);
-    if (q.id === 'coloso' && q.level >= buildingMax('coloso')) {
-      this.#report({
-        t,
-        kind: 'victoria',
-        outcome: 'victoria',
-        title: '¡El Coloso está terminado!',
-        text: 'Marineros de todo el archipiélago lo ven brillar desde el horizonte. Tu imperio ya es leyenda.',
-      });
-      this.#note('🗽 ¡Has terminado el Coloso! Tu imperio será recordado para siempre.', 'success');
-      this.world.announce?.(`🗽 ${this.state.name} ha terminado el Coloso`);
+    // El Coloso no tiene final: cada cinco niveles se anuncia a todo el archipiélago
+    if (q.id === 'coloso' && q.level % 5 === 0) {
+      this.#note(`🗽 Tu Coloso alcanza el nivel ${q.level}. Marineros de todo el archipiélago lo ven brillar.`, 'success');
+      this.world.announce?.(`🗽 ${this.state.name} lleva su Coloso a nivel ${q.level}`);
     }
   }
 

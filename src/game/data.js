@@ -195,11 +195,10 @@ export const BUILDINGS = {
   coloso: {
     name: 'Coloso',
     icon: '🗽',
-    description: 'Una maravilla del mundo que vigila el mar. Cada nivel aumenta un 5 % toda la producción. Al nivel 10, tu imperio será leyenda.',
+    description: 'Una maravilla que vigila el mar y nunca deja de crecer. Cada nivel aumenta un 5 % toda la producción; al nivel 10 su bronce se vuelve oro.',
     baseCost: { madera: 5000, piedra: 8000, hierro: 2000, cristal: 3000, oro: 2000 },
     costFactor: 1.45,
     baseTime: 3600,
-    maxLevel: 10,
     requires: { ayuntamiento: 8, arquitectura: 4 },
   },
 };
@@ -675,7 +674,7 @@ export const QUESTS = [
   { id: 'q-maravilla', title: 'Obra de todos', text: 'Aporta 2.000 recursos a la maravilla de un continente.', goal: stat('donated', 2000), reward: { cristal: 1500, oro: 800 } },
   { id: 'q-kraken', title: 'Matador de monstruos', text: 'Derrota al Kraken.', goal: stat('kraken', 1), reward: { oro: 5000, cristal: 5000 } },
   { id: 'q-coloso1', title: 'Primera piedra', text: 'Empieza el Coloso (nivel 1).', goal: lvl('coloso', 1), reward: { oro: 2000, hierro: 2000 } },
-  { id: 'q-coloso', title: 'Leyenda eterna', text: 'Termina el Coloso (nivel 10).', goal: lvl('coloso', 10), reward: { oro: 20000 } },
+  { id: 'q-coloso', title: 'Coloso de oro', text: 'Lleva el Coloso a nivel 10.', goal: lvl('coloso', 10), reward: { oro: 20000 } },
 ];
 
 // ── Visitantes que llegan a la isla de vez en cuando ─────────────────────────
@@ -788,7 +787,7 @@ export const ACHIEVEMENTS = [
   { id: 'constante', icon: '📅', name: 'Constante', text: 'Entra 7 días seguidos', check: (g) => (g.state.daily?.best ?? 0) >= 7 },
   { id: 'imperio', icon: '🏛️', name: 'Imperio', text: 'Llega a 10.000 puntos', check: (g) => g.score() >= 10000 },
   { id: 'kraken', icon: '🐙', name: 'Matador del Kraken', text: 'Derrota al Kraken', check: (g) => g.stats.kraken >= 1 },
-  { id: 'leyenda', icon: '🗽', name: 'Leyenda', text: 'Termina el Coloso', check: (g) => g.level('coloso') >= 10 },
+  { id: 'leyenda', icon: '🗽', name: 'Coloso de oro', text: 'Lleva el Coloso a nivel 10', check: (g) => g.level('coloso') >= 10 },
 ];
 
 // ── Almirante (héroe) ────────────────────────────────────────────────────────

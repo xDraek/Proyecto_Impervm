@@ -9,6 +9,7 @@ const TOPICS = [
     icon: '🚀',
     title: 'Primeros pasos',
     body: `<p>Tu isla produce recursos sin parar, también con el juego cerrado. Gástalos en mejorar edificios: cada mejora produce más o desbloquea cosas nuevas.</p>
+      <p>Como en Ikariam, el juego <b>no tiene final</b> ni condición de victoria: tu imperio crece mientras quieras jugar, y cada semana hay competición y premios.</p>
       <p>Sigue las <b>misiones</b> (📋): te dicen qué hacer y dan recompensas. Cada día tienes además <b>encargos</b> y un <b>regalo diario</b> 🎁.</p>`,
   },
   {
