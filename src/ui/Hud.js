@@ -91,6 +91,8 @@ export class Hud {
     this.questsBtn.addEventListener('click', () => this.openModal('quests'));
     this.armyBtn = $('#army-btn');
     this.armyBtn.addEventListener('click', () => this.openModal('army'));
+    this.friendsBtn = $('#friends-btn');
+    this.friendsBtn.addEventListener('click', () => this.social.openFriends());
     $('#rank-btn').addEventListener('click', () => this.openModal('ranking'));
     $('#map-btn').addEventListener('click', () => this.worldMap.open());
     this.favorEl.addEventListener('click', () => this.onSelect('templo'));
@@ -193,6 +195,7 @@ export class Hud {
       this.menu.querySelector('[name="sound"]').checked = settings.sound();
       this.menu.querySelector('[name="music"]').checked = settings.music();
       this.menu.querySelector('[name="daynight"]').checked = settings.dayNight();
+      this.menu.querySelector('[name="quality"]').checked = settings.quality();
       this.menu.querySelector('[name="notify"]').checked = settings.notify();
     });
     document.addEventListener('click', (e) => {
@@ -202,6 +205,7 @@ export class Hud {
       if (e.target.name === 'sound') settings.setSound(e.target.checked);
       if (e.target.name === 'music') settings.setMusic(e.target.checked);
       if (e.target.name === 'daynight') settings.setDayNight(e.target.checked);
+      if (e.target.name === 'quality') settings.setQuality(e.target.checked);
       if (e.target.name === 'notify') settings.setNotify(e.target.checked).then((on) => (e.target.checked = on));
     });
     this.menu.querySelector('[data-action="guide"]').addEventListener('click', () => {
@@ -325,6 +329,9 @@ export class Hud {
     this.#renderVisitor();
     this.#renderVacation();
     this.#renderModal();
+    const friendBadge = this.friendsBtn.querySelector('.badge');
+    friendBadge.hidden = !this.game.friendRequests;
+    friendBadge.textContent = this.game.friendRequests;
     const armyBadge = this.armyBtn.querySelector('.badge');
     armyBadge.hidden = !this.game.missions.length;
     armyBadge.textContent = this.game.missions.length;
@@ -450,6 +457,7 @@ export class Hud {
       if (eco.research[key]) lines.push(`Investigación: +${fmtNum(eco.research[key])}/h`);
       if (eco.colonies[key]) lines.push(`Colonias: +${fmtNum(eco.colonies[key])}/h`);
       if (key === 'oro' && eco.taxes) lines.push(`Impuestos de los trabajadores libres: +${fmtNum(eco.taxes)}/h`);
+      if (key === 'oro' && eco.pay) lines.push(`Paga de las tropas de élite: −${fmtNum(eco.pay)}/h`);
       if (eco.eventBonus?.[key]) lines.push(`Evento del archipiélago: +${Math.round(eco.eventBonus[key] * 100)} %`);
       if (key === 'comida' && eco.upkeep) lines.push(`Tropas: −${fmtNum(eco.upkeep)}/h`);
       if (starving) lines.push('Hambruna: la producción cae a la mitad');
@@ -939,11 +947,22 @@ export class Hud {
 
   /** Mensaje que llega por la conexión en vivo. */
   receiveChat(message) {
-    if (message.id <= this.chatLast) return;
-    this.chatMessages.push(message);
-    if (this.chatMessages.length > 200) this.chatMessages.shift();
-    this.chatLast = message.id;
-    this.#renderChat();
+    if (this.#addChat([message])) this.#renderChat();
+  }
+
+  /**
+   * Añade mensajes que aún no estén: el mismo puede llegar a la vez por la conexión en vivo
+   * y por la consulta que se hace al enviar (así no sale dos veces). Devuelve si ha añadido alguno.
+   */
+  #addChat(messages) {
+    const known = new Set(this.chatMessages.map((m) => m.id));
+    const fresh = messages.filter((m) => !known.has(m.id));
+    if (!fresh.length) return false;
+    this.chatMessages.push(...fresh);
+    this.chatMessages.sort((a, b) => a.id - b.id);
+    if (this.chatMessages.length > 200) this.chatMessages.splice(0, this.chatMessages.length - 200);
+    this.chatLast = Math.max(this.chatLast, this.chatMessages.at(-1).id);
+    return true;
   }
 
   removeChat(id) {
@@ -954,12 +973,7 @@ export class Hud {
   async #fetchChat(scroll = false) {
     try {
       const { messages } = await api('GET', `/api/chat?after=${this.chatLast}`);
-      if (messages.length) {
-        this.chatMessages.push(...messages);
-        if (this.chatMessages.length > 200) this.chatMessages.splice(0, this.chatMessages.length - 200);
-        this.chatLast = messages.at(-1).id;
-        this.#renderChat(scroll);
-      }
+      if (this.#addChat(messages) || scroll) this.#renderChat(scroll);
     } catch {
       // se reintenta en la siguiente vuelta
     }

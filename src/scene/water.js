@@ -5,6 +5,7 @@ import * as THREE from 'three';
 //   y más gruesa lejos, para tener facetas pequeñas sin millones de vértices.
 // - Junto a la orilla las olas se calman, así nunca suben por encima de la
 //   playa, y aparece agua clara poco profunda con espuma que va y viene.
+// - Cada orilla tiene la forma de su isla (la misma serie de Fourier que el relieve, coast.js).
 
 export const MAX_SHORES = 24;
 const SIZE = 900; // mitad del lado
@@ -16,8 +17,17 @@ function remap(u) {
   return Math.sign(u) * SIZE * (0.15 * a + 0.85 * a ** 2.2);
 }
 
+/** Una orilla en tres vec4: (x, z, radio, a1) (p1, a2, p2, a3) (p3, a4, p4, -). */
+function packShore(s, i, A, B, Cc) {
+  const h = s?.h ?? [];
+  const at = (k) => h[k] ?? { a: 0, p: 0 };
+  A[i].set(s?.x ?? 1e5, s?.z ?? 1e5, s?.r ?? 0, at(0).a);
+  B[i].set(at(0).p, at(1).a, at(1).p, at(2).a);
+  Cc[i].set(at(2).p, at(3).a, at(3).p, 0);
+}
+
 /**
- * @param {{ x: number, z: number, r: number }[]} shores  islas: centro y radio de la orilla
+ * @param {{ x: number, z: number, r: number, h?: {a: number, p: number}[] }[]} shores  islas: centro, radio y forma de la orilla
  */
 export function createWater(shores, level) {
   const geo = new THREE.PlaneGeometry(2, 2, SEGMENTS, SEGMENTS);
@@ -28,7 +38,9 @@ export function createWater(shores, level) {
 
   const uniforms = {
     uTime: { value: 0 },
-    uShores: { value: Array.from({ length: MAX_SHORES }, (_, i) => new THREE.Vector3(shores[i]?.x ?? 1e5, shores[i]?.z ?? 1e5, shores[i]?.r ?? 0)) },
+    uShoreA: { value: Array.from({ length: MAX_SHORES }, () => new THREE.Vector4()) },
+    uShoreB: { value: Array.from({ length: MAX_SHORES }, () => new THREE.Vector4()) },
+    uShoreC: { value: Array.from({ length: MAX_SHORES }, () => new THREE.Vector4()) },
     uDeep: { value: new THREE.Color('#1f6fa8') },
     uShallow: { value: new THREE.Color('#3fc1c9') },
     uFoam: { value: new THREE.Color('#f4fbff') },
@@ -45,11 +57,24 @@ export function createWater(shores, level) {
 
   const common = /* glsl */ `
     uniform float uTime;
-    uniform vec3 uShores[${MAX_SHORES}];
+    uniform vec4 uShoreA[${MAX_SHORES}];
+    uniform vec4 uShoreB[${MAX_SHORES}];
+    uniform vec4 uShoreC[${MAX_SHORES}];
     varying vec3 vWaterPos;
     float shoreDistance(vec2 p) {
       float d = 1e5;
-      for (int i = 0; i < ${MAX_SHORES}; i++) d = min(d, length(p - uShores[i].xy) - uShores[i].z);
+      for (int i = 0; i < ${MAX_SHORES}; i++) {
+        vec4 A = uShoreA[i];
+        vec2 q = p - A.xy;
+        float len = length(q);
+        // Lejos de esta isla no hace falta la forma exacta
+        if (len - A.z * 1.3 > d) continue;
+        vec4 B = uShoreB[i];
+        vec4 Cc = uShoreC[i];
+        float th = atan(q.x, q.y);
+        float f = 1.0 + A.w * cos(th + B.x) + B.y * cos(2.0 * th + B.z) + B.w * cos(3.0 * th + Cc.x) + Cc.y * cos(4.0 * th + Cc.z);
+        d = min(d, len - A.z * f);
+      }
       return d;
     }
   `;
@@ -89,6 +114,11 @@ export function createWater(shores, level) {
         float breakUp = smoothstep(-0.2, 0.7, n);
         float ripple = smoothstep(0.82, 1.0, sin(d * 1.4 - uTime * 1.6)) * (1.0 - smoothstep(1.0, 7.0, d)) * breakUp;
         float foam = clamp(max(edge, ripple * 0.85), 0.0, 1.0);
+        // Destellos del sol que titilan sobre las olas (lejos de la espuma)
+        vec2 cell = floor(vWaterPos.xz * 2.2 + vec2(uTime * 0.35, -uTime * 0.2));
+        float sparkle = step(0.986, fract(sin(dot(cell, vec2(12.9898, 78.233))) * 43758.5453));
+        sparkle *= 0.5 + 0.5 * sin(uTime * 6.0 + cell.x * 1.7 + cell.y);
+        water += vec3(1.0, 0.97, 0.88) * sparkle * 0.9 * (1.0 - foam) * smoothstep(4.0, 12.0, d);
         diffuseColor.rgb = mix(water, uFoam, foam);
         diffuseColor.a = mix(diffuseColor.a, 1.0, foam);`,
       );
@@ -98,6 +128,7 @@ export function createWater(shores, level) {
 
   const mesh = new THREE.Mesh(geo, material);
   mesh.position.y = level;
+  for (let i = 0; i < MAX_SHORES; i++) packShore(shores[i], i, uniforms.uShoreA.value, uniforms.uShoreB.value, uniforms.uShoreC.value);
   mesh.receiveShadow = true;
   mesh.userData.uniforms = uniforms;
   return mesh;
@@ -105,9 +136,6 @@ export function createWater(shores, level) {
 
 /** Cambia las orillas (con espuma) que tiene en cuenta el mar: las más cercanas. */
 export function setShores(mesh, shores) {
-  const list = mesh.userData.uniforms.uShores.value;
-  for (let i = 0; i < MAX_SHORES; i++) {
-    const s = shores[i];
-    list[i].set(s?.x ?? 1e5, s?.z ?? 1e5, s?.r ?? 0);
-  }
+  const u = mesh.userData.uniforms;
+  for (let i = 0; i < MAX_SHORES; i++) packShore(shores[i], i, u.uShoreA.value, u.uShoreB.value, u.uShoreC.value);
 }

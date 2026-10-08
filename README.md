@@ -67,6 +67,9 @@ Sin `BREVO_API_KEY` no se manda ningún correo: el texto con el enlace se escrib
 - **Reliquias** 🏺: diez objetos míticos (de raros a legendarios) que se encuentran en expediciones, ruinas, conquistas y en la guarida del Kraken. Se equipan hasta tres desde el ayuntamiento o se venden por oro.
 - **Trabajadores** 👷: en los edificios que producen eliges qué parte de los trabajadores produce; los demás pagan impuestos en oro.
 - **Cámara cómoda**: arrastrar para moverte, botón derecho para girar, rueda hacia el ratón, teclado (WASD, Q/E, +/−, C), doble clic para ir a un punto y botones en pantalla.
+- **Amigos** 👥: añade a otros capitanes, mira quién está conectado y escríbeles.
+- **Música y sonido**: tema propio de fondo y gaviotas que se oyen al sobrevolar la isla.
+- **Gráficos de alta calidad** (⚙): resplandor, bordes suaves, sillares y tejas, hierba que se mece y destellos en el mar.
 - **Cuenta con correo**: se confirma con un enlace al correo, se entra con el nombre o el correo y la contraseña olvidada se recupera por correo. Los moderadores pueden dar una contraseña temporal.
 - **Encargos diarios** 📜: cada día tres tareas distintas (invertir, entrenar, saquear, explorar, comerciar…) con recompensa, y premio extra por cumplir las tres.
 - **Competición semanal** 🏅: cada semana se premia a los tres mejores en saqueo, militar y construcción (solo cuenta lo hecho esa semana). Los ganadores quedan en el salón de la fama, en la pestaña «Semana» de la clasificación.

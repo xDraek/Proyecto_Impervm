@@ -1,4 +1,5 @@
-// Sonido sintetizado con Web Audio: no hay archivos que cargar.
+// Sonido con Web Audio: la música de fondo y las gaviotas son pistas grabadas
+// (public/audio); el mar, la lluvia y los efectos se sintetizan al momento.
 // El navegador no deja sonar nada hasta que el jugador interactúa, así que el
 // contexto se crea en el primer clic o tecla.
 
@@ -9,7 +10,6 @@ let ctx = null;
 let master = null;
 let ambience = null;
 let muted = readMuted();
-let gullTimer = null;
 
 function readMuted() {
   try {
@@ -85,41 +85,55 @@ function startAmbience() {
   src.start();
   lfo.start();
   ambience = gain;
-  scheduleGull();
 }
 
-function scheduleGull() {
-  clearTimeout(gullTimer);
-  gullTimer = setTimeout(() => {
-    if (!document.hidden) gull();
-    scheduleGull();
-  }, 7000 + Math.random() * 14000);
+// ── Gaviotas: la pista suena más o menos según las que pasen sobre la isla ────
+
+let gullTrack = null;
+
+/** Pista grabada en bucle que pasa por el volumen general (y se calla con el silencio). */
+function track(url, volume) {
+  const el = new Audio(url);
+  el.loop = true;
+  el.preload = 'auto';
+  el.crossOrigin = 'anonymous';
+  const gain = ctx.createGain();
+  gain.gain.value = 0;
+  ctx.createMediaElementSource(el).connect(gain).connect(master);
+  return { el, gain, volume, playing: false };
 }
 
-function gull() {
-  const t = ctx.currentTime;
-  const calls = 2 + Math.floor(Math.random() * 3);
-  for (let i = 0; i < calls; i++) {
-    const start = t + i * 0.22;
-    const osc = ctx.createOscillator();
-    osc.type = 'triangle';
-    osc.frequency.setValueAtTime(1500, start);
-    osc.frequency.exponentialRampToValueAtTime(900, start + 0.16);
-    const g = ctx.createGain();
-    g.gain.setValueAtTime(0.0001, start);
-    g.gain.exponentialRampToValueAtTime(0.035, start + 0.03);
-    g.gain.exponentialRampToValueAtTime(0.0001, start + 0.18);
-    osc.connect(g).connect(master);
-    osc.start(start);
-    osc.stop(start + 0.2);
+function fade(t, level, seconds) {
+  t.gain.gain.setTargetAtTime(level, ctx.currentTime, seconds);
+  if (level > 0.001 && !t.playing) {
+    t.playing = true;
+    t.el.play().catch(() => (t.playing = false));
   }
 }
 
-// ── Música: una lira que improvisa sobre una escala pentatónica ──────────────
-// Sin archivos: cada nota se sintetiza al momento, así que nunca se repite igual.
+/**
+ * Cuántas gaviotas se oyen (de 0 a 1): la escena lo calcula según las que vuelan sobre
+ * la isla cerca de donde miras. En el mapa, 0.
+ */
+export function setGulls(k) {
+  if (!ctx || document.hidden) return;
+  gullTrack ??= track('/audio/gaviotas.mp3', 0.55);
+  const level = Math.max(0, Math.min(1, k)) * gullTrack.volume;
+  fade(gullTrack, level, 1.2);
+  // Sin gaviotas cerca, la pista se para del todo (no gasta nada)
+  if (level < 0.001 && gullTrack.playing) {
+    clearTimeout(gullTrack.stop);
+    gullTrack.stop = setTimeout(() => {
+      if (gullTrack.gain.gain.value < 0.002) {
+        gullTrack.el.pause();
+        gullTrack.playing = false;
+      }
+    }, 5000);
+  }
+}
 
-const SCALE = [146.83, 164.81, 196.0, 220.0, 246.94, 293.66, 329.63, 392.0, 440.0, 493.88, 587.33]; // re mi sol la si…
-const BEAT = 60 / 66; // negras a 66 por minuto
+// ── Música: el tema de Imperium en bucle ────────────────────────────────────
+
 let music = null;
 
 export function musicOn() {
@@ -142,97 +156,32 @@ export function setMusic(on) {
   } else stopMusic();
 }
 
-/** Cuerda pulsada: ataque rápido, cola larga y un poco de brillo que se apaga. */
-function pluck(freq, start, vol = 0.05, dur = 2.4) {
-  const osc = ctx.createOscillator();
-  osc.type = 'triangle';
-  osc.frequency.value = freq;
-  const harm = ctx.createOscillator();
-  harm.type = 'sine';
-  harm.frequency.value = freq * 2;
-  const filter = ctx.createBiquadFilter();
-  filter.type = 'lowpass';
-  filter.frequency.setValueAtTime(3200, start);
-  filter.frequency.exponentialRampToValueAtTime(700, start + dur);
-  const g = ctx.createGain();
-  g.gain.setValueAtTime(0.0001, start);
-  g.gain.exponentialRampToValueAtTime(vol, start + 0.01);
-  g.gain.exponentialRampToValueAtTime(0.0001, start + dur);
-  const hg = ctx.createGain();
-  hg.gain.value = 0.25;
-  osc.connect(filter);
-  harm.connect(hg).connect(filter);
-  filter.connect(g).connect(music.out);
-  for (const o of [osc, harm]) {
-    o.start(start);
-    o.stop(start + dur + 0.05);
-  }
-}
-
 function startMusic() {
-  if (!ctx || music) return;
-  const out = ctx.createGain();
-  out.gain.value = 0;
-  out.gain.setTargetAtTime(0.9, ctx.currentTime, 2);
-  out.connect(master);
-  // Un bordón muy suave (re y la) que respira despacio
-  const drone = [];
-  for (const f of [73.42, 110.0]) {
-    const o = ctx.createOscillator();
-    o.type = 'sine';
-    o.frequency.value = f;
-    const g = ctx.createGain();
-    g.gain.value = 0.012;
-    const lfo = ctx.createOscillator();
-    lfo.frequency.value = 0.05 + Math.random() * 0.05;
-    const lg = ctx.createGain();
-    lg.gain.value = 0.008;
-    lfo.connect(lg).connect(g.gain);
-    o.connect(g).connect(out);
-    o.start();
-    lfo.start();
-    drone.push(o, lfo);
-  }
-  music = { out, drone, next: ctx.currentTime + 0.5, note: 5, bar: 0 };
-  music.timer = setInterval(scheduleMusic, 200);
+  if (!ctx) return;
+  music ??= track('/audio/tema.mp3', 0.45);
+  fade(music, music.volume, 2);
 }
 
 function stopMusic() {
   if (!music) return;
+  fade(music, 0, 0.6);
   const m = music;
-  music = null;
-  clearInterval(m.timer);
-  m.out.gain.setTargetAtTime(0, ctx.currentTime, 0.6);
   setTimeout(() => {
-    for (const o of m.drone) o.stop();
-    m.out.disconnect();
+    if (!musicOn()) {
+      m.el.pause();
+      m.playing = false;
+    }
   }, 3000);
 }
 
-/** Programa las notas del próximo segundo: un paseo por la escala con silencios y algún arpegio. */
-function scheduleMusic() {
+// Con la pestaña en segundo plano, la música se pausa (y vuelve al volver)
+document.addEventListener('visibilitychange', () => {
   if (!music) return;
   if (document.hidden) {
-    music.next = ctx.currentTime + 0.5;
-    return;
-  }
-  while (music.next < ctx.currentTime + 1.2) {
-    const t = music.next;
-    const beat = music.bar % 8;
-    if (beat === 0 && Math.random() < 0.6) {
-      // Arpegio de tres notas al empezar algunos compases
-      const root = [0, 2, 3][Math.floor(Math.random() * 3)];
-      [0, 2, 4].forEach((k, i) => pluck(SCALE[root + k], t + i * BEAT * 0.33, 0.035, 3));
-    } else if (Math.random() < 0.72) {
-      const step = [-2, -1, -1, 1, 1, 2, 0][Math.floor(Math.random() * 7)];
-      music.note = Math.max(3, Math.min(SCALE.length - 1, music.note + step));
-      pluck(SCALE[music.note], t, 0.045);
-      if (Math.random() < 0.2) pluck(SCALE[Math.max(0, music.note - 5)], t, 0.025, 3);
-    }
-    music.next += BEAT * (Math.random() < 0.25 ? 2 : 1);
-    music.bar++;
-  }
-}
+    music.el.pause();
+    music.playing = false;
+  } else if (musicOn()) fade(music, music.volume, 1);
+});
 
 // ── Lluvia y truenos ─────────────────────────────────────────────────────────
 

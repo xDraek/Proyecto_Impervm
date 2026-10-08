@@ -25,13 +25,15 @@ const TOPICS = [
     icon: '🏛️',
     title: 'Edificios e investigaciones',
     body: `<p>El <b>ayuntamiento</b> acelera las obras y desbloquea edificios. Solo se construye una cosa a la vez.</p>
-      <p>La <b>academia</b> investiga mejoras: más producción, mejores armas, barcos más rápidos, colonias (Cartografía)… También de una en una.</p>`,
+      <p>La <b>academia</b> investiga mejoras: más producción, mejores armas, barcos más rápidos, colonias (Cartografía)… También de una en una. Las más avanzadas cuestan también oro y cristal.</p>
+      <p>Al subir de nivel los edificios ganan detalle: enlosado y cipreses (nivel 5), pebeteros y estatua (10) y remate dorado con estandartes (15).</p>`,
   },
   {
     icon: '⚔️',
     title: 'Tropas, barcos y combate',
     body: `<p>El cuartel entrena tropas de tierra y el puerto construye barcos. Las tropas viajan dentro de los barcos (cada barco tiene plazas) y los barcos cargan el botín.</p>
       <p>El combate dura hasta 6 asaltos: los dos bandos disparan a la vez y el daño se reparte entre los tipos de unidad. Los barcos sin ataque (mercantes, botes) solo caen si cae todo tu ejército.</p>
+      <p><b>Tropas de élite</b> ⭐ (espartanos, arqueros cretenses, catafractos, elefantes de guerra y liburnas): mucho más fuertes, pero además de comer cobran una <b>paga en oro</b> cada hora. Si el oro se acaba, desertan las que no puedas pagar. Se desbloquean con la investigación <b>Táctica militar</b> (y los elefantes con <b>Doma de elefantes</b>).</p>
       <p>La <b>muralla</b> da vida a los defensores y sus torres disparan; la <b>torre de vigía</b> añade arqueros. Las <b>catapultas</b> abren brecha en las fortificaciones enemigas. Usa el <b>simulador</b> 🎲 antes de atacar.</p>`,
   },
   {
@@ -122,7 +124,7 @@ const TOPICS = [
     icon: '⌨️',
     title: 'Cámara y atajos de teclado',
     body: `<p><b>M</b>: cambiar entre tu isla y el archipiélago · <b>Esc</b>: cerrar ventanas y paneles · <b>?</b>: esta guía.</p>
-      <p><b>1</b> misiones · <b>2</b> chat · <b>3</b> correo · <b>4</b> alianza · <b>5</b> clasificación · <b>6</b> mapa del mundo · <b>7</b> informes · <b>8</b> ejército.</p>
+      <p><b>1</b> misiones · <b>2</b> chat · <b>3</b> correo · <b>4</b> alianza · <b>5</b> clasificación · <b>6</b> mapa del mundo · <b>7</b> informes · <b>8</b> ejército · <b>9</b> amigos.</p>
       <p><b>Cámara</b>: arrastra para moverte, arrastra con el botón derecho (o Mayús) para girar y usa la rueda para acercarte hacia el ratón. Con el teclado: <b>WASD</b> o flechas para moverte, <b>Q</b>/<b>E</b> para girar, <b>+</b>/<b>−</b> para acercar y <b>C</b> para centrar. Doble clic en el suelo o el mar para ir allí. En el móvil, un dedo mueve y dos acercan y giran.</p>`,
   },
 ];

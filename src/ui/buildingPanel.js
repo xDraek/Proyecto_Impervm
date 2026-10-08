@@ -164,6 +164,7 @@ function unitStats(u, game) {
     parts.push(`👥 ${u.size} plazas`);
   }
   parts.push(`🥖 ${u.upkeep}/h`);
+  if (u.pay) parts.push(`<b class="pay" title="Paga en oro por hora: si no hay oro, desertan">🪙 ${fmtDec(u.pay)}/h</b>`);
   return parts.map((p) => `<span>${p}</span>`).join('');
 }
 
@@ -179,7 +180,7 @@ function unitCard(game, id) {
   }
   const input = `n-${id}`;
   return `<div class="card">
-    <div class="card-head">${unitArt(id)}<div class="card-title"><b>${u.name}</b> ${homeTag}
+    <div class="card-head">${unitArt(id)}<div class="card-title"><b>${u.name}</b>${u.elite ? ' <span class="elite-tag">⭐ Élite</span>' : ''} ${homeTag}
       <div class="card-sub">${u.description}</div></div></div>
     <div class="stats">${unitStats(u, game)}</div>
     <div class="card-row">${costList(u.cost, game.resources, input)}<span class="time">⏱ ${fmtTime(info.seconds)} c/u</span></div>

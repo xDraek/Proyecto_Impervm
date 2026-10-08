@@ -145,7 +145,79 @@ export class Batch {
 
 let sharedBatchMaterial = null;
 function batchMaterial() {
-  return (sharedBatchMaterial ??= new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 0.9 }));
+  return (sharedBatchMaterial ??= surfaceDetail(new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 0.9 }), 'batch'));
+}
+
+/**
+ * Detalle de superficie sin texturas, calculado en la GPU a partir de la posición en el mundo:
+ * veta en todo (piedra, madera, hierba), hiladas de sillares en los muros claros y filas de tejas
+ * en los tejados de terracota. Se desvanece con la distancia para que no parpadee.
+ * `kind` distingue el programa en la caché de three.js.
+ */
+export function surfaceDetail(material, kind, { masonry = true } = {}) {
+  material.onBeforeCompile = (shader) => {
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', '#include <common>\nvarying vec3 vDetailPos;')
+      .replace('#include <worldpos_vertex>', '#include <worldpos_vertex>\nvDetailPos = (modelMatrix * vec4(transformed, 1.0)).xyz;');
+    shader.fragmentShader = shader.fragmentShader
+      .replace(
+        '#include <common>',
+        /* glsl */ `#include <common>
+        varying vec3 vDetailPos;
+        float dHash(vec3 p) {
+          p = fract(p * 0.3183099 + 0.1);
+          p *= 17.0;
+          return fract(p.x * p.y * p.z * (p.x + p.y + p.z));
+        }
+        float dNoise(vec3 x) {
+          vec3 i = floor(x);
+          vec3 f = fract(x);
+          f = f * f * (3.0 - 2.0 * f);
+          return mix(mix(mix(dHash(i), dHash(i + vec3(1, 0, 0)), f.x), mix(dHash(i + vec3(0, 1, 0)), dHash(i + vec3(1, 1, 0)), f.x), f.y),
+                     mix(mix(dHash(i + vec3(0, 0, 1)), dHash(i + vec3(1, 0, 1)), f.x), mix(dHash(i + vec3(0, 1, 1)), dHash(i + vec3(1, 1, 1)), f.x), f.y), f.z);
+        }
+        // 0 sobre la línea y 1 fuera, con antialias; se borra cuando las líneas son más finas que un píxel
+        float dLine(float x, float w) {
+          float aa = fwidth(x);
+          float fx = fract(x);
+          float d = min(fx, 1.0 - fx);
+          return mix(smoothstep(w, w + aa * 1.5, d), 1.0, smoothstep(0.25, 0.6, aa));
+        }`,
+      )
+      .replace(
+        '#include <color_fragment>',
+        /* glsl */ `#include <color_fragment>
+        {
+          vec3 fn = normalize(cross(dFdx(vDetailPos), dFdy(vDetailPos)));
+          vec3 base = diffuseColor.rgb;
+          float lum = dot(base, vec3(0.299, 0.587, 0.114));
+          float near = 1.0 - smoothstep(45.0, 110.0, distance(cameraPosition, vDetailPos));
+          // Veta: dos escalas de ruido
+          float grain = dNoise(vDetailPos * 2.3) * 0.6 + dNoise(vDetailPos * 9.0) * 0.4;
+          float k = mix(1.0, 0.91 + 0.16 * grain, 0.35 + 0.65 * near);
+          vec2 side = normalize(vec2(-fn.z, fn.x) + 1e-5);
+          float u = dot(vDetailPos.xz, side);
+          bool terracotta = base.r > base.g * 1.3 && base.r > base.b * 1.55 && lum > 0.12;
+          #ifdef DETAIL_MASONRY
+          if (terracotta && fn.y > 0.15 && fn.y < 0.97) {
+            // Tejas: hiladas a lo largo del tejado y canales hacia abajo
+            float rows = dLine(vDetailPos.y * 9.0, 0.07);
+            float ribs = 0.9 + 0.1 * abs(fract(u * 6.0) - 0.5) * 2.0;
+            k *= mix(1.0, mix(0.8, 1.0, rows) * ribs, near);
+          } else if (abs(fn.y) < 0.35 && lum > 0.55) {
+            // Muros claros: sillares con juntas, cada hilada desplazada media pieza
+            float row = vDetailPos.y * 4.2;
+            float joints = dLine(row, 0.04) * dLine(u * 1.9 + floor(row) * 0.5, 0.03);
+            k *= mix(1.0, mix(0.86, 1.0, joints), near);
+          }
+          #endif
+          diffuseColor.rgb *= k;
+        }`,
+      );
+    if (masonry) shader.defines = { ...(shader.defines ?? {}), DETAIL_MASONRY: '' };
+  };
+  material.customProgramCacheKey = () => `imperium-detail-${kind}`;
+  return material;
 }
 
 const ANIMATED = ['spin', 'swing', 'wave', 'smoke', 'flicker', 'bob', 'wiggle', 'sparks'];

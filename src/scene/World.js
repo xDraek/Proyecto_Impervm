@@ -1,6 +1,10 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { CSS2DObject, CSS2DRenderer } from 'three/addons/renderers/CSS2DRenderer.js';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { BUILDINGS, BUILDING_KEYS, ISLAND_TYPES, LAND_UNITS, SHIP_UNITS } from '../game/data.js';
 import {
   C,
@@ -11,7 +15,13 @@ import {
   createShip,
   createSoldier,
   createVillager,
+  column,
   cyl,
+  cypress,
+  dome,
+  olive,
+  statue,
+  stylobate,
   WINDOW_GLOW,
   disposeTree,
   smokeColumn,
@@ -23,28 +33,38 @@ import {
   wallHeight,
   windowMaterial,
 } from './models.js';
-import { createIslandBase, createIslandFeature, islandLook, islandRadius, shoreRadius } from './islands.js';
+import { createIslandBase, createIslandFeature, islandExtent, islandLook, islandRadius, shoreRadius } from './islands.js';
 import { escapeHtml } from '../ui/format.js';
-import { Batch, bakeStatic, mountainGeometry, paintByNormal, plateauGeometry, polar, rng } from './util.js';
+import { Batch, bakeStatic, hashString, mountainGeometry, paintByNormal, plateauGeometry, polar, rng, surfaceDetail } from './util.js';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { createWater, setShores } from './water.js';
+import { coastFactor, coastMax, islandCoast, shapeGeometry } from './coast.js';
 import { clock } from '../config.js';
-import { setRain, thunder } from '../audio.js';
+import { setGulls, setRain, thunder } from '../audio.js';
 
 const HORIZON = '#cfe8f7';
 const WATER_Y = -0.7;
-const ISLAND_R = 25;
+const ISLAND_R = 32.5; // radio medio de la costa de tu isla (la forma real la da this.coast)
+const COAST_MIN = 27.5; // nunca menos: los edificios de fuera tienen que caber
 const BEACH_Y = -0.5;
-const ROAD_R = 11.2;
-const WALL_R = 12.6;
+const ROAD_R = 13.4;
+const WALL_R = 15.0;
 const GATE_ANGLE = 15;
-const HARBOR_R = 38; // radio por el que las flotas rodean la isla al salir
 const RAID_FROM = 280;
-const HOME_SHORE = 27.7; // donde la playa de tu isla corta el agua
+const TAU = Math.PI * 2;
+// Avenida del puerto: carriles para los carros en el centro y una acera a cada lado. Los carros dan
+// la vuelta junto a la plaza y junto a la playa; la gente, un poco antes, para no cruzarse nunca
+// con el círculo que barre un carro al girar.
+const AVENUE_W = 3.2;
+const AVENUE_IN = 6.2;
+const CART_TURN_R = 1.75;
+// Lo que tarda en virar en redondo un pesquero
+const BOAT_TURN = 3.2;
 
 // Ciclo de día y noche (un día dura 20 minutos reales)
 const DAY_MS = 20 * 60 * 1000;
 const SKIES = {
-  day: { top: '#4a9be0', horizon: '#cfe8f7', sun: '#fff3dc', sunI: 2.6, hemi: '#dff1ff', hemiI: 1.3 },
+  day: { top: '#4a93d6', horizon: '#c4dff0', sun: '#ffeed2', sunI: 2.15, hemi: '#d6e9f7', hemiI: 1.05 },
   dusk: { top: '#3d5b9c', horizon: '#f4b27c', sun: '#ffb070', sunI: 1.5, hemi: '#f0c8a8', hemiI: 0.95 },
   night: { top: '#0c1733', horizon: '#2b3d6b', sun: '#9fb6ff', sunI: 0.55, hemi: '#6b7fae', hemiI: 0.6 },
 };
@@ -52,39 +72,41 @@ const SKIES = {
 // Disposición de la isla. Ángulo 0 = hacia +Z (la cámara mira desde unos 36°).
 const LAYOUT = {
   ayuntamiento: { r: 0, angle: 0 },
-  academia: { r: 8, angle: 45 },
-  almacen: { r: 8, angle: 100 },
-  templo: { r: 8, angle: 155 },
-  cuartel: { r: 8, angle: 210 },
-  mercado: { r: 8, angle: 265 },
-  taberna: { r: 8, angle: 320 },
-  granja: { r: 18, angle: 60 },
-  aserradero: { r: 18, angle: 100 },
-  forja: { r: 18, angle: 140 },
-  cantera: { r: 18, angle: 178 },
-  mina: { r: 18, angle: 216 },
-  fundicion: { r: 18, angle: 254 },
-  torre: { r: 18, angle: 292 },
-  coloso: { r: 18, angle: 330, ring: 1.15 },
-  astillero: { r: 22.4, angle: 40, hit: 3.0 },
-  faro: { r: 23, angle: 352 },
-  muralla: { r: WALL_R, angle: GATE_ANGLE, hit: 1.8, ring: 0.7 },
-  puerto: { r: ISLAND_R + 1.4, angle: GATE_ANGLE, y: BEACH_Y, hit: 3.2, hitZ: -2.6 },
+  academia: { r: 9.6, angle: 45 },
+  almacen: { r: 9.6, angle: 100 },
+  templo: { r: 9.6, angle: 155 },
+  cuartel: { r: 9.6, angle: 210 },
+  mercado: { r: 9.6, angle: 265 },
+  taberna: { r: 9.6, angle: 320 },
+  granja: { r: 22, angle: 60 },
+  aserradero: { r: 22, angle: 100 },
+  forja: { r: 22, angle: 140 },
+  cantera: { r: 22, angle: 178 },
+  mina: { r: 22, angle: 216 },
+  fundicion: { r: 22, angle: 254 },
+  torre: { r: 22, angle: 292 },
+  coloso: { r: 22, angle: 330, ring: 1.15 },
+  // Los de la costa se colocan según la orilla real (#layoutFor)
+  astillero: { coast: -2.6, angle: 40, hit: 3.0 },
+  faro: { coast: -2.0, angle: 352 },
+  muralla: { r: WALL_R, angle: GATE_ANGLE, hit: 2.8, ring: 0.95 },
+  puerto: { coast: 1.4, angle: GATE_ANGLE, y: BEACH_Y, hit: 3.2, hitZ: -2.6 },
 };
 const INNER = ['academia', 'almacen', 'templo', 'cuartel', 'mercado', 'taberna'];
 const OUTER = ['granja', 'aserradero', 'forja', 'cantera', 'mina', 'fundicion', 'torre', 'coloso'];
 const COAST = ['astillero', 'faro'];
+// Montañas detrás de la cantera y la mina: a `inset` de la orilla
 const MOUNTAINS = [
-  { angle: 197, r: 22.6, radius: 4.2, height: 7.6 },
-  { angle: 176, r: 24.2, radius: 2.5, height: 4.4 },
-  { angle: 220, r: 24.2, radius: 2.4, height: 3.8 },
-  { angle: 236, r: 23.6, radius: 1.8, height: 2.8 },
+  { angle: 197, inset: 2.8, radius: 4.8, height: 8.6 },
+  { angle: 176, inset: 1.0, radius: 2.9, height: 5.0 },
+  { angle: 220, inset: 1.0, radius: 2.8, height: 4.4 },
+  { angle: 236, inset: 1.6, radius: 2.1, height: 3.2 },
 ];
 const VIEWS = {
-  isla: { offset: new THREE.Vector3(33, 34, 46), min: 16, max: 115 },
+  isla: { offset: new THREE.Vector3(44, 48, 64), min: 16, max: 150 },
   mapa: { offset: new THREE.Vector3(0, 420, 250), min: 60, max: 900 },
 };
-const SHIP_PRIORITY = ['dromon', 'galeon', 'trirreme', 'brulote', 'mercante', 'bote'];
+const SHIP_PRIORITY = ['dromon', 'galeon', 'liburna', 'trirreme', 'brulote', 'mercante', 'bote'];
 
 // Clima: cada media hora real cambia (igual para todos, sale de la hora)
 const WEATHER_MS = 30 * 60 * 1000;
@@ -140,6 +162,12 @@ export class World {
   constructor(container, game, { onSelect = () => {}, showcase = false } = {}) {
     this.container = container;
     this.game = game;
+    // Tu isla no es un círculo: su costa sale de su identificador (la ven igual los demás jugadores)
+    this.homeCoast = islandCoast(game.homeIsland ?? { id: 'escaparate', type: 'jugador' });
+    this.coastMaxR = ISLAND_R * coastMax(this.homeCoast);
+    this.harborR = this.coastMaxR + 9;
+    this.layout = this.#layoutFor();
+    this.mountains = MOUNTAINS.map((m) => ({ ...m, r: this.coast(m.angle) - m.inset }));
     this.onSelect = onSelect;
     this.showcase = showcase;
     this.slots = {};
@@ -186,6 +214,23 @@ export class World {
       this.controls.enablePan = false;
       for (const slot of Object.values(this.slots)) slot.label.visible = false;
     }
+  }
+
+  /** Radio de la costa de tu isla en la dirección `deg` (grados, 0 hacia +Z). */
+  coast(deg) {
+    return Math.max(COAST_MIN, ISLAND_R * coastFactor(this.homeCoast, THREE.MathUtils.degToRad(deg)));
+  }
+
+  /** La disposición de los edificios, con los de la costa puestos en la orilla real. */
+  #layoutFor() {
+    const out = {};
+    for (const [id, l] of Object.entries(LAYOUT)) out[id] = l.coast != null ? { ...l, r: this.coast(l.angle) + l.coast } : { ...l };
+    return out;
+  }
+
+  /** Lo que el agua necesita de la orilla de tu isla (para la espuma). */
+  #homeShore() {
+    return { x: 0, z: 0, r: ISLAND_R + 2.7, h: this.homeCoast };
   }
 
   /** Posición de una isla del mundo relativa a la tuya (tu isla está en el origen). */
@@ -241,7 +286,7 @@ export class World {
     r.shadowMap.type = THREE.PCFShadowMap;
     // Mapeo de tonos de cine: luces más suaves y colores con más cuerpo
     r.toneMapping = THREE.ACESFilmicToneMapping;
-    r.toneMappingExposure = 1.05;
+    r.toneMappingExposure = 1.0;
     this.container.appendChild(r.domElement);
     this.renderer = r;
 
@@ -282,6 +327,7 @@ export class World {
       if (!w || !h) return;
       r.setSize(w, h);
       this.labelRenderer.setSize(w, h);
+      this.composer?.setSize(w, h);
       this.camera.aspect = w / h;
       this.camera.updateProjectionMatrix();
     };
@@ -315,7 +361,7 @@ export class World {
     sun.position.set(26, 44, 20);
     sun.castShadow = true;
     sun.shadow.mapSize.set(2048, 2048);
-    Object.assign(sun.shadow.camera, { left: -36, right: 36, top: 36, bottom: -36, near: 1, far: 140 });
+    Object.assign(sun.shadow.camera, { left: -46, right: 46, top: 46, bottom: -46, near: 1, far: 170 });
     sun.shadow.bias = -0.0005;
     sun.shadow.normalBias = 0.03;
     sun.shadow.radius = 2.5; // bordes de sombra suaves
@@ -324,9 +370,40 @@ export class World {
     this.#updateSky(clock.now());
 
     // Mar estilizado: olas en la GPU, agua clara y espuma junto a cada orilla
-    this.water = createWater([{ x: 0, z: 0, r: HOME_SHORE }], WATER_Y);
+    this.water = createWater([this.#homeShore()], WATER_Y);
     this.waterTime = this.water.userData.uniforms.uTime;
     scene.add(this.water);
+  }
+
+  /**
+   * Calidad gráfica. Alta: resplandor en fuegos, ventanas y faros, bordes suaves (MSAA),
+   * sombras de más resolución y más píxeles. Baja: lo justo, para móviles y equipos modestos.
+   */
+  setQuality(high) {
+    this.high = !!high;
+    const r = this.renderer;
+    r.setPixelRatio(Math.min(window.devicePixelRatio, this.high ? 2 : 1.25));
+    const size = this.high ? 4096 : 2048;
+    if (this.sun.shadow.mapSize.x !== size) {
+      this.sun.shadow.mapSize.set(size, size);
+      this.sun.shadow.map?.dispose();
+      this.sun.shadow.map = null;
+    }
+    if (this.high && !this.composer) {
+      const { clientWidth: w, clientHeight: h } = this.container;
+      const target = new THREE.WebGLRenderTarget(w || 1, h || 1, { type: THREE.HalfFloatType, samples: 4 });
+      const composer = new EffectComposer(r, target);
+      composer.addPass(new RenderPass(this.scene, this.camera));
+      // Solo brilla lo que emite luz (fuegos, ventanas de noche, faros, chispas) y algún destello del sol
+      this.bloom = new UnrealBloomPass(new THREE.Vector2(w / 2 || 1, h / 2 || 1), 0.32, 0.45, 0.92);
+      composer.addPass(this.bloom);
+      composer.addPass(new OutputPass());
+      this.composer = composer;
+    }
+    if (this.composer) {
+      this.composer.setPixelRatio(r.getPixelRatio());
+      this.composer.setSize(this.container.clientWidth || 1, this.container.clientHeight || 1);
+    }
   }
 
   /** Activa o desactiva el ciclo de día y noche (si no, siempre es de día). */
@@ -380,14 +457,31 @@ export class World {
     const scene = this.scene;
 
     // Meseta de hierba con acantilados
-    const geo = plateauGeometry(ISLAND_R, ISLAND_R - 1.6, 2.2, 64, 0, 0);
+    // La misma forma que this.coast (con su mínimo), como factor sobre el radio medio
+    const shape = (theta) => this.coast(THREE.MathUtils.radToDeg(theta)) / ISLAND_R;
+    const geo = shapeGeometry(plateauGeometry(ISLAND_R, ISLAND_R - 1.6, 2.2, 96, 0, 0), shape);
+    // Junto a la avenida, el borde exacto (sin las irregularidades del acantilado): así la rampa
+    // baja justo hasta la playa y el puerto
+    const gatePos = geo.attributes.position;
+    const gateTheta = THREE.MathUtils.degToRad(GATE_ANGLE);
+    for (let i = 0; i < gatePos.count; i++) {
+      const x = gatePos.getX(i);
+      const z = gatePos.getZ(i);
+      const r = Math.hypot(x, z);
+      if (r < 1) continue;
+      const th = Math.atan2(x, z);
+      if (Math.abs(((th - gateTheta + 3 * Math.PI) % TAU) - Math.PI) * r > AVENUE_W / 2 + 3) continue;
+      const edge = shape(th) * (ISLAND_R - 1.6 * Math.min(1, -gatePos.getY(i) / 2.2));
+      gatePos.setXYZ(i, Math.sin(th) * edge, gatePos.getY(i), Math.cos(th) * edge);
+    }
+    geo.computeVertexNormals();
     paintByNormal(geo, (ny, cy) => (ny > 0.7 ? '#86ab4e' : cy > -0.8 ? '#a17f55' : '#8c8070'));
-    const island = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 1 }));
+    const island = new THREE.Mesh(geo, surfaceDetail(new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 1 }), 'ground', { masonry: false }));
     island.receiveShadow = true;
     island.castShadow = true;
     scene.add(island);
 
-    const sand = new THREE.Mesh(new THREE.CylinderGeometry(ISLAND_R + 2.5, ISLAND_R + 4.2, 1.6, 64), mat('#e8d49a'));
+    const sand = new THREE.Mesh(shapeGeometry(new THREE.CylinderGeometry(ISLAND_R + 2.5, ISLAND_R + 4.2, 1.6, 96).toNonIndexed(), shape), mat('#e8d49a'));
     sand.position.y = BEACH_Y - 0.8;
     sand.receiveShadow = true;
     scene.add(sand);
@@ -405,9 +499,11 @@ export class World {
       scene.add(path);
       this.roads.push({ deg, from, to, width });
     };
-    for (const id of INNER) road(LAYOUT[id].angle, 3.2, LAYOUT[id].r - 2.2);
-    for (const id of [...OUTER, ...COAST]) road(LAYOUT[id].angle, ROAD_R, LAYOUT[id].r - 2.2);
-    road(GATE_ANGLE, 3.2, ISLAND_R - 0.9, 1.3);
+    const L = this.layout;
+    const gateCoast = this.coast(GATE_ANGLE);
+    for (const id of INNER) road(L[id].angle, 3.2, L[id].r - 2.2);
+    for (const id of [...OUTER, ...COAST]) road(L[id].angle, ROAD_R, L[id].r - 2.2);
+    road(GATE_ANGLE, 3.2, gateCoast - 0.9, AVENUE_W);
     const ringGeo = new THREE.RingGeometry(ROAD_R - 0.45, ROAD_R + 0.45, 72);
     ringGeo.rotateX(-Math.PI / 2);
     const ring = new THREE.Mesh(ringGeo, mat('#c9b48a'));
@@ -416,14 +512,14 @@ export class World {
     scene.add(ring);
     // Rampa de la avenida hasta la playa
     const rampLen = 2.6;
-    const rampMid = polar(ISLAND_R - 0.9 + rampLen / 2 - 0.1, GATE_ANGLE, -0.22);
-    const ramp = box(1.3, 0.08, rampLen, '#c9b48a', 0, 0, 0);
+    const rampMid = polar(gateCoast - 0.9 + rampLen / 2 - 0.1, GATE_ANGLE, -0.22);
+    const ramp = box(AVENUE_W, 0.08, rampLen, '#c9b48a', 0, 0, 0);
     ramp.position.copy(rampMid);
     ramp.rotation.set(Math.atan2(0.5, rampLen), THREE.MathUtils.degToRad(GATE_ANGLE), 0, 'YXZ');
     scene.add(ramp);
 
     // Montañas detrás de la cantera y la mina
-    for (const m of MOUNTAINS) {
+    for (const m of this.mountains) {
       const mountain = new THREE.Mesh(
         mountainGeometry(m.radius, m.height, m.angle, { snow: '#f4f6f8', grass: '#7d9a52', rock: '#8c8780' }),
         new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 1 }),
@@ -437,22 +533,46 @@ export class World {
     const rand = rng(7);
     const blockers = [
       { p: new THREE.Vector3(), r: 4.2 },
-      ...Object.entries(LAYOUT)
+      ...Object.entries(L)
         .filter(([id]) => id !== 'ayuntamiento' && id !== 'puerto' && id !== 'muralla')
-        .map(([, l]) => ({ p: polar(l.r, l.angle), r: 3.6 })),
-      ...MOUNTAINS.map((m) => ({ p: polar(m.r, m.angle), r: m.radius + 0.6 })),
+        .map(([, l]) => ({ p: polar(l.r, l.angle), r: 2.8 })),
+      ...this.mountains.map((m) => ({ p: polar(m.r, m.angle), r: m.radius + 0.6 })),
     ];
-    const free = (p, pad = 0.7) => {
+    const coastAt = (p) => this.coast(THREE.MathUtils.radToDeg(Math.atan2(p.x, p.z)));
+    // Un punto al azar en tierra, entre `from` del centro y `margin` antes de la orilla (repartido por área)
+    const inland = (from, margin) => {
+      const deg = rand() * 360;
+      const to = this.coast(deg) - margin;
+      return polar(from + Math.sqrt(rand()) * Math.max(0, to - from), deg);
+    };
+    /**
+     * ¿Cabe aquí algo de radio `size`? Lejos de la orilla, la muralla, las calles (`pad` de margen)
+     * y de lo que ya hay. Los árboles son «blandos»: se pueden tocar entre ellos y con las matas.
+     */
+    const free = (p, pad = 0.7, size = 0) => {
       const r = Math.hypot(p.x, p.z);
-      if (r > ISLAND_R - 1.3) return false;
-      if (r > ROAD_R - 1.0 && r < WALL_R + 0.9) return false;
+      if (r + size > coastAt(p) - 1.3) return false;
+      if (r + size > ROAD_R - 1.0 && r - size < WALL_R + 0.9) return false;
       for (const rd of this.roads) {
         const a = THREE.MathUtils.degToRad(rd.deg);
         const along = p.x * Math.sin(a) + p.z * Math.cos(a);
         const across = Math.abs(p.x * Math.cos(a) - p.z * Math.sin(a));
-        if (along > rd.from - 0.5 && along < rd.to + 0.5 && across < rd.width / 2 + pad) return false;
+        if (along > rd.from - 0.5 - size && along < rd.to + 0.5 + size && across < rd.width / 2 + pad + size) return false;
       }
-      return blockers.every((b) => b.p.distanceTo(p) > b.r);
+      return blockers.every((b) => b.p.distanceTo(p) > b.r + (b.soft ? 0 : size));
+    };
+    // La hierba crece en todo lo que no sea edificio, calle, muralla o montaña (también bajo los árboles)
+    const fixed = blockers.slice();
+    const lawn = (p) => {
+      const r = Math.hypot(p.x, p.z);
+      if (r > coastAt(p) - 0.9 || (r > ROAD_R - 0.9 && r < WALL_R + 0.8)) return false;
+      for (const rd of this.roads) {
+        const a = THREE.MathUtils.degToRad(rd.deg);
+        const along = p.x * Math.sin(a) + p.z * Math.cos(a);
+        const across = Math.abs(p.x * Math.cos(a) - p.z * Math.sin(a));
+        if (along > rd.from - 0.3 && along < rd.to + 0.3 && across < rd.width / 2 + 0.12) return false;
+      }
+      return fixed.every((b) => b.p.distanceTo(p) > b.r * 0.9);
     };
     // Todo lo que no se mueve va junto en una sola malla: se pueden poner muchos más detalles
     const decor = new Batch(windowMaterial());
@@ -464,23 +584,18 @@ export class World {
     };
 
     // Campos de cultivo y un prado con ovejas junto a la granja
-    const farm = LAYOUT.granja;
+    const farm = L.granja;
     const crops = ['#e3c25a', '#cfb24a', '#8fbf4a', '#d9b44a'];
     for (let ring = 0; ring < 3; ring++) {
       for (let k = -2; k <= 2; k++) {
         const p = polar(farm.r + 3.2 + ring * 1.8, farm.angle + k * 9);
-        if (!free(p, 0.4)) continue;
+        if (!free(p, 0.4, 0.8)) continue;
         blockers.push({ p, r: 1.0 });
         const field = new THREE.Group();
         field.add(box(1.6, 0.1, 1.25, '#8a6a46'));
         for (let row = 0; row < 4; row++) field.add(box(1.5, 0.12, 0.18, crops[(ring + k + 9) % 4], 0, 0.1, -0.45 + row * 0.3));
         place(field, p, THREE.MathUtils.degToRad(farm.angle + k * 9));
       }
-    }
-    for (let i = 0; i < 7; i++) {
-      const p = polar(farm.r + 2.2 + rand() * 4, farm.angle + 28 + rand() * 14);
-      if (!free(p, 0.3)) continue;
-      place(sheep(), p, rand() * Math.PI * 2, 0.9 + rand() * 0.3);
     }
 
     // Barrios: las casas van apareciendo al subir el ayuntamiento (primero dentro de la muralla)
@@ -489,9 +604,9 @@ export class World {
       const inside = tries % 3 !== 2;
       const p = inside
         ? polar(4.7 + rand() * (ROAD_R - 6.0), rand() * 360)
-        : polar(WALL_R + 1.4 + rand() * (ISLAND_R - WALL_R - 3.2), rand() * 360);
-      if (!free(p, 0.75)) continue;
-      blockers.push({ p, r: 1.3 });
+        : inland(WALL_R + 1.4, 3.2);
+      if (!free(p, 0.75, 0.95)) continue;
+      blockers.push({ p, r: 1.0 });
       this.houseSpots.push({
         p,
         inside,
@@ -508,34 +623,134 @@ export class World {
     this.houseGroup = new THREE.Group();
     scene.add(this.houseGroup);
 
+    // El rebaño, en el prado de la granja (donde no hay casas ni campos)
+    for (let i = 0; i < 13; i++) {
+      const p = polar(farm.r + 2.2 + rand() * 4.5, farm.angle + 22 + rand() * 22);
+      if (!free(p, 0.3, 0.35)) continue;
+      blockers.push({ p, r: 0.35 });
+      place(sheep(), p, rand() * Math.PI * 2, 0.9 + rand() * 0.3);
+    }
+
     // Pebeteros de mármol a los lados de la avenida del puerto (arden de noche)
     const gate = THREE.MathUtils.degToRad(GATE_ANGLE);
-    for (let d = 4.6; d < ISLAND_R - 1.5; d += 3.1) {
-      if (Math.abs(d - WALL_R) < 1.4) continue;
+    for (let d = AVENUE_IN + 0.8; d < gateCoast - 3.4; d += 3.1) {
+      if (Math.abs(d - WALL_R) < 1.4 || Math.abs(d - ROAD_R) < 1.2) continue;
       for (const side of [-1, 1]) {
-        const p = new THREE.Vector3(Math.sin(gate) * d + Math.cos(gate) * side * 1.05, 0, Math.cos(gate) * d - Math.sin(gate) * side * 1.05);
+        const p = new THREE.Vector3(Math.sin(gate) * d + Math.cos(gate) * side * 2.05, 0, Math.cos(gate) * d - Math.sin(gate) * side * 2.05);
         const lamp = new THREE.Group();
         lamp.add(box(0.26, 0.12, 0.26, C.marbleDark), cyl(0.07, 0.09, 1.2, 8, C.marble, 0, 0.12, 0), box(0.2, 0.06, 0.2, C.marble, 0, 1.32, 0));
         lamp.add(cyl(0.2, 0.09, 0.16, 8, '#8a6a3a', 0, 1.38, 0, { metalness: 0.5, roughness: 0.45 }), cyl(0.15, 0.15, 0.04, 8, C.dark, 0, 1.52, 0, WINDOW_GLOW));
         place(lamp, p);
+        blockers.push({ p, r: 0.3 });
       }
     }
 
+    // ── Campiña: avenida de cipreses, estatuas en la puerta, viñedo, olivar y santuarios ──
+    const reserve = (p, r) => {
+      blockers.push({ p, r });
+      fixed.push({ p, r });
+    };
+    const gateRad = THREE.MathUtils.degToRad(GATE_ANGLE);
+    const onAvenue = (d, side) => new THREE.Vector3(Math.sin(gateRad) * d + Math.cos(gateRad) * side, 0, Math.cos(gateRad) * d - Math.sin(gateRad) * side);
+    for (let d = WALL_R + 3.2; d < gateCoast - 2; d += 2.3) {
+      for (const side of [-2.95, 2.95]) {
+        const p = onAvenue(d, side);
+        if (!free(p, 0, 0.45)) continue;
+        place(cypress('#2f5e34'), p, 0, 0.5 + rand() * 0.12);
+        reserve(p, 0.45);
+      }
+    }
+    for (const side of [-3.15, 3.15]) {
+      const p = onAvenue(WALL_R + 1.5, side);
+      if (!free(p, 0, 0.4)) continue;
+      place(statue(0, 0, C.marble, 0.95), p, gateRad + Math.PI);
+      reserve(p, 0.4);
+    }
+    // Un círculo libre de radio `r` fuera de la muralla, sin casas, campos ni calles dentro (o null)
+    const patch = (r) => {
+      for (let i = 0; i < 200; i++) {
+        const p = inland(WALL_R + 2 + r, r + 1.2);
+        if (free(p, 0.2, r)) return p;
+      }
+      return null;
+    };
+    // Viñedo: hileras de cepas con racimos
+    const vineyard = patch(4.6);
+    if (vineyard) {
+      const g = new THREE.Group();
+      for (let row = 0; row < 5; row++) {
+        const z = -2 + row;
+        g.add(box(6.3, 0.03, 0.04, '#8a6a3a', 0, 0.48, z));
+        for (let k = 0; k < 7; k++) {
+          const x = -3 + k;
+          g.add(box(0.05, 0.55, 0.05, C.woodDark, x, 0, z));
+          const leaf = mesh(new THREE.DodecahedronGeometry(0.27), k % 2 ? '#5f8f3a' : '#6f9f45');
+          leaf.position.set(x + 0.5, 0.5, z);
+          leaf.scale.set(1.4, 0.7, 0.8);
+          g.add(leaf);
+          if ((k + row) % 2 === 0) {
+            const grapes = mesh(new THREE.SphereGeometry(0.08, 5, 4), '#5a2a6a');
+            grapes.position.set(x + 0.6, 0.34, z + 0.12);
+            g.add(grapes);
+          }
+        }
+      }
+      place(g, vineyard, rand() * Math.PI);
+      reserve(vineyard, 4.6);
+    }
+    // Olivar: hileras de olivos
+    const grove = patch(5.6);
+    if (grove) {
+      const g = new THREE.Group();
+      for (let i = 0; i < 4; i++) {
+        for (let k = 0; k < 4; k++) {
+          const t = olive(i % 2 ? '#829a5c' : '#76925a');
+          t.position.set(-3 + i * 2 + (rand() - 0.5) * 0.4, 0, -3 + k * 2 + (rand() - 0.5) * 0.4);
+          t.scale.setScalar(0.85 + rand() * 0.3);
+          t.rotation.y = rand() * Math.PI;
+          g.add(t);
+        }
+      }
+      place(g, grove, rand() * Math.PI);
+      reserve(grove, 5.6);
+    }
+    // Santuarios: un templete redondo de columnas con su estatua
+    for (let k = 0; k < 2; k++) {
+      const spot = patch(2.6);
+      if (!spot) continue;
+      const g = new THREE.Group();
+      const y0 = stylobate(g, 3.2, 3.2, 3, 0, 0, 0.12);
+      for (let a = 0; a < 6; a++) {
+        const ang = (a / 6) * Math.PI * 2;
+        g.add(column(Math.sin(ang) * 1.1, y0, Math.cos(ang) * 1.1, 1.4, 0.09));
+      }
+      g.add(cyl(1.35, 1.35, 0.12, 12, C.marbleDark, 0, y0 + 1.4, 0));
+      g.add(dome(1.05, k ? C.roofBlue : C.roofRed, 0, y0 + 1.52, 0, 0.15));
+      g.add(statue(0, 0, C.marble, 0.7));
+      place(g, spot, rand() * Math.PI);
+      reserve(spot, 2.6);
+    }
+
     // Arboleda mediterránea (más densa junto al aserradero): olivos, cipreses y pinos piñoneros
-    const forest = polar(ISLAND_R - 3.5, LAYOUT.aserradero.angle + 8);
+    const forest = polar(this.coast(L.aserradero.angle + 8) - 3.5, L.aserradero.angle + 8);
     let trees = 0;
     for (let tries = 0; tries < 2600 && trees < 190; tries++) {
-      const p = tries % 3 === 0 ? forest.clone().add(polar(rand() * 7, rand() * 360)) : polar(3.5 + rand() * (ISLAND_R - 4), rand() * 360);
-      if (!free(p)) continue;
-      blockers.push({ p, r: 0.85 });
-      place(mediterraneanTree(rand()), p, rand() * Math.PI, 0.7 + rand() * 0.6);
+      const p = tries % 3 === 0 ? forest.clone().add(polar(rand() * 7, rand() * 360)) : inland(3.5, 1);
+      // Lo que abre su copa: el pino piñonero mucho más que el olivo o el ciprés
+      const kind = rand();
+      const scale = 0.7 + rand() * 0.45;
+      const crown = (kind >= 0.75 ? 1.3 : kind >= 0.4 ? 0.5 : 0.8) * scale;
+      if (!free(p, 0.7, crown + 0.2)) continue;
+      blockers.push({ p, r: crown, soft: true });
+      place(mediterraneanTree(kind), p, rand() * Math.PI, scale);
       trees++;
     }
     // Arbustos y flores
     const flowers = ['#e86a8a', '#f2c94c', '#ffffff', '#b07ad9', '#f08fb0'];
     for (let i = 0, placed = 0; i < 900 && placed < 90; i++) {
-      const p = polar(3 + rand() * (ISLAND_R - 3.5), rand() * 360);
-      if (!free(p, 0.3)) continue;
+      const p = inland(3, 0.5);
+      if (!free(p, 0.3, 0.45)) continue;
+      blockers.push({ p, r: 0.4, soft: true });
       placed++;
       const bush = new THREE.Group();
       bush.add(mesh(new THREE.DodecahedronGeometry(0.32), placed % 3 ? '#6b8f45' : '#5a7f3a'));
@@ -543,11 +758,14 @@ export class World {
       if (placed % 2) for (let k = 0; k < 3; k++) bush.add(box(0.1, 0.1, 0.1, flowers[(placed + k) % 5], Math.sin(k * 2.1) * 0.25, 0.3, Math.cos(k * 2.1) * 0.25));
       place(bush, p, 0, 0.7 + rand() * 0.6);
     }
+    // Hierba y flores por todos los prados (con su propio azar para no mover lo demás)
+    this.#buildGrass(lawn);
     // Rocas
     const rockGeo = new THREE.DodecahedronGeometry(0.4);
     for (let i = 0, placed = 0; i < 600 && placed < 34; i++) {
-      const p = polar(4 + rand() * (ISLAND_R - 5), rand() * 360);
-      if (!free(p)) continue;
+      const p = inland(4, 1);
+      if (!free(p, 0.7, 0.6)) continue;
+      blockers.push({ p, r: 0.6, soft: true });
       const rock = new THREE.Mesh(rockGeo, mat(placed % 3 ? C.stone : C.stoneDark));
       rock.position.set(p.x, 0.1, p.z);
       rock.scale.set(0.6 + rand(), 0.5 + rand() * 0.5, 0.6 + rand());
@@ -555,27 +773,11 @@ export class World {
       placed++;
     }
 
-    // La playa: palmeras, barcas varadas, redes y cabañas de pescadores
-    const busy = [GATE_ANGLE, LAYOUT.astillero.angle, LAYOUT.faro.angle];
+    // La playa: barcas varadas, redes, cabañas y embarcaderos; luego palmeras donde quede sitio
+    const onBeach = [];
+    const onSand = (p, r) => onBeach.push({ p, r });
+    const busy = [GATE_ANGLE, L.astillero.angle, L.faro.angle];
     const nearBusy = (a, w) => busy.some((b) => Math.abs(((a - b + 540) % 360) - 180) < w);
-    for (let i = 0; i < 34; i++) {
-      const a = rand() * 360;
-      if (nearBusy(a, 12)) continue;
-      place(palm(), polar(ISLAND_R + 1.3 + rand() * 1.6, a, BEACH_Y), rand() * Math.PI, 0.9 + rand() * 0.5);
-    }
-    for (let i = 0; i < 5; i++) {
-      const a = 40 + i * 62 + rand() * 20;
-      if (nearBusy(a, 16)) continue;
-      const boat = createShip('bote');
-      boat.rotation.set(0.05, THREE.MathUtils.degToRad(a) + Math.PI / 2, 0.25);
-      boat.position.copy(polar(ISLAND_R + 2.4, a, BEACH_Y + 0.08));
-      boat.scale.setScalar(1.7);
-      decor.add(boat);
-      // Red tendida a secar
-      const net = new THREE.Group();
-      net.add(box(0.06, 0.8, 0.06, C.woodDark, -0.6, 0, 0), box(0.06, 0.8, 0.06, C.woodDark, 0.6, 0, 0), box(1.2, 0.5, 0.03, '#c9b48a', 0, 0.25, 0));
-      place(net, polar(ISLAND_R + 1.4, a + 6, BEACH_Y), THREE.MathUtils.degToRad(a));
-    }
     for (const a of [GATE_ANGLE + 52, GATE_ANGLE + 200, GATE_ANGLE + 255]) {
       if (nearBusy(a, 14)) continue;
       const hut = new THREE.Group();
@@ -583,7 +785,50 @@ export class World {
       hut.add(gableRoof(1.6, 0.6, 1.3, '#9c7a4a', 0, 0.9, 0));
       hut.add(box(0.35, 0.55, 0.05, C.woodDark, 0, 0, 0.56));
       for (const x of [-0.5, 0.5]) hut.add(cyl(0.06, 0.06, 1.0, 5, C.woodDark, x, -0.6, -0.6));
-      place(hut, polar(ISLAND_R + 1.9, a, BEACH_Y), THREE.MathUtils.degToRad(a) + Math.PI);
+      const hp = polar(this.coast(a) + 1.9, a, BEACH_Y);
+      place(hut, hp, THREE.MathUtils.degToRad(a) + Math.PI);
+      onSand(hp, 1.3);
+    }
+    // Embarcaderos de pesca con su barca amarrada
+    for (const a of [GATE_ANGLE + 128, GATE_ANGLE + 300]) {
+      if (nearBusy(a, 16)) continue;
+      const g = new THREE.Group();
+      g.add(box(1.0, 0.1, 4.8, C.woodLight, 0, 0.05, 2.4));
+      for (let z = 0.4; z < 4.8; z += 1.1) for (const x of [-0.45, 0.45]) g.add(cyl(0.06, 0.06, 1.6, 5, C.woodDark, x, -1.45, z));
+      const boat = createShip('bote');
+      boat.scale.setScalar(1.6);
+      boat.position.set(1.35, -0.25, 3.3);
+      g.add(boat);
+      g.add(cyl(0.18, 0.18, 0.4, 8, C.woodLight, -0.25, 0.15, 4.2), box(0.35, 0.3, 0.35, '#c9b48a', 0.2, 0.15, 3.9));
+      place(g, polar(this.coast(a) + 1.0, a, BEACH_Y + 0.12), THREE.MathUtils.degToRad(a));
+      for (let d = 0.5; d < 6; d += 1.2) onSand(polar(this.coast(a) + 1.0 + d, a, BEACH_Y), 1.6);
+    }
+    // Barcas varadas con su red tendida a secar
+    for (let i = 0; i < 5; i++) {
+      const a = 40 + i * 62 + rand() * 20;
+      const bp = polar(this.coast(a) + 2.4, a, BEACH_Y + 0.08);
+      const np = polar(this.coast(a + 6) + 1.4, a + 6, BEACH_Y);
+      if (nearBusy(a, 16) || onBeach.some((b) => b.p.distanceTo(bp) < b.r + 2.0 || b.p.distanceTo(np) < b.r + 0.9)) continue;
+      const boat = createShip('bote');
+      boat.rotation.set(0.05, THREE.MathUtils.degToRad(a) + Math.PI / 2, 0.25);
+      boat.position.copy(bp);
+      boat.scale.setScalar(1.7);
+      decor.add(boat);
+      onSand(boat.position, 2.0);
+      // Red tendida a secar
+      const net = new THREE.Group();
+      net.add(box(0.06, 0.8, 0.06, C.woodDark, -0.6, 0, 0), box(0.06, 0.8, 0.06, C.woodDark, 0.6, 0, 0), box(1.2, 0.5, 0.03, '#c9b48a', 0, 0.25, 0));
+      place(net, np, THREE.MathUtils.degToRad(a));
+      onSand(np, 0.9);
+    }
+    // Palmeras: ni encima de una barca o cabaña ni pegadas unas a otras
+    for (let i = 0; i < 34; i++) {
+      const a = rand() * 360;
+      if (nearBusy(a, 12)) continue;
+      const p = polar(this.coast(a) + 1.3 + rand() * 1.6, a, BEACH_Y);
+      if (onBeach.some((b) => b.p.distanceTo(p) < b.r + 1.1)) continue;
+      place(palm(), p, rand() * Math.PI, 0.9 + rand() * 0.5);
+      onSand(p, 0.6);
     }
     scene.add(decor.build());
 
@@ -596,7 +841,7 @@ export class World {
     this.hitTargets = [];
 
     for (const id of BUILDING_KEYS) {
-      const l = LAYOUT[id];
+      const l = this.layout[id];
       const pos = polar(l.r, l.angle, l.y ?? 0);
       const root = new THREE.Group();
       root.position.copy(pos);
@@ -639,6 +884,35 @@ export class World {
     this.scene.add(this.hoverRing);
   }
 
+  /**
+   * Cuánto puede crecer cada isla del mapa (las neutrales hasta un 30 %, los continentes un 15 %)
+   * sin pisar a ninguna vecina: si dos se acercarían demasiado, se reparten el hueco según su
+   * tamaño; tu isla y las de los demás jugadores no cambian de tamaño. Entre isla e isla queda
+   * siempre un canal por el que pasan los barcos, y alrededor de la tuya, un anillo de mar libre.
+   */
+  #growths(visible) {
+    const items = visible
+      .filter((isl) => !isl.land && isl.type !== 'brumas')
+      .map((isl) => {
+        const fixed = isl.type === 'jugador';
+        const want = fixed ? 1 : isl.type === 'continente' ? 1.15 : 1.3;
+        return { id: isl.id, pos: this.#relPos(isl), want, g: want, fixed, ext: islandExtent({ ...isl, grow: want }) };
+      });
+    items.push({ id: '', pos: new THREE.Vector3(), want: 1, g: 1, fixed: true, ext: this.coastMaxR + 13 });
+    const GAP = 5;
+    for (const a of items) {
+      if (a.fixed) continue;
+      for (const b of items) {
+        if (a === b) continue;
+        const d = a.pos.distanceTo(b.pos);
+        if (a.ext + b.ext + GAP <= d) continue;
+        const room = b.fixed ? d - GAP - b.ext : ((d - GAP) * a.ext) / (a.ext + b.ext);
+        a.g = Math.min(a.g, (a.want * room) / a.ext);
+      }
+    }
+    return new Map(items.map((x) => [x.id, Math.max(0.8, Math.floor(x.g * 50) / 50)]));
+  }
+
   /** Crea las islas que acaban de aparecer en tu mapa y quita las que ya no están. */
   #syncArchipelago() {
     const hitMat = (this.hitMat ??= new THREE.MeshBasicMaterial({ colorWrite: false, depthWrite: false }));
@@ -652,8 +926,19 @@ export class World {
       this.hitTargets = this.hitTargets.filter((h) => h !== entry.hit);
       delete this.islands[id];
     }
-    for (const isl of visible) {
-      if (this.islands[isl.id]) continue;
+    // Cada isla crece todo lo que le deja el sitio hasta sus vecinas (si cambia, se rehace)
+    const grows = this.#growths(visible);
+    for (const raw of visible) {
+      const grow = grows.get(raw.id) ?? 1;
+      const old = this.islands[raw.id];
+      if (old && Math.abs(old.isl.grow - grow) < 0.02) continue;
+      if (old) {
+        this.scene.remove(old.group, old.label);
+        disposeTree(old.group);
+        this.hitTargets = this.hitTargets.filter((h) => h !== old.hit);
+        delete this.islands[raw.id];
+      }
+      const isl = { ...raw, grow };
       const pos = this.#relPos(isl);
       const radius = islandRadius(isl);
       const group = new THREE.Group();
@@ -682,12 +967,89 @@ export class World {
       this.islands[isl.id] = { isl, pos, radius, group, hit, feature: null, look: null, label, el };
     }
     this.mapRadius = Math.max(120, ...Object.values(this.islands).map((e) => e.pos.length() + e.radius));
+    // Lo que ocupa cada isla en el mar: las flotas las rodean y los pesqueros no las atraviesan
+    this.islandObstacles = Object.values(this.islands)
+      .map((e) => ({ id: e.isl.id, p: e.pos, core: islandExtent(e.isl), r: islandExtent(e.isl) + 3 }))
+      .filter((o) => o.core > 0);
     // Espuma en las orillas más cercanas (el mar admite un número limitado)
     const shores = Object.values(this.islands)
-      .map((e) => ({ x: e.pos.x, z: e.pos.z, r: shoreRadius(e.isl), d: e.pos.length() }))
+      .map((e) => ({ x: e.pos.x, z: e.pos.z, r: shoreRadius(e.isl), h: islandCoast(e.isl), d: e.pos.length() }))
       .filter((e) => e.r > 0)
       .sort((a, b) => a.d - b.d);
-    setShores(this.water, [{ x: 0, z: 0, r: HOME_SHORE }, ...shores]);
+    setShores(this.water, [this.#homeShore(), ...shores]);
+  }
+
+  /**
+   * Miles de matas de hierba que se mecen con el viento y flores sueltas, en dos mallas
+   * instanciadas (dos llamadas de dibujo para todo).
+   */
+  #buildGrass(free) {
+    const rand = rng(321);
+    const blade = new THREE.ConeGeometry(0.045, 0.36, 3);
+    blade.translate(0, 0.18, 0);
+    const parts = [];
+    for (let k = 0; k < 3; k++) {
+      const g = blade.clone();
+      g.rotateZ(0.28);
+      g.rotateY((k * Math.PI * 2) / 3 + 0.4);
+      parts.push(g);
+    }
+    const tuft = mergeGeometries(parts);
+    const wind = this.waterTime;
+    const sway = (material, key, height) => {
+      material.onBeforeCompile = (shader) => {
+        shader.uniforms.uTime = wind;
+        shader.vertexShader = 'uniform float uTime;\n' + shader.vertexShader.replace(
+          '#include <begin_vertex>',
+          `#include <begin_vertex>
+          vec4 root = instanceMatrix * vec4(0.0, 0.0, 0.0, 1.0);
+          float bend = sin(uTime * 1.7 + root.x * 0.6 + root.z * 0.45) * 0.09 + sin(uTime * 3.1 + root.z) * 0.03;
+          float tip = clamp(position.y / ${height}, 0.0, 1.0);
+          transformed.x += bend * tip;
+          transformed.z += bend * tip * 0.6;`,
+        );
+      };
+      material.customProgramCacheKey = () => key;
+      return material;
+    };
+    const greens = ['#7fa84a', '#6d9a40', '#8fb456', '#9db55a', '#a7b65e', '#5f8f3a'];
+    const flowers = ['#f2f0e6', '#f08fb0', '#f2c94c', '#b07ad9', '#e86a5a'];
+    const dummy = new THREE.Object3D();
+    const color = new THREE.Color();
+    const spots = [];
+    for (let i = 0; i < 24000 && spots.length < 7000; i++) {
+      const deg = rand() * 360;
+      const p = polar(2.5 + Math.sqrt(rand()) * (this.coast(deg) - 3), deg);
+      if (free(p)) spots.push(p);
+    }
+    const grass = new THREE.InstancedMesh(tuft, sway(new THREE.MeshStandardMaterial({ roughness: 1, flatShading: true }), 'imperium-grass', '0.36'), spots.length);
+    spots.forEach((p, i) => {
+      dummy.position.set(p.x, 0.02, p.z);
+      dummy.rotation.set(0, rand() * Math.PI * 2, 0);
+      dummy.scale.setScalar(0.9 + rand() * 0.9);
+      dummy.updateMatrix();
+      grass.setMatrixAt(i, dummy.matrix);
+      grass.setColorAt(i, color.set(greens[Math.floor(rand() * greens.length)]));
+    });
+    grass.receiveShadow = true;
+    this.scene.add(grass);
+
+    const petal = new THREE.IcosahedronGeometry(0.06, 0);
+    petal.translate(0, 0.24, 0);
+    const stem = new THREE.CylinderGeometry(0.008, 0.008, 0.24, 3);
+    stem.translate(0, 0.12, 0);
+    const flowerGeo = mergeGeometries([petal.toNonIndexed(), stem.toNonIndexed()]);
+    const blooms = spots.filter(() => rand() < 0.12);
+    const field = new THREE.InstancedMesh(flowerGeo, sway(new THREE.MeshStandardMaterial({ roughness: 0.8, flatShading: true }), 'imperium-flowers', '0.3'), blooms.length);
+    blooms.forEach((p, i) => {
+      dummy.position.set(p.x + 0.15, 0.02, p.z - 0.1);
+      dummy.rotation.set(0, 0, 0);
+      dummy.scale.setScalar(0.8 + rand() * 0.6);
+      dummy.updateMatrix();
+      field.setMatrixAt(i, dummy.matrix);
+      field.setColorAt(i, color.set(flowers[Math.floor(rand() * flowers.length)]));
+    });
+    this.scene.add(field);
   }
 
   #buildHomeLabel() {
@@ -695,7 +1057,7 @@ export class World {
     el.className = 'label isl home';
     el.innerHTML = `<span class="label-name">${this.game.state.banner?.emblem ?? '⚜'} ${escapeHtml(this.game.homeIsland?.name ?? 'Tu isla')}</span>`;
     this.homeLabel = new CSS2DObject(el);
-    this.homeLabel.position.set(0, 0, ISLAND_R + 9);
+    this.homeLabel.position.set(0, 0, this.coast(0) + 9);
     this.homeLabel.visible = false;
     this.scene.add(this.homeLabel);
   }
@@ -728,16 +1090,17 @@ export class World {
     this.lifeGroup = new THREE.Group();
     this.scene.add(this.lifeGroup);
     const rand = rng(99);
-    // Pesqueros que faenan alrededor de la isla
-    for (let i = 0; i < 4; i++) {
-      const boat = createShip(i === 3 ? 'mercante' : 'bote');
-      boat.scale.setScalar(i === 3 ? 2.2 : 2.4);
-      boat.userData.sail = { r: ISLAND_R + 9 + rand() * 12, speed: (2 + rand() * 1.5) * (i % 2 ? 1 : -1), phase: rand() * Math.PI * 2 };
+    // Pesqueros que faenan alrededor de la isla, cada uno por su círculo (así nunca se cruzan entre ellos)
+    for (let i = 0; i < 5; i++) {
+      const merchant = i % 3 === 0;
+      const boat = createShip(merchant ? 'mercante' : 'bote');
+      boat.scale.setScalar(merchant ? 2.2 : 2.4);
+      boat.userData.sail = { r: this.coastMaxR + 6.5 + i * 3.6, a: rand() * TAU, dir: i % 2 ? 1 : -1, speed: 2 + rand() * 1.5, turn: 0, size: merchant ? 2.6 : 1.5 };
       this.lifeGroup.add(boat);
       this.boats.push(boat);
     }
     // Delfines que saltan de vez en cuando
-    for (let i = 0; i < 3; i++) {
+    for (let i = 0; i < 4; i++) {
       const d = dolphin();
       d.visible = false;
       d.userData.jump = { next: 2 + rand() * 6 + i * 3, t: -1 };
@@ -745,9 +1108,9 @@ export class World {
       this.dolphins.push(d);
     }
     // Carros de bueyes por la avenida del puerto
-    for (let i = 0; i < 2; i++) {
+    for (let i = 0; i < 4; i++) {
       const c = cart();
-      c.userData.walk = { avenue: true, s: 6 + i * 9, dir: i ? -1 : 1, speed: 0.6, lane: i ? 0.35 : -0.35 };
+      c.userData.walk = { avenue: true, cart: true, s: AVENUE_IN + 1.5 + i * 5.5, dir: i % 2 ? -1 : 1, speed: 0.7 + i * 0.04 };
       this.lifeGroup.add(c);
       this.carts.push(c);
     }
@@ -770,9 +1133,10 @@ export class World {
     // Una sola luz para los combates (crear luces nuevas obligaría a recompilar todos los materiales)
     this.fxLight = new THREE.PointLight('#ffb070', 0, 40);
     this.scene.add(this.fxLight);
-    for (let i = 0; i < 7; i++) {
+    for (let i = 0; i < 12; i++) {
       const gull = createGull();
-      gull.userData.fly = { r: 12 + rand() * 24, h: 10 + rand() * 7, speed: (0.15 + rand() * 0.15) * (i % 2 ? 1 : -1), phase: rand() * Math.PI * 2 };
+      // Cada una a su distancia: dan vueltas sin chocar aunque vayan en sentidos contrarios
+      gull.userData.fly = { r: 14 + i * 2.5, h: 10 + rand() * 7, speed: (0.15 + rand() * 0.15) * (i % 2 ? 1 : -1), phase: rand() * Math.PI * 2 };
       this.scene.add(gull);
       this.gulls.push(gull);
     }
@@ -780,7 +1144,7 @@ export class World {
 
   /** Aldeanos paseando por la ronda y la avenida del puerto (más cuanto más grande es la ciudad). */
   #syncVillagers() {
-    const n = Math.min(34, 6 + 2 * this.game.level('ayuntamiento'));
+    const n = Math.min(56, 8 + 3 * this.game.level('ayuntamiento'));
     if (n === this.villagers.length) return;
     for (const v of this.villagers) this.lifeGroup.remove(v);
     this.villagers = [];
@@ -789,8 +1153,8 @@ export class World {
       const v = createVillager(i);
       const avenue = i % 3 === 0;
       v.userData.walk = avenue
-        ? { avenue, s: 4 + rand() * (ISLAND_R - 6), dir: rand() < 0.5 ? 1 : -1, speed: 0.5 + rand() * 0.4, lane: (rand() - 0.5) * 0.8 }
-        : { avenue, a: rand() * Math.PI * 2, dir: rand() < 0.5 ? 1 : -1, speed: 0.45 + rand() * 0.45, lane: rand() < 0.5 ? -0.22 : 0.22 };
+        ? { avenue, side: rand() < 0.5 ? 1 : -1, s: AVENUE_IN + 2.5 + rand() * (this.coast(GATE_ANGLE) - AVENUE_IN - 8), dir: rand() < 0.5 ? 1 : -1, speed: 0.5 + rand() * 0.4 }
+        : { avenue, a: rand() * TAU, dir: rand() < 0.5 ? 1 : -1, speed: 0.45 + rand() * 0.45 };
       this.lifeGroup.add(v);
       this.villagers.push(v);
     }
@@ -987,40 +1351,241 @@ export class World {
     this.#collectAnimated();
   }
 
-  #updateLife(dt, t) {
+  /**
+   * Aldeanos y carros. Cada sentido va por su carril (los carros por el centro de la avenida y la
+   * gente por las aceras y la ronda), nadie adelanta atravesando al de delante, se ceden el paso
+   * donde se cruzan y dan la vuelta en los extremos solo cuando tienen sitio.
+   */
+  #updateWalkers(dt, t) {
     const gate = THREE.MathUtils.degToRad(GATE_ANGLE);
-    [...this.villagers, ...this.carts].forEach((v, i) => {
+    const gx = Math.sin(gate);
+    const gz = Math.cos(gate);
+    const coastGate = this.coast(GATE_ANGLE);
+    // Dónde dan la vuelta: los carros en los extremos y la gente fuera del círculo que barren
+    const margin = CART_TURN_R + 0.45;
+    const endOf = (w) => (w.dir > 0 ? coastGate - 2.6 - (w.cart ? 0 : margin) : AVENUE_IN + (w.cart ? 0 : margin));
+    const laneOf = (w, dir = w.dir) => {
+      if (!w.avenue) return dir > 0 ? 0.24 : -0.24;
+      return w.cart ? -dir * 0.45 : w.side * (dir > 0 ? 1.1 : 1.46);
+    };
+    const onAvenue = (s, lane) => new THREE.Vector3(gx * s + gz * lane, 0, gz * s - gx * lane);
+    // Primero los carros: si dos se esperan mutuamente, pasa antes el que va antes en la lista
+    const movers = [...this.carts, ...this.villagers];
+    const state = movers.map((v) => {
       const w = v.userData.walk;
-      const bob = v.userData.cart ? 0 : Math.abs(Math.sin(t * 9 + i)) * 0.04;
+      w.lane ??= laneOf(w);
+      const fwd = new THREE.Vector3();
+      let pos;
       if (w.avenue) {
-        w.s += w.dir * w.speed * dt;
-        if (w.s > ISLAND_R - 1.8 || w.s < 3.8) w.dir *= -1;
-        v.position.set(Math.sin(gate) * w.s + Math.cos(gate) * w.lane, bob, Math.cos(gate) * w.s - Math.sin(gate) * w.lane);
-        v.rotation.y = gate + (w.dir > 0 ? 0 : Math.PI);
+        pos = onAvenue(w.s, w.lane);
+        fwd.set(gx * w.dir, 0, gz * w.dir);
       } else {
-        w.a += (w.dir * w.speed * dt) / ROAD_R;
+        const r = ROAD_R + w.lane;
+        pos = new THREE.Vector3(Math.sin(w.a) * r, 0, Math.cos(w.a) * r);
+        fwd.set(Math.cos(w.a) * w.dir, 0, -Math.sin(w.a) * w.dir);
+      }
+      // Huella: un punto con radio (persona) o un segmento con radio (buey y carro)
+      const cart = !!w.cart;
+      return { w, pos, fwd, cart, r: cart ? 0.42 : 0.17, back: cart ? 0.85 : 0, front: cart ? 1.1 : 0 };
+    });
+    const tmp = new THREE.Vector3();
+    const reach = (p, o) => {
+      if (!o.cart) return p.distanceTo(o.pos) - o.r;
+      tmp.subVectors(p, o.pos);
+      const k = THREE.MathUtils.clamp(tmp.dot(o.fwd), -o.back, o.front);
+      return tmp.addScaledVector(o.fwd, -k).length() - o.r;
+    };
+    // ¿Quién tiene a quién en el tramo de delante? (si hay alguien un poco más allá, va más despacio)
+    const blocker = state.map((a, i) => {
+      if (a.w.turn > 0 || a.w.pending) return { j: -1, slow: 1 };
+      const look = a.cart ? 0.4 : 0.3;
+      const probes = [1, 2, 3].map((k) => a.pos.clone().addScaledVector(a.fwd, a.front + (look * k) / 3));
+      const far = a.pos.clone().addScaledVector(a.fwd, a.front + (a.cart ? 0.9 : 0.7));
+      let j = -1;
+      let best = Infinity;
+      let slow = 1;
+      state.forEach((b, k) => {
+        if (k === i) return;
+        const d = Math.min(...probes.map((q) => reach(q, b)));
+        if (d < a.r && d < best) {
+          best = d;
+          j = k;
+        } else if (reach(far, b) < a.r) slow = 0.45;
+      });
+      return { j, slow };
+    });
+    // Un carro que lleva un rato parado ante la ronda pide paso: la gente de la ronda espera antes de
+    // pisar su carril hasta que haya cruzado. Cada petición: el tramo de avenida que ocupa (o va a
+    // ocupar) el carro y la franja de su carril.
+    const claims = state.filter((a) => a.cart && a.w.claim).map(({ w }) => {
+      const front = w.s + w.dir * 1.1;
+      const tail = w.s - w.dir * 0.85;
+      const [lo, hi] = w.dir > 0 ? [tail - 0.3, front + 1.0] : [front - 1.0, tail + 0.3];
+      return { lo, hi, x0: w.lane - 1.0, x1: w.lane + 1.0 };
+    });
+    const ringX = (w) => ((((w.a - gate) % TAU) + TAU + Math.PI) % TAU - Math.PI) * ROAD_R;
+    // Si se esperan en círculo (A a B y B a A…), pasa el que menos roza al otro: nunca se atascan
+    const clearance = (i) => {
+      const a = state[i];
+      const b = state[blocker[i].j];
+      let c = Infinity;
+      for (let d = 0.1; d <= 0.9; d += 0.1) c = Math.min(c, reach(a.pos.clone().addScaledVector(a.fwd, a.front + d), b) - a.r);
+      return c;
+    };
+    const pass = new Set();
+    blocker.forEach((b, i) => {
+      const cycle = [i];
+      let k = b.j;
+      while (k >= 0 && k !== i && cycle.length <= state.length) {
+        cycle.push(k);
+        k = blocker[k].j;
+      }
+      if (k !== i || Math.min(...cycle) !== i) return;
+      const c = cycle.map(clearance);
+      pass.add(cycle[c.indexOf(Math.max(...c))]);
+    });
+
+    // En un extremo: da la vuelta si el sitio adonde va (o el círculo que barre el carro) está libre
+    const tryTurn = (a, i) => {
+      const w = a.w;
+      const back = -w.dir;
+      let clear;
+      if (w.cart) {
+        // Espera a que el carro que acaba de girar se aparte (los que vienen detrás no estorban)
+        const c = onAvenue(w.s, 0);
+        clear = state.every((b, k) => k === i || (b.cart ? b.w.dir === w.dir || reach(c, b) > CART_TURN_R : b.pos.distanceTo(c) > CART_TURN_R + b.r));
+      } else {
+        const spot = onAvenue(w.s, laneOf(w, back));
+        clear = state.every((b, k) => k === i || reach(spot, b) > a.r + 0.05);
+      }
+      w.pending = !clear;
+      if (clear) {
+        w.dir = back;
+        w.turnTime = w.cart ? 2.4 : 0.8;
+        w.turn = w.turnTime;
+      }
+    };
+
+    state.forEach((a, i) => {
+      const w = a.w;
+      const v = movers[i];
+      // Cambio de carril suave (al dar la vuelta)
+      const rate = dt * (w.cart ? 0.5 : 0.6);
+      w.lane += THREE.MathUtils.clamp(laneOf(w) - w.lane, -rate, rate);
+      let moving = false;
+      if (w.turn > 0) w.turn = Math.max(0, w.turn - dt);
+      else if (w.pending) tryTurn(a, i);
+      else {
+        let go = blocker[i].j < 0 || pass.has(i) ? blocker[i].slow : 0;
+        if (!w.avenue && claims.length) {
+          const x = ringX(w);
+          const line = ROAD_R + w.lane;
+          const halt = (c) => line >= c.lo && line <= c.hi && (w.dir > 0 ? x < c.x0 && x > c.x0 - 0.7 : x > c.x1 && x < c.x1 + 0.7);
+          if (claims.some(halt)) go = 0;
+        }
+        if (w.cart) {
+          // Cerca del cruce: si no puede pasar en un momento, pide paso hasta haber cruzado
+          const front = w.s + w.dir * 1.1;
+          const tail = w.s - w.dir * 0.85;
+          const before = (ROAD_R - front) * w.dir > -0.5 && (ROAD_R - front) * w.dir < 1.6;
+          const crossed = (tail - ROAD_R) * w.dir > 0.6;
+          w.waitT = go === 0 && before ? (w.waitT ?? 0) + dt : 0;
+          if (w.waitT > 1) w.claim = true;
+          if (crossed || (!before && !w.claim)) w.claim = false;
+        }
+        const step = w.dir * w.speed * go * dt;
+        if (w.avenue) {
+          w.s += step;
+          moving = step !== 0;
+          const end = endOf(w);
+          if ((w.s - end) * w.dir >= 0) {
+            w.s = end;
+            tryTurn(a, i);
+          }
+        } else if (step) {
+          w.a = (w.a + step / ROAD_R + TAU) % TAU;
+          moving = true;
+        }
+      }
+      const bob = !w.cart && moving ? Math.abs(Math.sin(t * 9 + i)) * 0.04 : 0;
+      if (w.avenue) {
+        v.position.copy(onAvenue(w.s, w.lane)).setY(bob);
+        let heading = gate + (w.dir > 0 ? 0 : Math.PI);
+        if (w.turn > 0) {
+          const p = 1 - w.turn / w.turnTime;
+          heading += (1 - p * p * (3 - 2 * p)) * Math.PI;
+        }
+        v.rotation.y = heading;
+      } else {
         const r = ROAD_R + w.lane;
         v.position.set(Math.sin(w.a) * r, bob, Math.cos(w.a) * r);
         v.rotation.y = w.a + (w.dir > 0 ? Math.PI / 2 : -Math.PI / 2);
       }
     });
+  }
+
+  /** Lo que los barcos pequeños y los delfines no deben atravesar: las islas vecinas y las flotas. */
+  #seaObstacles() {
+    const out = (this.islandObstacles ?? []).slice();
+    for (const f of this.fleets.values()) out.push({ p: f.group.position, r: f.group.scale.x * (f.group.children.length > 1 ? 2.6 : 1.8) });
+    if (this.raidGroup) out.push({ p: this.raidGroup.position, r: this.raidGroup.scale.x * 3.4 });
+    return out;
+  }
+
+  #updateLife(dt, t) {
+    this.#updateWalkers(dt, t);
+    const obstacles = this.#seaObstacles();
+    // Pesqueros: cada uno por su círculo; si una flota o una isla les corta el paso, viran en redondo
     for (const [i, boat] of this.boats.entries()) {
       const f = boat.userData.sail;
-      const a = f.phase + (t * f.speed) / f.r;
-      boat.position.set(Math.sin(a) * f.r, WATER_Y + Math.sin(t * 1.3 + i) * 0.08, Math.cos(a) * f.r);
-      boat.rotation.set(0, a + (f.speed > 0 ? Math.PI / 2 : -Math.PI / 2), Math.sin(t * 1.1 + i) * 0.06);
+      const blocked = (dir) =>
+        obstacles.some((o) => {
+          if (Math.abs(Math.hypot(o.p.x, o.p.z) - f.r) > o.r + f.size) return false;
+          const ahead = ((((Math.atan2(o.p.x, o.p.z) - f.a) * dir) % TAU) + TAU) % TAU;
+          return ahead * f.r < o.r + f.size + 5;
+        });
+      let v = f.speed;
+      let heading = f.a + (f.dir > 0 ? Math.PI / 2 : -Math.PI / 2);
+      if (f.turn > 0) {
+        // Frena, vira y vuelve a arrancar en el otro sentido
+        f.turn = Math.max(0, f.turn - dt);
+        const p = 1 - f.turn / BOAT_TURN;
+        v = f.speed * 0.5 * (p < 0.5 ? -(1 - 2 * p) : 2 * p - 1);
+        heading += (1 - p * p * (3 - 2 * p)) * Math.PI;
+      } else if (blocked(f.dir)) {
+        v = 0;
+        // Si por detrás hay sitio, da media vuelta; si está encerrado entre dos, espera fondeado
+        if (!blocked(-f.dir)) {
+          f.dir = -f.dir;
+          f.turn = BOAT_TURN;
+          heading += Math.PI;
+        }
+      }
+      f.a = (f.a + (f.dir * v * dt) / f.r + TAU) % TAU;
+      boat.position.set(Math.sin(f.a) * f.r, WATER_Y + Math.sin(t * 1.3 + i) * 0.08, Math.cos(f.a) * f.r);
+      boat.rotation.set(0, heading, Math.sin(t * 1.1 + i) * 0.06);
+      // Si su círculo pasa por dentro de una isla vecina, ahí no se ve
+      boat.visible = !(this.islandObstacles ?? []).some((o) => o.p.distanceTo(boat.position) < o.core);
     }
     for (const d of this.dolphins) {
       const j = d.userData.jump;
       j.next -= dt;
       if (j.t < 0 && j.next <= 0) {
-        // Un salto cerca de la costa, en una dirección al azar
-        const a = Math.random() * Math.PI * 2;
-        const r = ISLAND_R + 8 + Math.random() * 20;
-        j.from = new THREE.Vector3(Math.sin(a) * r, 0, Math.cos(a) * r);
-        j.dir = new THREE.Vector3(Math.cos(a), 0, -Math.sin(a)).multiplyScalar(Math.random() < 0.5 ? 1 : -1);
-        j.t = 0;
-        d.visible = true;
+        // Un salto entre la costa y la bocana, lejos del puerto, de los embarcaderos y de los barcos
+        const deg = Math.random() * 360;
+        const r0 = this.coast(deg) + 7.5;
+        const r = r0 + Math.random() * Math.max(0, this.harborR - 2 - r0);
+        const from = polar(r, deg);
+        const nearPort = Math.abs(((deg - GATE_ANGLE + 540) % 360) - 180) < 25;
+        const crowded = [...obstacles, ...this.boats.map((b) => ({ p: b.position, r: b.userData.sail.size }))].some((o) => o.p.distanceTo(from) < o.r + 9);
+        if (nearPort || crowded) j.next = 0.5;
+        else {
+          const a = THREE.MathUtils.degToRad(deg);
+          j.from = from;
+          j.dir = new THREE.Vector3(Math.cos(a), 0, -Math.sin(a)).multiplyScalar(Math.random() < 0.5 ? 1 : -1);
+          j.t = 0;
+          d.visible = true;
+        }
       }
       if (j.t >= 0) {
         j.t += dt / 1.4;
@@ -1149,7 +1714,7 @@ export class World {
     }
     // Límite: la isla y su costa, o el archipiélago conocido
     if (!this.camTween) {
-      const maxR = this.view === 'isla' ? ISLAND_R + 14 : (this.mapRadius ?? 300) + 40;
+      const maxR = this.view === 'isla' ? this.coastMaxR + 14 : (this.mapRadius ?? 300) + 40;
       const r = Math.hypot(target.x, target.z);
       if (r > maxR) {
         const back = new THREE.Vector3(target.x, 0, target.z).multiplyScalar(maxR / r - 1);
@@ -1157,6 +1722,22 @@ export class World {
         cam.position.add(back);
       }
     }
+  }
+
+  /** Las gaviotas se oyen cuando vuelan sobre la isla cerca de donde miras (solo en la vista de la isla). */
+  #gullSound(dt) {
+    this.gullClock = (this.gullClock ?? 0) + dt;
+    if (this.gullClock < 0.4 || this.showcase) return;
+    this.gullClock = 0;
+    let k = 0;
+    if (this.view === 'isla') {
+      const target = this.controls.target;
+      for (const g of this.gulls) {
+        if (Math.hypot(g.position.x, g.position.z) > this.coast(THREE.MathUtils.radToDeg(Math.atan2(g.position.x, g.position.z))) + 3) continue;
+        k += Math.max(0, 1 - g.position.distanceTo(target) / 38);
+      }
+    }
+    setGulls(Math.min(1, k / 1.5));
   }
 
   /** Gira la cámara alrededor de lo que mira y la acerca o aleja (dentro de los límites). */
@@ -1248,7 +1829,7 @@ export class World {
     }
     if (level <= 0) return;
     const h = wallHeight(level);
-    const gaps = [{ a: GATE_ANGLE, w: 8 }, ...[...OUTER, ...COAST].map((id) => ({ a: LAYOUT[id].angle, w: 4 }))];
+    const gaps = [{ a: GATE_ANGLE, w: 8 }, ...[...OUTER, ...COAST].map((id) => ({ a: this.layout[id].angle, w: 3.4 }))];
     const blocked = (a) => gaps.some((g) => Math.abs(((a - g.a + 540) % 360) - 180) < g.w);
     const step = 4;
     const len = 2 * WALL_R * Math.sin(THREE.MathUtils.degToRad(step / 2)) + 0.06;
@@ -1367,19 +1948,145 @@ export class World {
     }
   }
 
-  /** Ruta desde tu puerto: rodea tu isla y sale en línea recta hacia el destino. */
-  #routeTo(target) {
+  /**
+   * Camino por mar de `a` a `b` que no pasa por encima de ninguna isla (ni de la tuya): búsqueda A*
+   * en una rejilla y luego se tensa la cuerda para dejar pocos tramos rectos. Las islas de donde
+   * sale o adonde llega no cuentan (se sale y se llega por su orilla).
+   */
+  #navigate(a, b) {
+    a = a.clone().setY(0);
+    b = b.clone().setY(0);
+    const near = (o, p) => Math.hypot(p.x - o.p.x, p.z - o.p.z) < o.r + 0.5;
+    const obstacles = (this.islandObstacles ?? []).map((o) => ({ p: o.p, r: o.core + 4 })).filter((o) => !near(o, a) && !near(o, b));
+    const homeR = (x, z) => this.coast(THREE.MathUtils.radToDeg(Math.atan2(x, z))) + 6;
+    const home = Math.hypot(a.x, a.z) > homeR(a.x, a.z) - 0.5 && Math.hypot(b.x, b.z) > homeR(b.x, b.z) - 0.5;
+    const blockedAt = (x, z, pad) => (home && Math.hypot(x, z) < homeR(x, z) + pad) || obstacles.some((o) => Math.hypot(x - o.p.x, z - o.p.z) < o.r + pad);
+    const clear = (p, q) => {
+      const n = Math.max(1, Math.ceil(Math.hypot(q.x - p.x, q.z - p.z) / 1.5));
+      for (let i = 0; i <= n; i++) if (blockedAt(p.x + ((q.x - p.x) * i) / n, p.z + ((q.z - p.z) * i) / n, 0)) return false;
+      return true;
+    };
+    if (clear(a, b)) return [a, b];
+
+    const CELL = 3;
+    const minX = Math.min(a.x, b.x) - 90;
+    const minZ = Math.min(a.z, b.z) - 90;
+    const W = Math.ceil((Math.max(a.x, b.x) + 90 - minX) / CELL) + 1;
+    const H = Math.ceil((Math.max(a.z, b.z) + 90 - minZ) / CELL) + 1;
+    if (W * H > 120000) return [a, b];
+    const cellOf = (p) => Math.round((p.z - minZ) / CELL) * W + Math.round((p.x - minX) / CELL);
+    const at = (k) => new THREE.Vector3(minX + (k % W) * CELL, 0, minZ + Math.floor(k / W) * CELL);
+    const blocked = new Uint8Array(W * H);
+    for (let k = 0; k < W * H; k++) {
+      const c = at(k);
+      blocked[k] = blockedAt(c.x, c.z, 2) ? 1 : 0;
+    }
+    const s0 = cellOf(a);
+    const t0 = cellOf(b);
+    blocked[s0] = blocked[t0] = 0;
+    const tx = t0 % W;
+    const tz = Math.floor(t0 / W);
+    const h = (k) => {
+      const dx = Math.abs((k % W) - tx);
+      const dz = Math.abs(Math.floor(k / W) - tz);
+      return Math.max(dx, dz) + 0.414 * Math.min(dx, dz);
+    };
+    const g = new Float32Array(W * H).fill(Infinity);
+    const from = new Int32Array(W * H).fill(-1);
+    // Montículo binario de [f, celda]
+    const heap = [];
+    const push = (f, k) => {
+      heap.push([f, k]);
+      for (let n = heap.length - 1; n > 0; ) {
+        const up = (n - 1) >> 1;
+        if (heap[up][0] <= heap[n][0]) break;
+        [heap[up], heap[n]] = [heap[n], heap[up]];
+        n = up;
+      }
+    };
+    const pop = () => {
+      const top = heap[0];
+      const last = heap.pop();
+      if (heap.length) {
+        heap[0] = last;
+        for (let n = 0; ; ) {
+          const l = 2 * n + 1;
+          let m = n;
+          if (l < heap.length && heap[l][0] < heap[m][0]) m = l;
+          if (l + 1 < heap.length && heap[l + 1][0] < heap[m][0]) m = l + 1;
+          if (m === n) break;
+          [heap[m], heap[n]] = [heap[n], heap[m]];
+          n = m;
+        }
+      }
+      return top;
+    };
+    g[s0] = 0;
+    push(h(s0), s0);
+    let found = false;
+    while (heap.length) {
+      const [f, k] = pop();
+      if (k === t0) {
+        found = true;
+        break;
+      }
+      if (f - h(k) > g[k] + 1e-4) continue;
+      const x = k % W;
+      const z = Math.floor(k / W);
+      for (let dz = -1; dz <= 1; dz++) {
+        for (let dx = -1; dx <= 1; dx++) {
+          if (!dx && !dz) continue;
+          const nx = x + dx;
+          const nz = z + dz;
+          if (nx < 0 || nz < 0 || nx >= W || nz >= H) continue;
+          const n = nz * W + nx;
+          if (blocked[n]) continue;
+          const cost = g[k] + (dx && dz ? 1.414 : 1);
+          if (cost >= g[n]) continue;
+          g[n] = cost;
+          from[n] = k;
+          push(cost + h(n), n);
+        }
+      }
+    }
+    if (!found) return [a, b];
+    const cells = [];
+    for (let k = t0; k >= 0 && k !== s0; k = from[k]) cells.push(at(k));
+    const path = [a, ...cells.reverse().slice(0, -1), b];
+    // Tensar la cuerda: desde cada punto, al más lejano que se ve sin tocar ninguna isla
+    const out = [a];
+    for (let k = 0; k < path.length - 1; ) {
+      let far = k + 1;
+      while (far + 1 < path.length && clear(path[k], path[far + 1])) far++;
+      out.push(path[far]);
+      k = far;
+    }
+    return out;
+  }
+
+  /** Cuánto apartarse del centro de una isla para salir o llegar por mar (o `fallback` si no se conoce). */
+  #offshore(p, fallback) {
+    if (p.length() < 3) return this.coastMaxR + 10;
+    const o = (this.islandObstacles ?? []).find((x) => x.p.distanceTo(p) < 3);
+    return o ? o.core + 4 : fallback;
+  }
+
+  /**
+   * Ruta desde tu puerto: sale por la bocana y va hasta el destino rodeando las islas. `lane` (0..2)
+   * separa a la salida y a la llegada las flotas que van al mismo sitio, para que no se monten.
+   */
+  #routeTo(target, lane = 1) {
     const entry = this.islands[target];
-    const pos = entry ? entry.pos : new THREE.Vector3(0, 0, 200);
-    const dist = pos.length();
-    const a0 = GATE_ANGLE;
-    const a1 = THREE.MathUtils.radToDeg(Math.atan2(pos.x, pos.z));
-    const delta = ((a1 - a0 + 540) % 360) - 180;
-    const points = [polar(ISLAND_R + 7, a0), polar(HARBOR_R, a0)];
-    const steps = Math.ceil(Math.abs(delta) / 15);
-    for (let i = 1; i <= steps; i++) points.push(polar(HARBOR_R, a0 + (delta * i) / steps));
-    points.push(polar(Math.max(HARBOR_R + 5, dist - (entry?.radius ?? 10) * 1.35 - 2), a1));
-    return new Route(points);
+    const pos = entry ? entry.pos.clone().setY(0) : new THREE.Vector3(0, 0, 200);
+    // Más allá del muelle y del faro del puerto
+    const a0 = GATE_ANGLE + (lane - 1) * 4;
+    const mouth = polar(this.coast(a0) + 12, a0);
+    // Se detiene frente a la isla, cada flota en su sitio
+    const toward = pos.clone().normalize();
+    const side = new THREE.Vector3(toward.z, 0, -toward.x);
+    const stop = (entry ? islandExtent(entry.isl) : 10) + 4;
+    const end = pos.clone().addScaledVector(toward, -stop).addScaledVector(side, (lane - 1) * 4.5);
+    return new Route(this.#navigate(mouth, end));
   }
 
   #syncFleets() {
@@ -1397,7 +2104,7 @@ export class World {
     }
     for (const m of missions) {
       if (this.fleets.has(m.id)) continue;
-      const route = this.#routeTo(m.target);
+      const route = this.#routeTo(m.target, hashString(String(m.id)) % 3);
       const type = SHIP_PRIORITY.find((s) => m.units[s]) ?? 'mercante';
       const group = new THREE.Group();
       const ship = createShip(type);
@@ -1424,7 +2131,9 @@ export class World {
       const from = new THREE.Vector3(m.fx - home.x, 0, m.fz - home.z);
       const to = new THREE.Vector3(m.tx - home.x, 0, m.tz - home.z);
       const dir = to.clone().sub(from).normalize();
-      const route = new Route([from.clone().addScaledVector(dir, 22), to.clone().addScaledVector(dir, -14)]);
+      const a = from.clone().addScaledVector(dir, this.#offshore(from, 22));
+      const b = to.clone().addScaledVector(dir, -this.#offshore(to, 14));
+      const route = new Route(this.#navigate(a, b));
       const group = new THREE.Group();
       group.add(createShip(m.ship));
       this.scene.add(group);
@@ -1437,8 +2146,10 @@ export class World {
       // Del puerto enemigo hasta la entrada del tuyo
       const home = this.game.homeIsland;
       const from = new THREE.Vector3(m.x - home.x, 0, m.z - home.z);
-      const to = from.clone().setLength(ISLAND_R + 10);
-      const route = new Route([from.clone().setLength(Math.max(ISLAND_R + 20, from.length() - 25)), to]);
+      const deg = THREE.MathUtils.radToDeg(Math.atan2(from.x, from.z));
+      const to = polar(this.coast(deg) + 12, deg);
+      const start = from.clone().setLength(Math.max(this.coastMaxR + 20, from.length() - this.#offshore(from, 25)));
+      const route = new Route(this.#navigate(start, to));
       const group = new THREE.Group();
       group.add(createShip('trirreme'));
       const escort = createShip('mercante');
@@ -1468,7 +2179,7 @@ export class World {
     if (!raid) return;
     // Siempre por el lado que ve la cámara al empezar, para que se vean llegar
     const angle = -50 + ((raid.spawn / 997) % 140);
-    this.raidRoute = new Route([polar(RAID_FROM, angle), polar(ISLAND_R + 9, angle)]);
+    this.raidRoute = new Route(this.#navigate(polar(RAID_FROM, angle), polar(this.coast(angle) + 9, angle)));
     this.raidGroup = new THREE.Group();
     const ships = Math.min(4, 1 + (raid.army.corsario ?? 0) + Math.floor((raid.army.pirata ?? 0) / 15));
     for (let i = 0; i < ships; i++) {
@@ -1529,6 +2240,7 @@ export class World {
     }
     this.#moveCamera(dt);
     this.controls.update(dt);
+    this.#gullSound(dt);
 
     // Niebla según lo lejos que esté la cámara
     const dist = this.camera.position.distanceTo(this.controls.target);
@@ -1662,7 +2374,8 @@ export class World {
 
     this.frame = (this.frame ?? 0) + 1;
     if (this.frame % 3 === 0) this.#declutter();
-    this.renderer.render(this.scene, this.camera);
+    if (this.high && this.composer) this.composer.render(dt);
+    else this.renderer.render(this.scene, this.camera);
     this.labelRenderer.render(this.scene, this.camera);
   }
 

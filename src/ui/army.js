@@ -25,7 +25,7 @@ function unitGrid(game, ids, empty, recruitIn) {
       const u = UNITS[id];
       return `<div class="army-card" title="${u.name}">
         ${unitIcon(id, 'army-art')}
-        <div><b>${fmtNum(game.units[id])}</b><span>${u.name}</span><span class="muted small">⚔️ ${u.atk} · ❤️ ${u.hp}</span></div>
+        <div><b>${fmtNum(game.units[id])}</b><span>${u.elite ? '⭐ ' : ''}${u.name}</span><span class="muted small">⚔️ ${u.atk} · ❤️ ${u.hp}${u.pay ? ` · 🪙 ${u.pay}/h` : ''}</span></div>
       </div>`;
     })
     .join('');
@@ -97,7 +97,9 @@ export function armyHtml(game) {
       <div><b>${fmtNum(home.hp)}</b><span>❤️ Vida en casa</span></div>
       <div><b>${fmtNum(sea.atk)}</b><span>⛵ Ataque en el mar</span></div>
       <div><b>${fmtNum(eco.upkeep)}/h</b><span>🥖 Comen</span></div>
+      <div class="${eco.pay ? '' : 'muted'}"><b>${fmtNum(eco.pay)}/h</b><span>🪙 Paga de la élite</span></div>
     </div>
+    ${eco.pay && eco.net.oro < 0 ? `<p class="hint warn">💸 El oro baja ${fmtNum(-eco.net.oro)}/h: cuando se acabe, desertarán las tropas de élite que no puedas pagar.</p>` : ''}
     <h4>🛡️ Tropas en casa · ${fmtNum(land)}</h4>
     ${unitGrid(game, LAND_UNITS, 'No tienes tropas en casa.', 'cuartel')}
     <h4>⚓ Barcos en el puerto · ${fmtNum(ships)}</h4>

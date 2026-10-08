@@ -62,6 +62,7 @@ import {
   scoreOf,
   relicBonus,
   storageCapacity,
+  totalUnits,
   wonderLevel,
   wonderOf,
   worldEventAt,
@@ -807,6 +808,8 @@ export class Game extends EventTarget {
         inactive: !!p?.inactive,
         relation: this.world.relation?.(this.userId, isl.owner) ?? null,
       });
+      // Las ciudades de tu alianza las conoces sin espiarlas
+      if (view.relation === 'aliado') view.explored = true;
       return view;
     }
     if (isl.type === 'continente') {
@@ -965,6 +968,8 @@ export class Game extends EventTarget {
     if (!isl) return { ok: false, reason: 'Esa isla no existe.', units: {}, seconds: 0, capacity: 0, used: 0, cargo: 0, ships: 0, cost: null };
     const rt = this.world.islandState(target);
     const view = this.island(target);
+    // Sin explorar no se sabe qué hay: solo se puede mandar un bote a mirar
+    if (!view.explored && type !== 'explorar') reason = 'Primero explora la isla con un bote: no sabes qué hay en ella.';
     for (const id of PLAYER_UNITS) {
       const n = Math.max(0, Math.floor(Number(units?.[id]) || 0));
       if (!n) continue;
@@ -1448,7 +1453,45 @@ export class Game extends EventTarget {
     // El final de un efecto divino también es un suceso: cambia la producción
     for (const [id, until] of Object.entries(s.buffs)) consider(until, () => delete s.buffs[id]);
     for (const c of s.mercs ?? []) consider(c.until, (t) => this.#dismissMercs(c, t));
+    // Si la paga de la élite se come el oro, cuando se acabe desertan los que no se pueden pagar
+    if (!s.vacation) {
+      const eco = economy(s, s.lastUpdate);
+      if (eco.pay > 0 && eco.net.oro < 0) {
+        const at = s.lastUpdate + (s.resources.oro / -eco.net.oro) * HOUR_MS;
+        consider(Math.max(s.lastUpdate, at), (t) => this.#desert(t));
+      }
+    }
     return best;
+  }
+
+  /** Sin oro para la paga: se marchan tropas de élite (las que más cobran primero) hasta que el oro alcance. */
+  #desert(t) {
+    const s = this.state;
+    let deficit = -economy(s, t).net.oro;
+    if (deficit <= 0) return;
+    const gone = [];
+    const paid = PLAYER_UNITS.filter((id) => UNITS[id].pay).sort((a, b) => UNITS[b].pay - UNITS[a].pay);
+    for (const id of paid) {
+      if (deficit <= 0) break;
+      const each = UNITS[id].pay * universe.speed;
+      let n = Math.min(Math.ceil(deficit / each), totalUnits(s)[id] ?? 0);
+      if (!n) continue;
+      deficit -= n * each;
+      gone.push(`${n} × ${UNITS[id].name}`);
+      // Primero los de casa y luego los de las flotas
+      const home = Math.min(n, s.units[id] ?? 0);
+      s.units[id] -= home;
+      n -= home;
+      for (const m of s.missions) {
+        if (n <= 0) break;
+        const k = Math.min(n, m.units[id] ?? 0);
+        if (!k) continue;
+        m.units[id] -= k;
+        if (!m.units[id]) delete m.units[id];
+        n -= k;
+      }
+    }
+    if (gone.length) this.#note(`💸 Sin oro para pagarles, desertan ${gone.join(', ')}`, 'error');
   }
 
   #accrue(t) {

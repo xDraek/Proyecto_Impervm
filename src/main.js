@@ -14,6 +14,18 @@ import { Hud } from './ui/Hud.js';
 import { showLanding } from './ui/landing.js';
 
 const DAYNIGHT_KEY = 'imperium.daynight';
+const QUALITY_KEY = 'imperium.quality';
+
+/** Gráficos de alta calidad: por defecto sí en el ordenador y no en el móvil. */
+function readQuality() {
+  try {
+    const saved = localStorage.getItem(QUALITY_KEY);
+    if (saved) return saved === 'alta';
+  } catch {
+    // sin almacenamiento
+  }
+  return !window.matchMedia?.('(pointer: coarse)').matches;
+}
 const NOTIFY_KEY = 'imperium.notify';
 const scene = document.getElementById('scene');
 
@@ -134,6 +146,15 @@ function startGame(game) {
       }
       return ok;
     },
+    quality: () => world.high,
+    setQuality: (on) => {
+      world.setQuality(on);
+      try {
+        localStorage.setItem(QUALITY_KEY, on ? 'alta' : 'baja');
+      } catch {
+        // sin almacenamiento: solo dura esta sesión
+      }
+    },
     dayNight: () => world.dayNight,
     setDayNight: (on) => {
       world.setDayNight(on);
@@ -152,6 +173,7 @@ function startGame(game) {
 
   const world = new World(scene, game, { onSelect: select });
   world.setDayNight(readDayNight());
+  world.setQuality(readQuality());
   const hud = new Hud(game, { onSelect: select, onView: setView, settings, onLogout: logout });
   game.addEventListener('logout', logout);
 
@@ -173,7 +195,7 @@ function startGame(game) {
   });
 
   // Atajos de la barra superior (1-7, en su orden) y rótulos que salen al momento con el ratón
-  const SHORTCUTS = ['quests-btn', 'chat-btn', 'mail-btn', 'alliance-btn', 'rank-btn', 'map-btn', 'reports-btn', 'army-btn'];
+  const SHORTCUTS = ['quests-btn', 'chat-btn', 'mail-btn', 'alliance-btn', 'rank-btn', 'map-btn', 'reports-btn', 'army-btn', 'friends-btn'];
   for (const el of document.querySelectorAll('#topbar .top-actions .icon-btn[title], #view-btn')) {
     const key = SHORTCUTS.indexOf(el.id) + 1;
     el.dataset.tip = key ? `${el.title} · ${key}` : el.title;

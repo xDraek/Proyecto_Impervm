@@ -348,6 +348,18 @@ async function api(req, res, url) {
     }
 
     // Alianzas
+    if (route === 'GET /api/friends') return send(res, 200, world.friendList(uid));
+    if (req.method === 'POST' && url.pathname.startsWith('/api/friends/')) {
+      if (limited(`social:${uid}`, 20, 10_000)) return send(res, 429, { error: 'Vas demasiado rápido.' });
+      const body = await readJson(req);
+      const sub = url.pathname.slice('/api/friends/'.length);
+      let result = null;
+      if (sub === 'add') result = world.addFriend(uid, body.name);
+      else if (sub === 'answer') world.answerFriend(uid, body.name, body.accept === true);
+      else if (sub === 'remove') world.removeFriend(uid, body.name);
+      else return send(res, 404, { error: 'No existe.' });
+      return send(res, 200, { result, ...world.friendList(uid), snapshot: world.snapshot(uid) });
+    }
     if (route === 'GET /api/alliances') return send(res, 200, { alliances: world.allianceList(uid) });
     if (route === 'GET /api/alliance') return send(res, 200, { alliance: world.allianceDetail(uid) });
     if (req.method === 'POST' && url.pathname.startsWith('/api/alliance')) {
@@ -439,6 +451,7 @@ const TYPES = {
   '.ico': 'image/x-icon',
   '.json': 'application/json',
   '.woff2': 'font/woff2',
+  '.mp3': 'audio/mpeg',
 };
 
 async function serveStatic(req, res, url) {
@@ -457,7 +470,26 @@ async function serveStatic(req, res, url) {
   }
   const immutable = file.includes(`${join('dist', 'assets')}`);
   const type = TYPES[extname(file)] ?? 'application/octet-stream';
-  const headers = { 'content-type': type, 'cache-control': immutable ? 'public, max-age=31536000, immutable' : 'no-cache', vary: 'accept-encoding' };
+  const media = type.startsWith('audio/');
+  const cache = immutable ? 'public, max-age=31536000, immutable' : media ? 'public, max-age=86400' : 'no-cache';
+  const headers = { 'content-type': type, 'cache-control': cache, vary: 'accept-encoding' };
+  // La música y los sonidos se piden por trozos (Safari no los reproduce sin esto)
+  if (media) {
+    const size = (await stat(file)).size;
+    const range = /^bytes=(\d*)-(\d*)$/.exec(req.headers.range ?? '');
+    if (range) {
+      const start = range[1] ? Number(range[1]) : Math.max(0, size - Number(range[2]));
+      const end = range[1] && range[2] ? Math.min(Number(range[2]), size - 1) : size - 1;
+      if (start >= size || start > end) {
+        res.writeHead(416, { 'content-range': `bytes */${size}` });
+        return res.end();
+      }
+      res.writeHead(206, { ...headers, 'accept-ranges': 'bytes', 'content-range': `bytes ${start}-${end}/${size}`, 'content-length': end - start + 1 });
+      return createReadStream(file, { start, end }).pipe(res);
+    }
+    res.writeHead(200, { ...headers, 'accept-ranges': 'bytes', 'content-length': size });
+    return createReadStream(file).pipe(res);
+  }
   // Código, estilos y la página se mandan comprimidos (se comprimen una vez y se guardan)
   const encoding = /javascript|css|html|json|svg/.test(type) ? encodingFor(req) : null;
   if (encoding) {

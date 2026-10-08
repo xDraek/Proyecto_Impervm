@@ -5,7 +5,7 @@ import { bag, escapeHtml, fmtAgo, fmtDec, fmtNum, fmtTime } from './format.js';
 import { runSimulation, simulatorHtml } from './simulator.js';
 
 /** Ventanas que gestiona este módulo. */
-export const SOCIAL_MODALS = ['alliance', 'mail', 'profile', 'daily', 'welcome', 'password', 'sim'];
+export const SOCIAL_MODALS = ['alliance', 'mail', 'profile', 'daily', 'welcome', 'password', 'sim', 'friends'];
 
 // Alianza, correo y mercado del archipiélago: lo que se habla con otros
 // jugadores. Los datos llegan del servidor aparte del estado de la partida.
@@ -344,6 +344,7 @@ export class Social {
         <div class="modal-actions">
           ${me ? '' : `<button class="primary small auto" data-action="mail-to" data-name="${escapeHtml(p.name)}">✉️ Mandar un mensaje</button>`}
           ${me ? '' : `<button class="ghost small" data-action="goto" data-island="${p.island}">🗺️ Ver su ciudad</button>`}
+          ${me ? '' : `<button class="ghost small" data-action="friend-add" data-name="${escapeHtml(p.name)}">👥 Añadir amigo</button>`}
         </div>
         ${this.game.admin && !me
           ? `<div class="admin-tools"><b>🛠️ Moderación</b>${p.muted ? ' · silenciado' : ''}${p.banned ? ' · suspendido' : ''}
@@ -467,6 +468,57 @@ export class Social {
           <button class="ghost">Cambiar el correo</button>
         </form>
         <p class="hint small email-sent" hidden></p>
+      </div>`,
+    );
+  }
+
+  // ── Amigos ─────────────────────────────────────────────────────────────────
+
+  async openFriends(data = null) {
+    data ??= await this.#call('GET', '/api/friends');
+    if (!data) return;
+    this.friends = data;
+    const person = (f, buttons) => `<li class="friend${f.online ? ' online' : ''}">
+        <span class="dot" title="${f.online ? 'Conectado ahora' : 'Desconectado'}"></span>
+        <div class="friend-who" data-action="profile" data-name="${escapeHtml(f.name)}">
+          <b>${f.alliance ? `[${escapeHtml(f.alliance)}] ` : ''}${escapeHtml(f.name)}</b>
+          <span class="muted small">${escapeHtml(f.city)} · ${fmtNum(f.score)} pts · ${f.online ? 'conectado' : f.lastSeen ? `visto ${fmtAgo(Date.now() - f.lastSeen)}` : 'sin conectar'}</span>
+        </div>
+        <div class="friend-actions">${buttons}</div>
+      </li>`;
+    const friends = data.friends
+      .map((f) =>
+        person(
+          f,
+          `<button class="icon-btn tiny" data-action="mail-to" data-name="${escapeHtml(f.name)}" title="Mandar un mensaje">✉️</button>
+           <button class="icon-btn tiny" data-action="goto" data-island="${f.island}" title="Ver su ciudad">🗺️</button>
+           <button class="icon-btn tiny" data-action="friend-remove" data-name="${escapeHtml(f.name)}" title="Dejar de ser amigos">✕</button>`,
+        ),
+      )
+      .join('');
+    const incoming = data.incoming
+      .map((f) =>
+        person(
+          f,
+          `<button class="primary small" data-action="friend-answer" data-accept="1" data-name="${escapeHtml(f.name)}">Aceptar</button>
+           <button class="ghost small" data-action="friend-answer" data-name="${escapeHtml(f.name)}">No</button>`,
+        ),
+      )
+      .join('');
+    const outgoing = data.outgoing.map((f) => person(f, `<button class="ghost small" data-action="friend-remove" data-name="${escapeHtml(f.name)}">Retirar</button>`)).join('');
+    const online = data.friends.filter((f) => f.online).length;
+    this.hud.showModal(
+      'friends',
+      `<div class="modal-card narrow friends-modal">
+        ${head('👥', 'Amigos', data.friends.length ? `${online} de ${data.friends.length} conectados` : 'Añade a otros capitanes por su nombre')}
+        <form class="friend-add" data-form="friend-add">
+          <input type="text" name="name" placeholder="Nombre del jugador" maxlength="20" autocomplete="off" required />
+          <button class="primary small">Añadir</button>
+        </form>
+        ${incoming ? `<h4>📨 Quieren ser tus amigos</h4><ul class="friends">${incoming}</ul>` : ''}
+        <h4>👥 Tus amigos</h4>
+        ${friends ? `<ul class="friends">${friends}</ul>` : '<p class="muted small">Todavía no tienes amigos. Escribe el nombre de un jugador para pedirle amistad, o pulsa «Añadir amigo» en su perfil.</p>'}
+        ${outgoing ? `<h4>⏳ Esperando respuesta</h4><ul class="friends">${outgoing}</ul>` : ''}
       </div>`,
     );
   }
@@ -686,6 +738,22 @@ export class Social {
       case 'mail-to':
         this.compose(btn.dataset.name);
         return true;
+      case 'friend-add': {
+        const res = await this.#call('POST', '/api/friends/add', { name: btn.dataset.name });
+        if (res) this.hud.toast(res.result === 'amigos' ? `👥 Ya sois amigos` : `👥 Solicitud de amistad enviada a ${btn.dataset.name}`, 'success');
+        return true;
+      }
+      case 'friend-answer': {
+        const res = await this.#call('POST', '/api/friends/answer', { name: btn.dataset.name, accept: btn.dataset.accept === '1' });
+        if (res) this.openFriends(res);
+        return true;
+      }
+      case 'friend-remove': {
+        if (!confirm(`¿Quitar a ${btn.dataset.name} de tus amigos?`)) return true;
+        const res = await this.#call('POST', '/api/friends/remove', { name: btn.dataset.name });
+        if (res) this.openFriends(res);
+        return true;
+      }
       case 'set-title': {
         const res = await this.game.setTitle(btn.dataset.id);
         if (!res.ok) this.hud.toast(res.reason, 'error');
@@ -781,6 +849,12 @@ export class Social {
       } else if (form.dataset.form === 'rename-city') {
         const res = await this.#call('POST', '/api/city', { name: data.name }, '🏰 Tu ciudad tiene nombre nuevo');
         if (res) this.openProfile(this.game.username);
+      } else if (form.dataset.form === 'friend-add') {
+        const res = await this.#call('POST', '/api/friends/add', { name: data.name });
+        if (res) {
+          this.hud.toast(res.result === 'amigos' ? '👥 Ya sois amigos' : `👥 Solicitud enviada a ${data.name}`, 'success');
+          this.openFriends(res);
+        }
       } else if (form.dataset.form === 'email') {
         const res = await this.#call('POST', '/api/email', { email: data.email, password: data.password }, '✉️ Te hemos mandado un correo para confirmarlo');
         const hint = this.hud.modal.querySelector('.email-sent');

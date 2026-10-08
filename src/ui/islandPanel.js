@@ -158,7 +158,7 @@ function infoSectionFor(game, view, t) {
       <p class="desc small">Hace falta Navegación 2. Cuantos más barcos y más bodega lleves, más botín puedes traer, pero también hay piratas y monstruos.</p>`;
   }
   if (!view.explored) {
-    return '<p class="desc">Nadie sabe qué hay en esta isla. Envía un bote explorador para descubrirlo… o ataca a ciegas.</p>';
+    return '<p class="desc">Nadie sabe qué hay en esta isla. Envía un bote explorador para descubrirlo: hasta entonces no puedes hacer nada más en ella.</p>';
   }
   if (view.type === 'libre') {
     const r = RESOURCES[view.specialty];
@@ -218,10 +218,12 @@ function fleetForm(game, view) {
   const types = [];
   if (view.type === 'brumas') types.push('expedicion');
   else if (view.type !== 'continente') types.push('explorar');
-  const hostile = ['barbaros', 'ciudadela', 'piratas', 'kraken', 'jugador'].includes(view.type) || (view.type === 'continente' && !!view.horde);
-  if (view.type !== 'brumas' && view.colonizedBy == null && (!view.explored || hostile)) types.push('atacar');
-  if (view.type === 'jugador' && !(view.alliance && view.alliance.id === game.alliance?.id)) types.push('sabotaje');
-  if (view.type === 'jugador') types.push('transporte');
+  // Sin explorar, lo único que se puede hacer es mandar un bote a mirar
+  const known = view.explored;
+  const hostile = known && (['barbaros', 'ciudadela', 'piratas', 'kraken', 'jugador'].includes(view.type) || (view.type === 'continente' && !!view.horde));
+  if (view.type !== 'brumas' && view.colonizedBy == null && hostile) types.push('atacar');
+  if (known && view.type === 'jugador' && !(view.alliance && view.alliance.id === game.alliance?.id)) types.push('sabotaje');
+  if (known && view.type === 'jugador') types.push('transporte');
   if (view.type === 'jugador' && view.alliance && view.alliance.id === game.alliance?.id) types.push('apoyo');
   if (view.type === 'libre' && view.explored && view.colonizedBy == null) types.push('colonizar');
   if (view.type === 'ciudadela' && view.explored && view.colonizedBy == null) types.push('conquistar');

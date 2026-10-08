@@ -103,8 +103,8 @@ export function unitSeconds(state, id) {
 /** Multiplicadores de combate de tus tropas. */
 export function playerCombat(state) {
   return {
-    atkMul: 1 + 0.1 * lvl(state, 'herreria') + 0.03 * lvl(state, 'forja') + wonderBonus(state, 'ataque') + relicBonus(state, 'ataque'),
-    hpMul: 1 + 0.1 * lvl(state, 'armaduras') + relicBonus(state, 'defensa'),
+    atkMul: 1 + 0.1 * lvl(state, 'herreria') + 0.03 * lvl(state, 'forja') + 0.03 * lvl(state, 'tactica') + wonderBonus(state, 'ataque') + relicBonus(state, 'ataque'),
+    hpMul: 1 + 0.1 * lvl(state, 'armaduras') + 0.03 * lvl(state, 'tactica') + relicBonus(state, 'defensa'),
   };
 }
 
@@ -263,6 +263,13 @@ export function upkeepPerHour(state) {
   return total * universe.speed * (1 - tavernSaving(state));
 }
 
+/** Oro por hora que cobran las tropas de élite (las de casa y las que están en el mar). */
+export function payPerHour(state) {
+  let total = 0;
+  for (const [id, n] of Object.entries(totalUnits(state))) total += n * (UNITS[id].pay ?? 0);
+  return total * universe.speed;
+}
+
 /** Multiplicador de toda la producción: Coloso y Cosecha abundante. */
 export function productionBonus(state, t = state.lastUpdate) {
   let k = 1 + 0.05 * lvl(state, 'coloso');
@@ -306,10 +313,11 @@ export function economy(state, t = state.lastUpdate) {
     gross[res] = (base[res] + buildings[res] + research[res] + colonies[res] + (res === 'oro' ? taxes : 0)) * bonus * (1 + eventBonus[res] + wonder + relic);
   }
   const upkeep = upkeepPerHour(state);
-  const net = { ...gross, comida: gross.comida - upkeep };
+  const pay = payPerHour(state);
+  const net = { ...gross, comida: gross.comida - upkeep, oro: gross.oro - pay };
   const hungry = {};
-  for (const res of RESOURCE_KEYS) hungry[res] = res === 'comida' ? net.comida : net[res] * 0.5;
-  return { base, buildings, research, colonies, taxes, bonus, eventBonus, gross, upkeep, net, hungry };
+  for (const res of RESOURCE_KEYS) hungry[res] = res === 'comida' ? net.comida : res === 'oro' ? gross.oro * 0.5 - pay : net[res] * 0.5;
+  return { base, buildings, research, colonies, taxes, bonus, eventBonus, gross, upkeep, pay, net, hungry };
 }
 
 /** Lo que el almacén esconde de cada recurso y los piratas no pueden robar. */

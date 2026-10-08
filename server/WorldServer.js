@@ -84,6 +84,9 @@ export class WorldServer {
     this.meta.alliances ??= {};
     this.meta.diplomacy ??= {};
     this.meta.forums ??= {};
+    // Amigos (mutuos) y solicitudes pendientes: id → lista de ids
+    this.meta.friends ??= {};
+    this.meta.friendRequests ??= {};
     this.meta.offers ??= [];
     this.memberOf = new Map();
     for (const a of Object.values(this.meta.alliances)) for (const uid of a.members) this.memberOf.set(uid, a.id);
@@ -894,6 +897,7 @@ export class WorldServer {
       mailUnread: (mail ?? []).filter((m) => m.box === 'in' && !m.read).length,
       forumUnread: this.#forumUnread(userId),
       applications: a && this.#canManage(a, userId) ? (a.applications ?? []).length : 0,
+      friendRequests: (this.meta.friendRequests[userId] ?? []).length,
       state,
       world: { islands, states, players },
       incoming: this.incoming(game.state.home),
@@ -1129,6 +1133,92 @@ export class WorldServer {
   }
 
   /** Pedir entrar: en una alianza abierta se entra directamente; si no, queda la solicitud. */
+  // ── Amigos ─────────────────────────────────────────────────────────────────
+  // Se piden por el nombre; cuando el otro acepta, son amigos los dos. Así se ve
+  // quién está conectado y se le escribe o se visita su perfil en un clic.
+
+  #friendId(name) {
+    const id = this.byName.get(String(name ?? '').trim().toLowerCase());
+    if (id == null || !this.games.has(id)) throw new UserError('No hay ningún jugador con ese nombre.');
+    return id;
+  }
+
+  #link(a, b) {
+    for (const [x, y] of [[a, b], [b, a]]) {
+      const list = (this.meta.friends[x] ??= []);
+      if (!list.includes(y)) list.push(y);
+      this.meta.friendRequests[x] = (this.meta.friendRequests[x] ?? []).filter((id) => id !== y);
+    }
+  }
+
+  /** Pedir amistad (si el otro ya te la había pedido, sois amigos al momento). */
+  addFriend(userId, name) {
+    const other = this.#friendId(name);
+    if (other === userId) throw new UserError('No puedes añadirte a ti mismo.');
+    if ((this.meta.friends[userId] ?? []).includes(other)) throw new UserError('Ya sois amigos.');
+    if ((this.meta.friendRequests[userId] ?? []).includes(other)) {
+      this.#link(userId, other);
+      this.hostNews(other, `👥 ${this.users.get(userId).username} ha aceptado tu amistad`);
+      this.pendingPush.add(other);
+      return 'amigos';
+    }
+    const pending = (this.meta.friendRequests[other] ??= []);
+    if (pending.includes(userId)) throw new UserError('Ya le has pedido amistad. Espera a que conteste.');
+    const sent = Object.values(this.meta.friendRequests).filter((list) => list.includes(userId)).length;
+    if (sent >= 30) throw new UserError('Tienes demasiadas solicitudes sin contestar.');
+    if (pending.length >= 50) throw new UserError('Ese jugador tiene demasiadas solicitudes pendientes.');
+    pending.push(userId);
+    this.hostNews(other, `👥 ${this.users.get(userId).username} quiere ser tu amigo`);
+    this.pendingPush.add(other);
+    return 'pedida';
+  }
+
+  answerFriend(userId, name, accept) {
+    const other = this.#friendId(name);
+    const pending = this.meta.friendRequests[userId] ?? [];
+    if (!pending.includes(other)) throw new UserError('Esa solicitud ya no existe.');
+    if (accept) {
+      this.#link(userId, other);
+      this.hostNews(other, `👥 ${this.users.get(userId).username} ha aceptado tu amistad`);
+      this.pendingPush.add(other);
+    } else this.meta.friendRequests[userId] = pending.filter((id) => id !== other);
+  }
+
+  /** Dejar de ser amigos, o retirar una solicitud que mandaste. */
+  removeFriend(userId, name) {
+    const other = this.#friendId(name);
+    for (const [x, y] of [[userId, other], [other, userId]]) this.meta.friends[x] = (this.meta.friends[x] ?? []).filter((id) => id !== y);
+    this.meta.friendRequests[other] = (this.meta.friendRequests[other] ?? []).filter((id) => id !== userId);
+  }
+
+  /** Lista de amigos (con quién está conectado), solicitudes recibidas y enviadas. */
+  friendList(userId) {
+    const card = (id) => {
+      const info = this.playerInfo(id);
+      const user = this.users.get(id);
+      if (!info || !user) return null;
+      return {
+        name: info.name,
+        city: this.islands.get(this.games.get(id).state.home)?.name ?? '',
+        score: info.score,
+        online: info.online,
+        lastSeen: this.games.get(id).state.lastSeen ?? user.lastSeen ?? 0,
+        alliance: info.alliance?.tag ?? null,
+        island: this.games.get(id).state.home,
+      };
+    };
+    const friends = (this.meta.friends[userId] ?? []).map(card).filter(Boolean);
+    friends.sort((a, b) => Number(b.online) - Number(a.online) || b.lastSeen - a.lastSeen);
+    return {
+      friends,
+      incoming: (this.meta.friendRequests[userId] ?? []).map(card).filter(Boolean),
+      outgoing: Object.entries(this.meta.friendRequests)
+        .filter(([, list]) => list.includes(userId))
+        .map(([id]) => card(Number(id)))
+        .filter(Boolean),
+    };
+  }
+
   requestJoin(userId, allianceId, text = '') {
     const a = this.meta.alliances[Number(allianceId)];
     if (!a) throw new UserError('Esa alianza ya no existe.');

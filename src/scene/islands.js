@@ -3,6 +3,7 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { C, box, colonnade, createShip, createSoldier, cyl, dome, gableRoof, hipRoof, mat, mediterraneanTree, mesh, smokeColumn, stylobate } from './models.js';
 import { wonderLevel, wonderOf } from '../game/rules.js';
 import { Batch, bakeStatic, hashString, mountainGeometry, paintByNormal, plateauGeometry, polar, rng } from './util.js';
+import { coastFactor, coastMax, islandCoast, shapeGeometry } from './coast.js';
 
 // Islas del archipiélago. La base (relieve, playa, árboles) no cambia; lo que hay
 // encima depende de lo que sepas de ella (niebla, campamento, colonia…).
@@ -20,16 +21,32 @@ const PALETTES = {
   kraken: { grass: '#4b5a4a', cliff: '#3f3a40', rock: '#2f2c33' },
 };
 
-/** Radio visible de una isla del mapa. */
+/**
+ * Radio medio de una isla del mapa (la forma real la da su costa, coast.js). `grow` es lo que
+ * la escena la deja crecer según el sitio que hay hasta sus vecinas.
+ */
 export function islandRadius(isl) {
-  return isl.size * 2.4;
+  // Las ciudades de los jugadores son tan grandes como tu propia isla
+  return isl.size * (isl.type === 'jugador' ? 3.25 : 2.4) * (isl.grow ?? 1);
 }
 
 /** Radio de la línea de costa (donde la arena corta el agua), para la espuma. */
 export function shoreRadius(isl) {
   if (isl.type === 'brumas' || isl.land) return 0;
-  if (isl.type === 'continente') return islandRadius(isl) * 1.08;
-  return islandRadius(isl) * 1.19;
+  const R = islandRadius(isl);
+  if (isl.type === 'jugador') return R + 2.7;
+  if (isl.type === 'continente') return R * 1.08;
+  return R * 1.19;
+}
+
+/** Lo que ocupa una isla en el mar como mucho (playa y salientes incluidos), para no pisar a otras. */
+export function islandExtent(isl) {
+  if (isl.type === 'brumas' || isl.land) return 0;
+  const R = islandRadius(isl);
+  const f = coastMax(islandCoast(isl));
+  if (isl.type === 'jugador') return (R + 4.6) * f;
+  if (isl.type === 'continente') return R * 1.12 * f;
+  return R * 1.34 * f;
 }
 
 export function createIslandBase(isl) {
@@ -41,14 +58,19 @@ export function createIslandBase(isl) {
   if (isl.type === 'continente') return bakeStatic(continentBase(isl, R, rand, seed));
   const pal = PALETTES[isl.type] ?? PALETTES.default;
   const g = new THREE.Group();
+  // Costa irregular: salientes, bahías y cabos (la misma forma que la espuma del agua)
+  const h = islandCoast(isl);
+  const at = (deg) => coastFactor(h, THREE.MathUtils.degToRad(deg));
+  const city = isl.type === 'jugador';
 
-  const geo = plateauGeometry(R, R * 0.86, 1.9, 28, seed % 1000, ISLAND_TOP);
+  const geo = shapeGeometry(plateauGeometry(R, city ? R - 1.6 : R * 0.86, 1.9, 56, seed % 1000, ISLAND_TOP), h);
   paintByNormal(geo, (ny, cy) => (ny > 0.7 ? pal.grass : cy > -0.6 ? pal.cliff : pal.rock));
   const land = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 1 }));
   land.receiveShadow = true;
   g.add(land);
 
-  const sand = new THREE.Mesh(new THREE.CylinderGeometry(R * 1.16, R * 1.32, 1.3, 28), mat(isl.type === 'kraken' ? '#6b6470' : '#e8d49a'));
+  const sandGeo = shapeGeometry(new THREE.CylinderGeometry(city ? R + 2.5 : R * 1.16, city ? R + 4.2 : R * 1.32, 1.3, 56).toNonIndexed(), h);
+  const sand = new THREE.Mesh(sandGeo, mat(isl.type === 'kraken' ? '#6b6470' : '#e8d49a'));
   sand.position.y = -0.45 - 0.65;
   g.add(sand);
 
@@ -56,9 +78,10 @@ export function createIslandBase(isl) {
   const hills = [];
   if (isl.type !== 'ruinas') {
     const a = rand() * 360;
-    hills.push({ p: polar(R * 0.62, a, ISLAND_TOP - 0.05), r: R * 0.42 });
+    hills.push({ p: polar(R * 0.62 * at(a), a, ISLAND_TOP - 0.05), r: R * 0.42 });
     g.userData.hillAngle = a;
-    if (R > 15 && isl.type !== 'kraken') hills.push({ p: polar(R * 0.66, a + 40 + rand() * 30, ISLAND_TOP - 0.05), r: R * 0.26 });
+    const b = a + 40 + rand() * 30;
+    if (R > 15 && isl.type !== 'kraken') hills.push({ p: polar(R * 0.66 * at(b), b, ISLAND_TOP - 0.05), r: R * 0.26 });
     hills.forEach((h, i) => {
       const hill = new THREE.Mesh(
         mountainGeometry(i ? R * 0.24 : R * 0.38, R * (isl.type === 'kraken' ? 0.75 : i ? 0.32 : 0.5), (seed + i * 31) % 97, {
@@ -79,8 +102,13 @@ export function createIslandBase(isl) {
   const onHill = (p) => hills.some((h) => p.distanceTo(h.p) < h.r);
   const trees = isl.type === 'kraken' ? 0 : Math.round(R * 2.4);
   const leafColors = isl.type === 'libre' && isl.specialty === 'madera' ? ['#2f7a43', '#3f8a3a'] : ['#3f8a3a', '#4f9a3a', '#2f7a43', '#5a9e3c'];
+  // Un punto al azar dentro de la isla, entre dos fracciones del radio en esa dirección
+  const inland = (k0, k1, y = ISLAND_TOP) => {
+    const deg = rand() * 360;
+    return polar(R * (k0 + rand() * (k1 - k0)) * at(deg), deg, y);
+  };
   for (let i = 0; i < trees; i++) {
-    const p = polar(R * (0.5 + rand() * 0.4), rand() * 360, ISLAND_TOP);
+    const p = inland(0.5, 0.9);
     if (onHill(p)) continue;
     const t = isl.type === 'ruinas' || rand() < 0.2 ? tree(leafColors[i % leafColors.length], true) : mediterraneanTree(rand());
     t.position.copy(p);
@@ -89,7 +117,7 @@ export function createIslandBase(isl) {
     decor.add(t);
   }
   for (let i = 0; i < Math.round(R * 1.2); i++) {
-    const p = polar(R * (0.35 + rand() * 0.55), rand() * 360, ISLAND_TOP);
+    const p = inland(0.35, 0.9);
     if (onHill(p)) continue;
     const big = rand() < 0.3;
     const m = mesh(new THREE.DodecahedronGeometry(big ? 0.45 : 0.32), big ? (isl.type === 'kraken' ? '#2f2c33' : '#8c8780') : i % 2 ? '#4f9a3a' : '#3f8a3a');
@@ -101,7 +129,7 @@ export function createIslandBase(isl) {
   if (isl.type !== 'kraken') {
     for (let i = 0; i < Math.round(R * 0.7); i++) {
       const t = tree('#4f9a3a', true);
-      t.position.copy(polar(R * (1.02 + rand() * 0.1), rand() * 360, -0.45));
+      t.position.copy(city ? inland((R + 0.6) / R, (R + 2) / R, -0.45) : inland(1.02, 1.12, -0.45));
       t.scale.setScalar(0.9 + rand() * 0.5);
       t.rotation.y = rand() * Math.PI;
       decor.add(t);
@@ -109,7 +137,7 @@ export function createIslandBase(isl) {
   }
   for (let i = 0; i < 5; i++) {
     const rock = mesh(new THREE.DodecahedronGeometry(0.6 + rand() * 0.8), isl.type === 'kraken' ? '#2f2c33' : '#7c7466');
-    rock.position.copy(polar(R * (1.25 + rand() * 0.2), rand() * 360, -0.8));
+    rock.position.copy(city ? inland((R + 4.4) / R, (R + 5.5) / R, -0.8) : inland(1.25, 1.45, -0.8));
     rock.scale.y = 0.6;
     decor.add(rock);
   }
@@ -131,17 +159,9 @@ function siteBase(isl, R) {
 /** Un continente: costa irregular, montes, bosques, un lago y caminos entre sus asentamientos. */
 function continentBase(isl, R, rand, seed) {
   const g = new THREE.Group();
-  const shape = isl.shape?.length ? isl.shape : Array(18).fill(1);
-  const n = shape.length;
-  // Contorno suavizado (cada radio del contorno, interpolado)
-  const radiusAt = (deg) => {
-    const f = (((deg % 360) + 360) % 360) / (360 / n);
-    const i = Math.floor(f);
-    const t = f - i;
-    const a = shape[i % n];
-    const b = shape[(i + 1) % n];
-    return R * (a + (b - a) * (t * t * (3 - 2 * t)));
-  };
+  // Contorno: la serie de Fourier que mejor se ajusta a su silueta (la misma que usa el agua)
+  const h = islandCoast(isl);
+  const radiusAt = (deg) => R * coastFactor(h, THREE.MathUtils.degToRad(deg));
   const outline = (k) => {
     const pts = [];
     for (let i = 0; i < 72; i++) {
@@ -162,7 +182,7 @@ function continentBase(isl, R, rand, seed) {
     m.receiveShadow = true;
     return m;
   };
-  g.add(slab(1.0, 2.0, ISLAND_TOP, (ny, cy) => (ny > 0.7 ? '#6fae4a' : cy > -0.6 ? '#8a6a46' : '#7c7466'), 0.8));
+  g.add(slab(1.0, 2.0, ISLAND_TOP, (ny, cy) => (ny > 0.7 ? '#86ab4e' : cy > -0.6 ? '#a17f55' : '#8c8070'), 0.8));
   g.add(slab(1.1, 1.3, -0.45, '#e8d49a', 0));
 
   const sites = (isl.sites ?? []).map(([x, z]) => new THREE.Vector3(x, ISLAND_TOP, z));
@@ -215,7 +235,7 @@ function continentBase(isl, R, rand, seed) {
     const size = 3 + rand() * 4;
     if (!freeAt(p, 0.75) || busy.some((b) => b.p.distanceTo(p) < b.r + size)) continue;
     const hill = new THREE.Mesh(
-      mountainGeometry(size, size * (1.2 + rand() * 0.8), (seed + i * 17) % 97, { snow: '#eef1f4', grass: '#6fae4a', rock: '#8c8780' }),
+      mountainGeometry(size, size * (1.2 + rand() * 0.8), (seed + i * 17) % 97, { snow: '#eef1f4', grass: '#86ab4e', rock: '#8c8780' }),
       new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 1 }),
     );
     hill.position.copy(p);
@@ -228,10 +248,10 @@ function continentBase(isl, R, rand, seed) {
   // Bosques y prados
   const leafColors = ['#3f8a3a', '#4f9a3a', '#2f7a43', '#5a9e3c'];
   const clusters = Array.from({ length: 5 }, () => polar(R * (0.3 + rand() * 0.5), rand() * 360, ISLAND_TOP));
-  for (let i = 0, made = 0; i < 1400 && made < R * 5; i++) {
+  for (let i = 0, made = 0; i < 3200 && made < R * 9; i++) {
     const p = i % 2 ? clusters[i % 5].clone().add(polar(rand() * 8, rand() * 360)) : polar(R * rand() * 0.95, rand() * 360, ISLAND_TOP);
     if (!freeAt(p, 0.9)) continue;
-    const t = tree(leafColors[made % 4], rand() < 0.15);
+    const t = rand() < 0.1 ? tree(leafColors[made % 4], true) : mediterraneanTree(rand());
     t.position.copy(p).setY(ISLAND_TOP);
     t.scale.setScalar(0.9 + rand() * 0.7);
     t.rotation.y = rand() * Math.PI;

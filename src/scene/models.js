@@ -1116,19 +1116,20 @@ export function wallHeight(level) {
 }
 
 function muralla(level) {
-  // Puerta principal; el resto del muro lo dibuja la escena alrededor de la ciudad.
+  // Puerta principal (tan ancha como la avenida: pasan los carros y la gente por las aceras);
+  // el resto del muro lo dibuja la escena alrededor de la ciudad.
   const g = new THREE.Group();
   const h = wallHeight(level);
-  for (const x of [-1.3, 1.3]) {
+  for (const x of [-2.15, 2.15]) {
     g.add(box(1.0, h + 0.8, 1.0, C.stone, x, 0, 0));
     for (const dx of [-0.35, 0, 0.35]) for (const dz of [-0.35, 0.35]) g.add(box(0.22, 0.3, 0.22, C.stone, x + dx, h + 0.8, dz));
   }
-  g.add(box(1.7, 0.5, 0.8, C.stoneDark, 0, h - 0.1, 0));
+  g.add(box(3.5, 0.5, 0.8, C.stoneDark, 0, h - 0.1, 0));
   const pole = h + 1.1;
-  g.add(cyl(0.03, 0.03, 1.0, 5, C.dark, 1.3, pole, 0));
+  g.add(cyl(0.03, 0.03, 1.0, 5, C.dark, 2.15, pole, 0));
   const flag = box(0.5, 0.32, 0.02, C.cloth[0], 0, 0, 0);
   flag.geometry.translate(0.25, 0, 0);
-  flag.position.set(1.3, pole + 0.8, 0);
+  flag.position.set(2.15, pole + 0.8, 0);
   flag.userData.wave = true;
   g.add(flag);
   return g;
@@ -1395,10 +1396,60 @@ function astillero(level) {
 
 const FACTORIES = { ayuntamiento, aserradero, cantera, granja, mina, fundicion, mercado, almacen, academia, templo, cuartel, puerto, muralla, coloso, taberna, forja, torre, faro, astillero };
 
+// Los que no tienen sitio alrededor (están en la costa, sobre rocas o rodean la isla)
+const NO_ADORN = new Set(['puerto', 'muralla', 'faro', 'astillero', 'coloso']);
+
+/**
+ * Escalones de prosperidad comunes a todos los edificios: con el nivel ganan un enlosado
+ * y cipreses en maceta (5), pebeteros y una estatua (10) y un remate dorado con estandartes (15).
+ */
+function adorn(g, id, level) {
+  if (NO_ADORN.has(id) || level < 5) return;
+  g.updateMatrixWorld(true);
+  const box3 = new THREE.Box3().setFromObject(g);
+  const hx = Math.max(1.2, Math.min(2.1, (box3.max.x - box3.min.x) / 2));
+  const hz = Math.max(1.0, Math.min(2.0, (box3.max.z - box3.min.z) / 2));
+  const front = hz + 0.35;
+  // Enlosado y cipreses en maceta a la entrada
+  g.add(box(hx * 2 + 0.6, 0.03, hz * 2 + 0.6, '#ddd0b4', 0, 0, 0));
+  for (const s of [-1, 1]) {
+    g.add(cyl(0.16, 0.12, 0.22, 8, '#b9643a', s * (hx + 0.1), 0, front));
+    const tree = cypress('#2f5e34');
+    tree.scale.setScalar(0.42);
+    tree.position.set(s * (hx + 0.1), 0.2, front);
+    g.add(tree);
+  }
+  if (level >= 10) {
+    // Pebeteros de mármol que arden de noche y una estatua a un lado
+    for (const s of [-1, 1]) {
+      g.add(cyl(0.07, 0.09, 0.75, 8, C.marble, s * (hx - 0.35), 0, front + 0.15));
+      g.add(cyl(0.17, 0.08, 0.13, 8, '#8a6a3a', s * (hx - 0.35), 0.75, front + 0.15), cyl(0.12, 0.12, 0.03, 8, C.dark, s * (hx - 0.35), 0.88, front + 0.15, WINDOW_GLOW));
+    }
+    g.add(statue(-(hx + 0.45), 0, C.marble, 0.8));
+  }
+  if (level >= 15) {
+    // Remate dorado en lo más alto y estandartes rojos a los lados
+    const top = box3.max.y;
+    const finial = mesh(new THREE.SphereGeometry(0.14, 8, 6), C.gold, { metalness: 0.55, roughness: 0.35 });
+    finial.position.set(0, top + 0.12, 0);
+    g.add(finial);
+    for (const s of [-1, 1]) {
+      g.add(cyl(0.025, 0.025, 1.6, 5, C.dark, s * (hx + 0.35), 0, -hz * 0.5));
+      const flag = box(0.42, 0.55, 0.02, '#a8231a', 0, 0, 0);
+      flag.geometry.translate(0.21, 0, 0);
+      flag.position.set(s * (hx + 0.35), 1.25, -hz * 0.5);
+      flag.userData.wave = true;
+      g.add(flag);
+    }
+  }
+}
+
 export function createBuilding(id, level) {
   if (level <= 0) return bakeStatic(emptyPlot(id));
+  const model = FACTORIES[id](level);
+  adorn(model, id, level);
   // Lo que no se mueve se funde en una sola malla: muchas menos llamadas de dibujo
-  const g = bakeStatic(FACTORIES[id](level), windowMaterial());
+  const g = bakeStatic(model, windowMaterial());
   if (id !== 'puerto' && id !== 'muralla' && id !== 'coloso') g.scale.setScalar(1 + Math.min(level, 15) * 0.025);
   return g;
 }
@@ -1464,6 +1515,28 @@ const TROOPS = {
     g.add(cyl(0.012, 0.012, 0.32, 4, C.woodDark, 0.12, 0.05, 0.03));
     g.add(box(0.03, 0.08, 0.07, '#c9ced6', 0.12, 0.3, 0.07));
   } },
+  // Élites
+  espartano: { color: '#8f1d16', cuirass: true, pteruges: '#8f1d16', greaves: true, helmet: 'corintio', crest: '#8f1d16', cloak: '#a8231a', beard: true, arms: ['abajo', 'adelante'], extra: (g) => {
+    spear(g, 1.1);
+    aspis(g, BRONZE_C, '#a8231a');
+    // La lambda de Lacedemonia en el escudo
+    const l = box(0.02, 0.1, 0.012, '#f4efe4', -0.11, 0.25, 0.092);
+    l.rotation.z = 0.35;
+    const r = box(0.02, 0.1, 0.012, '#f4efe4', -0.13, 0.25, 0.092);
+    r.rotation.z = -0.35;
+    g.add(l, r);
+  } },
+  sagitario: { color: '#5aa0c8', belt: LEATHER, helmet: 'gorro', hair: HAIR[1], greaves: true, arms: ['adelante', 'adelante'], extra: (g) => {
+    const bow = mesh(new THREE.TorusGeometry(0.2, 0.012, 4, 14, Math.PI), '#4a2e18');
+    bow.position.set(0, 0.36, 0.2);
+    bow.rotation.set(0, 0, Math.PI / 2);
+    g.add(bow);
+    g.add(box(0.012, 0.012, 0.3, '#e8e2d0', 0, 0.36, 0.2));
+    const quiver = cyl(0.035, 0.03, 0.26, 6, '#8f1d16', 0.05, 0.28, -0.08);
+    quiver.rotation.z = -0.35;
+    g.add(quiver);
+    for (let k = 0; k < 4; k++) g.add(box(0.012, 0.07, 0.012, '#f4efe4', 0.1 + k * 0.012, 0.52, -0.08));
+  } },
   pirata: { color: '#e8e2d0', belt: '#b8442f', helmet: 'panuelo', beard: true, hair: HAIR[2], arms: ['abajo', 'abajo'], extra: (g) => {
     const blade = box(0.025, 0.24, 0.05, '#c9ced6', 0.13, 0.04, 0.04);
     blade.rotation.z = 0.15;
@@ -1488,6 +1561,66 @@ export function createSoldier(id) {
     arm.rotation.x = 0.6;
     g.add(arm);
     g.add(box(0.14, 0.1, 0.14, C.stone, 0, 0.55, -0.3));
+    return g;
+  }
+  if (id === 'catafracto') {
+    // Caballo y jinete cubiertos de escamas de hierro, con lanza larga (contus)
+    const back = horse(g, '#5a4636');
+    g.add(box(0.24, 0.16, 0.5, IRON, 0, 0.3, 0), box(0.12, 0.16, 0.14, IRON, 0, 0.42, 0.28));
+    for (let k = 0; k < 5; k++) g.add(box(0.245, 0.012, 0.5, '#6e737a', 0, 0.33 + k * 0.025, 0));
+    const rider = figure({ color: '#4a4f57', cuirass: true, cuirassColor: IRON, greaves: true, helmet: 'legionario', crest: '#c9a24a', cloak: '#6a2a7a', arms: ['adelante', 'abajo'] });
+    spear(rider, 1.2);
+    rider.scale.setScalar(0.72);
+    rider.position.set(0, back - 0.1, -0.02);
+    g.add(rider);
+    return g;
+  }
+  if (id === 'elefante') {
+    // Elefante con su torre de arqueros y el cornaca en el cuello
+    const grey = '#8a8c8f';
+    const body = mesh(new THREE.SphereGeometry(0.32, 10, 8), grey);
+    body.scale.set(0.95, 0.85, 1.35);
+    body.position.y = 0.62;
+    g.add(body);
+    for (const [x, z] of [[-0.17, -0.25], [0.17, -0.25], [-0.17, 0.25], [0.17, 0.25]]) g.add(cyl(0.085, 0.09, 0.42, 7, grey, x, 0, z));
+    const head = mesh(new THREE.SphereGeometry(0.2, 9, 7), grey);
+    head.position.set(0, 0.78, 0.48);
+    g.add(head);
+    for (const s of [-1, 1]) {
+      const ear = box(0.03, 0.24, 0.2, '#7d7f82', s * 0.2, 0.68, 0.42);
+      ear.rotation.y = s * 0.5;
+      g.add(ear);
+      const tusk = mesh(new THREE.ConeGeometry(0.025, 0.25, 5), '#f4efe4');
+      tusk.position.set(s * 0.09, 0.58, 0.68);
+      tusk.rotation.x = -1.2;
+      g.add(tusk);
+    }
+    const trunk = cyl(0.04, 0.07, 0.42, 7, grey, 0, 0, 0);
+    trunk.position.set(0, 0.3, 0.64);
+    trunk.rotation.x = 0.25;
+    g.add(trunk);
+    const tail = box(0.03, 0.22, 0.03, grey, 0, 0.5, -0.45);
+    tail.rotation.x = -0.3;
+    g.add(tail);
+    // Gualdrapa roja y la torre de madera con escudos
+    g.add(box(0.5, 0.06, 0.6, '#a8231a', 0, 0.86, -0.05), box(0.52, 0.03, 0.62, C.gold, 0, 0.84, -0.05));
+    g.add(box(0.4, 0.3, 0.4, C.wood, 0, 0.92, -0.08));
+    for (const [x, z] of [[-0.18, -0.26], [0.18, -0.26], [-0.18, 0.1], [0.18, 0.1]]) g.add(box(0.06, 0.1, 0.06, C.wood, x, 1.22, z));
+    for (const s of [-1, 1]) {
+      const sh = mesh(new THREE.CylinderGeometry(0.08, 0.08, 0.02, 10), BRONZE_C);
+      sh.rotation.z = Math.PI / 2;
+      sh.position.set(s * 0.21, 1.06, -0.08);
+      g.add(sh);
+    }
+    const archer = figure({ color: '#5aa0c8', helmet: 'gorro', arms: ['adelante', 'adelante'] });
+    archer.scale.setScalar(0.55);
+    archer.position.set(0, 1.1, -0.08);
+    g.add(archer);
+    const mahout = figure({ color: '#e3b23c', skin: SKIN[2], arms: ['adelante', 'adelante'] });
+    mahout.scale.setScalar(0.5);
+    mahout.position.set(0, 0.82, 0.3);
+    g.add(mahout);
+    g.scale.setScalar(0.85);
     return g;
   }
   if (id === 'caballero') {
@@ -1830,6 +1963,19 @@ const SHIPS = {
       flame.userData.flicker = true;
       g.add(flame);
     }
+  },
+  liburna(g) {
+    // Liburna: birreme ligera y rápida, con espolón, ojos y vela roja y blanca
+    const hull = shipHull({ len: 2.5, beam: 0.62, depth: 0.38, rise: 0.28, full: 0.8, color: '#a8784a', band: '#a8231a' });
+    g.add(hull.mesh);
+    ram(g, 1.25, 0.1);
+    bowEyes(g, 0.98, hull.half(0.98) + 0.005, hull.top(0.9) - 0.1, 0.06);
+    sternPost(g, -1.25, hull.top(0));
+    oars(g, { n: 8, rows: 2, z0: -0.85, z1: 0.85, x: 0.32, y: hull.top(0.5) - 0.18, len: 0.65 });
+    railShields(g, 4, -0.6, 0.7, 0.33, hull.top(0.5) - 0.02, ['#a8231a', '#f4efe6']);
+    squareRig(g, { z: 0.1, h: 1.5, w: 1.0, sh: 0.72, colors: ['#f4efe6', '#a8231a'], stripes: 7, bow: new THREE.Vector3(0, hull.top(1), 1.2), stern: new THREE.Vector3(0, hull.top(0) + 0.1, -1.15) });
+    addFlag(g, 0, hull.top(0.5) + 1.62, 0.1, '#a8231a', 0.35, 0.2);
+    steering(g, -0.95, hull.half(-0.95) + 0.03, hull.top(0.1));
   },
   dromon(g) {
     // Dromón: el gran barco de guerra, con dos velas latinas, dos filas de remos, castillo y sifón de fuego
