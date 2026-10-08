@@ -262,7 +262,7 @@ export class Hud {
     this.#renderVisitor();
     this.#renderVacation();
     this.#renderModal();
-    const forum = this.game.forumUnread ?? 0;
+    const forum = (this.game.forumUnread ?? 0) + (this.game.allianceApplications ?? 0);
     const fBadge = this.allianceBtn.querySelector('.badge');
     fBadge.hidden = !forum;
     fBadge.textContent = forum;

@@ -15,6 +15,7 @@ Juego de estrategia multijugador en el navegador al estilo de Ikariam/OGame: un 
 - Escena: lo estático se funde en pocas mallas (`Batch` y `bakeStatic` en `scene/util.js`); lo que se anima (`userData.spin`, `wave`, `bob`…), lo transparente y lo que brilla queda aparte. Mantén eso al añadir modelos para no disparar las llamadas de dibujo.
 - Maravillas: el progreso va en el estado compartido del continente (`rt.wonder`); el bono de cada jugador se guarda en `state.wonderBonus` (lo calcula `WorldServer.wonderBonusFor` al colonizar, al subir de nivel una maravilla y al cargar) y lo leen las fórmulas de `rules.js`.
 - Rendimiento: con 300 jugadores un segundo de juego cuesta unos 2 ms y un estado ~1 ms. Las respuestas JSON grandes, los archivos del juego y el WebSocket van comprimidos (brotli/gzip, `server/index.js`).
+- Rangos de alianza: `founder` es el líder, `officers` los oficiales (`#canManage`), `applications` las solicitudes y `open` si se entra sin pedir permiso. La ruta `/api/alliance/join` pasa por `requestJoin`; `joinAlliance` mete directamente (lo usa aceptar una solicitud).
 - Recuperar la cuenta: el código se guarda cifrado en `meta.recovery[uid]` (sin tocar la tabla de usuarios) y cada uso lo renueva. Rutas `/api/recover`, `/api/recovery` y `/api/admin/reset`.
 - Reliquias: `state.relics` ({id, equipped}); sus efectos los suma `relicBonus` en `rules.js`.
 - Three.js va en su propio archivo (`vite.config.js`) para que el navegador lo guarde entre versiones.

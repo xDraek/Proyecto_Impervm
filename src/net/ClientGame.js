@@ -30,6 +30,7 @@ export class ClientGame extends Game {
     this.admin = !!snap.admin;
     this.mailUnread = snap.mailUnread ?? 0;
     this.forumUnread = snap.forumUnread ?? 0;
+    this.allianceApplications = snap.applications ?? 0;
     const islandsChanged = this.world.apply(snap.world);
     this.state = snap.state;
     this.incoming = snap.incoming ?? [];

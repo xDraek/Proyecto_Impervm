@@ -273,14 +273,19 @@ async function api(req, res, url) {
     }
 
     // Alianzas
-    if (route === 'GET /api/alliances') return send(res, 200, { alliances: world.allianceList() });
+    if (route === 'GET /api/alliances') return send(res, 200, { alliances: world.allianceList(uid) });
     if (route === 'GET /api/alliance') return send(res, 200, { alliance: world.allianceDetail(uid) });
     if (req.method === 'POST' && url.pathname.startsWith('/api/alliance')) {
       if (limited(`social:${uid}`, 20, 10_000)) return send(res, 429, { error: 'Vas demasiado rápido.' });
       const body = await readJson(req);
       const sub = url.pathname.slice('/api/alliance'.length);
       if (sub === '') world.createAlliance(uid, body.name, body.tag);
-      else if (sub === '/join') world.joinAlliance(uid, int(body.id));
+      else if (sub === '/join') world.requestJoin(uid, int(body.id), body.text);
+      else if (sub === '/cancel') world.cancelApplication(uid, int(body.id));
+      else if (sub === '/answer') world.answerApplication(uid, int(body.userId), body.accept === true);
+      else if (sub === '/officer') world.setOfficer(uid, int(body.userId), body.on === true);
+      else if (sub === '/transfer') world.transferLeadership(uid, int(body.userId));
+      else if (sub === '/open') world.setAllianceOpen(uid, body.open === true);
       else if (sub === '/leave') world.leaveAlliance(uid);
       else if (sub === '/kick') world.kickMember(uid, int(body.userId));
       else if (sub === '/description') world.describeAlliance(uid, body.text);

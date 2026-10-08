@@ -655,6 +655,7 @@ export class WorldServer {
       admin: this.isAdmin(userId),
       mailUnread: (mail ?? []).filter((m) => m.box === 'in' && !m.read).length,
       forumUnread: this.#forumUnread(userId),
+      applications: a && this.#canManage(a, userId) ? (a.applications ?? []).length : 0,
       state,
       world: { islands, states, players },
       incoming: this.incoming(game.state.home),
@@ -757,9 +758,17 @@ export class WorldServer {
     return a.members.reduce((sum, uid) => sum + (this.games.get(uid)?.score() ?? 0), 0);
   }
 
-  allianceList() {
+  allianceList(userId = null) {
     return Object.values(this.meta.alliances)
-      .map((a) => ({ id: a.id, name: a.name, tag: a.tag, members: a.members.length, points: this.#alliancePoints(a) }))
+      .map((a) => ({
+        id: a.id,
+        name: a.name,
+        tag: a.tag,
+        members: a.members.length,
+        points: this.#alliancePoints(a),
+        open: !!a.open,
+        applied: userId != null && (a.applications ?? []).some((x) => x.uid === userId),
+      }))
       .sort((a, b) => b.points - a.points)
       .map((a, i) => ({ ...a, rank: i + 1 }));
   }
@@ -770,7 +779,8 @@ export class WorldServer {
     const members = a.members
       .map((uid) => {
         const info = this.playerInfo(uid);
-        return { id: uid, name: info?.name, city: this.islands.get(this.games.get(uid)?.state.home)?.name, island: this.games.get(uid)?.state.home, points: info?.score ?? 0, online: info?.online, founder: uid === a.founder };
+        const role = uid === a.founder ? 'lider' : (a.officers ?? []).includes(uid) ? 'oficial' : 'miembro';
+        return { id: uid, name: info?.name, city: this.islands.get(this.games.get(uid)?.state.home)?.name, island: this.games.get(uid)?.state.home, points: info?.score ?? 0, online: info?.online, founder: uid === a.founder, role };
       })
       .sort((x, y) => y.points - x.points);
     return {
@@ -780,9 +790,15 @@ export class WorldServer {
       description: a.description,
       founder: a.founder,
       isFounder: a.founder === userId,
+      canManage: this.#canManage(a, userId),
+      open: !!a.open,
       points: this.#alliancePoints(a),
       members,
       diplomacy: this.#diplomacyOf(a.id),
+      // Las solicitudes solo las ven quienes pueden aceptarlas
+      applications: this.#canManage(a, userId)
+        ? (a.applications ?? []).map((x) => ({ id: x.uid, name: this.users.get(x.uid)?.username ?? '¿?', points: this.games.get(x.uid)?.score() ?? 0, t: x.t, text: x.text }))
+        : [],
     };
   }
 
@@ -804,6 +820,84 @@ export class WorldServer {
     return this.allianceDetail(userId);
   }
 
+  /** Líder u oficial: puede aceptar solicitudes, expulsar y moderar. */
+  #canManage(a, userId) {
+    return a.founder === userId || (a.officers ?? []).includes(userId);
+  }
+
+  /** Pedir entrar: en una alianza abierta se entra directamente; si no, queda la solicitud. */
+  requestJoin(userId, allianceId, text = '') {
+    const a = this.meta.alliances[Number(allianceId)];
+    if (!a) throw new UserError('Esa alianza ya no existe.');
+    if (this.allianceOf(userId)) throw new UserError('Ya estás en una alianza.');
+    if (a.open) return this.joinAlliance(userId, a.id);
+    if (a.members.length >= MAX_MEMBERS) throw new UserError(`La alianza está llena (${MAX_MEMBERS} miembros).`);
+    a.applications ??= [];
+    if (a.applications.some((x) => x.uid === userId)) throw new UserError('Ya has pedido entrar en esa alianza.');
+    if (a.applications.length >= 30) throw new UserError('Esa alianza tiene demasiadas solicitudes pendientes.');
+    a.applications.push({ uid: userId, t: Date.now(), text: String(text ?? '').replace(/\s+/g, ' ').trim().slice(0, 200) });
+    this.announce(`📨 ${this.users.get(userId).username} pide entrar en la alianza`, `a:${a.id}`);
+    for (const uid of [a.founder, ...(a.officers ?? [])]) this.pendingPush.add(uid);
+    return null;
+  }
+
+  cancelApplication(userId, allianceId) {
+    const a = this.meta.alliances[Number(allianceId)];
+    if (!a) return;
+    a.applications = (a.applications ?? []).filter((x) => x.uid !== userId);
+  }
+
+  /** Aceptar o rechazar a quien pide entrar (líder u oficiales). */
+  answerApplication(userId, targetId, accept) {
+    const a = this.allianceOf(userId);
+    if (!a || !this.#canManage(a, userId)) throw new UserError('Solo el líder y los oficiales pueden responder a las solicitudes.');
+    const app = (a.applications ?? []).find((x) => x.uid === targetId);
+    if (!app) throw new UserError('Esa solicitud ya no está.');
+    a.applications = a.applications.filter((x) => x !== app);
+    const name = this.users.get(targetId)?.username ?? '¿?';
+    if (!accept) {
+      this.hostNews(targetId, `📨 La alianza ${a.name} [${a.tag}] no ha aceptado tu solicitud`);
+      return this.allianceDetail(userId);
+    }
+    if (this.allianceOf(targetId)) throw new UserError(`${name} ya está en otra alianza.`);
+    this.joinAlliance(targetId, a.id);
+    this.hostNews(targetId, `🤝 ¡Te han aceptado en la alianza ${a.name} [${a.tag}]!`);
+    this.pendingPush.add(targetId);
+    return this.allianceDetail(userId);
+  }
+
+  /** El líder nombra o quita oficiales. */
+  setOfficer(userId, targetId, on) {
+    const a = this.allianceOf(userId);
+    if (!a || a.founder !== userId) throw new UserError('Solo el líder nombra oficiales.');
+    if (!a.members.includes(targetId) || targetId === userId) throw new UserError('Ese jugador no está en tu alianza.');
+    a.officers = (a.officers ?? []).filter((uid) => uid !== targetId);
+    if (on) a.officers.push(targetId);
+    const name = this.users.get(targetId).username;
+    this.announce(on ? `⭐ ${name} es ahora oficial de la alianza` : `${name} deja de ser oficial`, `a:${a.id}`);
+    return this.allianceDetail(userId);
+  }
+
+  /** El líder cede el mando a otro miembro (y pasa a ser oficial). */
+  transferLeadership(userId, targetId) {
+    const a = this.allianceOf(userId);
+    if (!a || a.founder !== userId) throw new UserError('Solo el líder puede ceder el mando.');
+    if (!a.members.includes(targetId) || targetId === userId) throw new UserError('Ese jugador no está en tu alianza.');
+    a.founder = targetId;
+    a.officers = [...(a.officers ?? []).filter((uid) => uid !== targetId), userId];
+    this.announce(`👑 ${this.users.get(targetId).username} lidera ahora la alianza`, `a:${a.id}`);
+    for (const uid of a.members) this.pendingPush.add(uid);
+    return this.allianceDetail(userId);
+  }
+
+  /** Abierta (entra quien quiera) o con solicitud. */
+  setAllianceOpen(userId, open) {
+    const a = this.allianceOf(userId);
+    if (!a || a.founder !== userId) throw new UserError('Solo el líder decide cómo se entra en la alianza.');
+    a.open = !!open;
+    return this.allianceDetail(userId);
+  }
+
   joinAlliance(userId, allianceId) {
     const a = this.meta.alliances[Number(allianceId)];
     if (!a) throw new UserError('Esa alianza ya no existe.');
@@ -811,6 +905,8 @@ export class WorldServer {
     if (a.members.length >= MAX_MEMBERS) throw new UserError(`La alianza está llena (${MAX_MEMBERS} miembros).`);
     a.members.push(userId);
     this.memberOf.set(userId, a.id);
+    // Sus solicitudes a otras alianzas ya no hacen falta
+    for (const other of Object.values(this.meta.alliances)) if (other.applications) other.applications = other.applications.filter((x) => x.uid !== userId);
     this.rankingCache = null;
     this.announce(`🤝 ${this.users.get(userId).username} se une a la alianza`, `a:${a.id}`);
     return this.allianceDetail(userId);
@@ -820,6 +916,7 @@ export class WorldServer {
     const a = this.allianceOf(userId);
     if (!a) throw new UserError('No estás en ninguna alianza.');
     a.members = a.members.filter((uid) => uid !== userId);
+    a.officers = (a.officers ?? []).filter((uid) => uid !== userId);
     this.memberOf.delete(userId);
     const name = this.users.get(userId).username;
     if (!a.members.length) {
@@ -827,7 +924,11 @@ export class WorldServer {
       delete this.meta.forums[a.id];
       for (const key of Object.keys(this.meta.diplomacy)) if (key.split('-').includes(String(a.id))) delete this.meta.diplomacy[key];
     } else {
-      if (a.founder === userId) a.founder = a.members[0];
+      // Si se va el líder, manda el oficial más antiguo (o el miembro más antiguo)
+      if (a.founder === userId) {
+        a.founder = a.officers[0] ?? a.members[0];
+        a.officers = a.officers.filter((uid) => uid !== a.founder);
+      }
       this.announce(kickedBy ? `🤝 ${name} ha sido expulsado de la alianza` : `🤝 ${name} deja la alianza`, `a:${a.id}`);
     }
     this.rankingCache = null;
@@ -836,8 +937,9 @@ export class WorldServer {
 
   kickMember(userId, targetId) {
     const a = this.allianceOf(userId);
-    if (!a || a.founder !== userId) throw new UserError('Solo quien lidera la alianza puede expulsar.');
+    if (!a || !this.#canManage(a, userId)) throw new UserError('Solo el líder y los oficiales pueden expulsar.');
     if (targetId === userId || !a.members.includes(targetId)) throw new UserError('Ese jugador no está en tu alianza.');
+    if (targetId === a.founder || (a.founder !== userId && (a.officers ?? []).includes(targetId))) throw new UserError('No puedes expulsar a alguien de tu mismo rango o superior.');
     this.leaveAlliance(targetId, { kickedBy: userId });
     return this.allianceDetail(userId);
   }
@@ -874,7 +976,7 @@ export class WorldServer {
     const seen = this.games.get(userId).state.forumSeen ?? {};
     const me = this.users.get(userId).username;
     return {
-      canModerate: a.founder === userId,
+      canModerate: this.#canManage(a, userId),
       threads: threads
         .map((th) => ({
           id: th.id,
@@ -903,7 +1005,7 @@ export class WorldServer {
     for (const key of Object.keys(game.state.forumSeen)) if (!threads.some((x) => x.id === Number(key))) delete game.state.forumSeen[key];
     game.dirty = true;
     const me = this.users.get(userId).username;
-    return { ...th, canModerate: a.founder === userId, mine: th.author === me };
+    return { ...th, canModerate: this.#canManage(a, userId), mine: th.author === me };
   }
 
   forumPost(userId, threadId, title, text) {
@@ -942,7 +1044,7 @@ export class WorldServer {
     const { a, threads } = this.#forum(userId);
     const th = threads.find((x) => x.id === threadId);
     if (!th) throw new UserError('Ese tema ya no existe.');
-    const leader = a.founder === userId;
+    const leader = this.#canManage(a, userId);
     if (op === 'pin') {
       if (!leader) throw new UserError('Solo quien lidera la alianza puede fijar temas.');
       th.pinned = !th.pinned;
@@ -1052,7 +1154,7 @@ export class WorldServer {
 
   describeAlliance(userId, text) {
     const a = this.allianceOf(userId);
-    if (!a || a.founder !== userId) throw new UserError('Solo quien lidera la alianza puede cambiar la descripción.');
+    if (!a || !this.#canManage(a, userId)) throw new UserError('Solo el líder y los oficiales pueden cambiar la descripción.');
     a.description = String(text ?? '').trim().slice(0, 500);
     return this.allianceDetail(userId);
   }

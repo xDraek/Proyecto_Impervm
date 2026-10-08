@@ -2874,3 +2874,20 @@ input[type='text'] {
   font-size: 11px;
   color: var(--rarity);
 }
+
+/* ── Rangos y solicitudes de alianza ─────────────────────────────────────── */
+
+.toggle-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 10px 0;
+  font-size: 13px;
+}
+
+/* Botón de peligro sin relleno (p. ej. «Declarar la guerra») */
+.ghost.danger {
+  background: transparent;
+  color: var(--bad);
+  border: 1px solid rgba(255, 122, 107, 0.55);
+}

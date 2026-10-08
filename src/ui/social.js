@@ -65,12 +65,13 @@ export class Social {
     const rows = a.members
       .map(
         (m) => `<tr>
-          <td><span class="dot ${m.online ? 'on' : ''}"></span><button class="link" data-action="profile" data-name="${escapeHtml(m.name)}">${escapeHtml(m.name)}</button>${m.founder ? ' 👑' : ''}<div class="muted small">${escapeHtml(m.city ?? '')}</div></td>
+          <td><span class="dot ${m.online ? 'on' : ''}"></span><button class="link" data-action="profile" data-name="${escapeHtml(m.name)}">${escapeHtml(m.name)}</button>${m.role === 'lider' ? ' <span title="Líder">👑</span>' : m.role === 'oficial' ? ' <span title="Oficial">⭐</span>' : ''}<div class="muted small">${escapeHtml(m.city ?? '')}</div></td>
           <td>${fmtNum(m.points)}</td>
           <td class="row-actions">
             ${m.island ? `<button class="ghost small" data-action="goto" data-island="${m.island}" title="Ver en el mapa">🗺️</button>` : ''}
             ${m.name !== this.game.username ? `<button class="ghost small" data-action="mail-to" data-name="${escapeHtml(m.name)}" title="Mensaje">✉️</button>` : ''}
-            ${a.isFounder && !m.founder ? `<button class="ghost small" data-action="kick" data-user="${m.id}" title="Expulsar">✕</button>` : ''}
+            ${a.isFounder && !m.founder ? `<button class="ghost small" data-action="officer" data-user="${m.id}" data-on="${m.role === 'oficial' ? 0 : 1}" title="${m.role === 'oficial' ? 'Quitar de oficial' : 'Nombrar oficial'}">${m.role === 'oficial' ? '☆' : '⭐'}</button><button class="ghost small" data-action="transfer" data-user="${m.id}" data-name="${escapeHtml(m.name)}" title="Cederle el liderazgo">👑</button>` : ''}
+            ${a.canManage && !m.founder && m.name !== this.game.username && (a.isFounder || m.role !== 'oficial') ? `<button class="ghost small" data-action="kick" data-user="${m.id}" title="Expulsar">✕</button>` : ''}
           </td>
         </tr>`,
       )
@@ -98,6 +99,8 @@ export class Social {
         ${a.members.length > 1 ? '<button class="ghost small" data-action="circular">📜 Circular</button>' : ''}
         <button class="ghost small" data-action="leave">Dejar la alianza</button>
       </div>
+      ${this.#applicationsHtml(a)}
+      ${a.isFounder ? `<label class="toggle-row"><input type="checkbox" data-action="alliance-open" ${a.open ? 'checked' : ''} /> Alianza abierta: entra quien quiera, sin solicitud</label>` : ''}
       ${this.#diplomacyHtml(a)}`
       }
     </div>`;
@@ -157,6 +160,17 @@ export class Social {
       ${rows ? `<ul class="mail-list forum-list">${rows}</ul>` : '<p class="muted">Todavía no hay ningún tema. Abre el primero: planes de ataque, quién necesita recursos, reglas de la alianza…</p>'}`;
   }
 
+  #applicationsHtml(a) {
+    if (!a.canManage) return '';
+    const rows = a.applications
+      .map(
+        (x) => `<div class="diplo-row"><div><button class="link" data-action="profile" data-name="${escapeHtml(x.name)}">${escapeHtml(x.name)}</button> <span class="muted small">· ${fmtNum(x.points)} pts · ${fmtAgo(x.t)}</span>${x.text ? `<div class="small">“${escapeHtml(x.text)}”</div>` : ''}</div>
+          <div class="row-actions"><button class="primary small" data-action="answer" data-user="${x.id}" data-accept="1">✔ Aceptar</button><button class="ghost small" data-action="answer" data-user="${x.id}" data-accept="0">✕</button></div></div>`,
+      )
+      .join('');
+    return `<h4>📨 Solicitudes de ingreso ${a.applications.length ? `(${a.applications.length})` : ''}</h4>${rows || '<p class="muted small">Nadie ha pedido entrar.</p>'}`;
+  }
+
   #diplomacyHtml(a) {
     const since = (t) => new Date(t).toLocaleDateString('es-ES', { day: 'numeric', month: 'short' });
     const btn = (op, id, text, cls = 'ghost') => (a.isFounder ? `<button class="${cls} small" data-action="diplo" data-op="${op}" data-id="${id}">${text}</button>` : '');
@@ -202,12 +216,17 @@ export class Social {
   #noAllianceHtml() {
     const rows = this.alliances
       .map(
-        (a) => `<tr><td>${a.rank}</td><td>${escapeHtml(a.name)} <span class="tag">[${escapeHtml(a.tag)}]</span></td><td>${a.members}</td><td>${fmtNum(a.points)}</td>
-          <td><button class="ghost small" data-action="join" data-id="${a.id}">Unirse</button></td></tr>`,
+        (a) => `<tr><td>${a.rank}</td><td>${escapeHtml(a.name)} <span class="tag">[${escapeHtml(a.tag)}]</span><div class="muted small">${a.open ? 'Abierta' : 'Con solicitud'}</div></td><td>${a.members}</td><td>${fmtNum(a.points)}</td>
+          <td>${
+            a.applied
+              ? `<button class="ghost small" data-action="cancel-apply" data-id="${a.id}" title="Retirar la solicitud">⏳ Pedido ✕</button>`
+              : `<button class="ghost small" data-action="join" data-id="${a.id}" data-open="${a.open ? 1 : 0}">${a.open ? 'Unirse' : 'Pedir entrar'}</button>`
+          }</td></tr>`,
       )
       .join('');
     return `<div class="modal-card">
       ${head('🤝', 'Alianzas', 'Juntos sois más fuertes: no os atacáis y tenéis chat propio')}
+      <p class="muted small">En las alianzas con solicitud, el líder o un oficial tiene que aceptarte. Puedes pedir entrar en varias a la vez.</p>
       <h4>Fundar una alianza</h4>
       <form class="inline-form" data-form="create">
         <input name="name" maxlength="30" placeholder="Nombre de la alianza" required />
@@ -472,11 +491,36 @@ export class Social {
     const { action } = btn.dataset;
     switch (action) {
       case 'join': {
-        const data = await this.#call('POST', '/api/alliance/join', { id: btn.dataset.id }, '🤝 Te has unido a la alianza');
+        const open = btn.dataset.open === '1';
+        const text = open ? '' : prompt('¿Quieres decirles algo? (opcional)') ?? null;
+        if (text === null) return true;
+        const data = await this.#call('POST', '/api/alliance/join', { id: btn.dataset.id, text }, open ? '🤝 Te has unido a la alianza' : '📨 Solicitud enviada: el líder o un oficial te responderá');
+        if (data?.alliance) {
+          this.alliance = data.alliance;
+          this.renderAlliance();
+        } else if (data) await this.openAlliance();
+        return true;
+      }
+      case 'cancel-apply': {
+        const data = await this.#call('POST', '/api/alliance/cancel', { id: btn.dataset.id }, 'Solicitud retirada');
+        if (data) await this.openAlliance();
+        return true;
+      }
+      case 'answer':
+      case 'officer':
+      case 'transfer': {
+        if (action === 'transfer' && !confirm(`¿Ceder el liderazgo a ${btn.dataset.name}? Pasarás a ser oficial.`)) return true;
+        const path = { answer: '/api/alliance/answer', officer: '/api/alliance/officer', transfer: '/api/alliance/transfer' }[action];
+        const data = await this.#call('POST', path, { userId: Number(btn.dataset.user), accept: btn.dataset.accept === '1', on: btn.dataset.on === '1' });
         if (data) {
           this.alliance = data.alliance;
           this.renderAlliance();
         }
+        return true;
+      }
+      case 'alliance-open': {
+        const data = await this.#call('POST', '/api/alliance/open', { open: btn.checked }, btn.checked ? 'La alianza ahora es abierta' : 'Ahora hay que pedir permiso para entrar');
+        if (data) this.alliance = data.alliance;
         return true;
       }
       case 'leave': {
