@@ -16,7 +16,9 @@ import {
   disposeTree,
   smokeColumn,
   gableRoof,
+  hipRoof,
   mat,
+  mediterraneanTree,
   mesh,
   wallHeight,
   windowMaterial,
@@ -362,7 +364,7 @@ export class World {
 
     // Meseta de hierba con acantilados
     const geo = plateauGeometry(ISLAND_R, ISLAND_R - 1.6, 2.2, 64, 0, 0);
-    paintByNormal(geo, (ny, cy) => (ny > 0.7 ? '#6fae4a' : cy > -0.8 ? '#8a6a46' : '#7c7466'));
+    paintByNormal(geo, (ny, cy) => (ny > 0.7 ? '#86ab4e' : cy > -0.8 ? '#a17f55' : '#8c8070'));
     const island = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 1 }));
     island.receiveShadow = true;
     island.castShadow = true;
@@ -489,38 +491,37 @@ export class World {
     this.houseGroup = new THREE.Group();
     scene.add(this.houseGroup);
 
-    // Farolas a los lados de la avenida del puerto (se encienden de noche)
+    // Pebeteros de mármol a los lados de la avenida del puerto (arden de noche)
     const gate = THREE.MathUtils.degToRad(GATE_ANGLE);
     for (let d = 4.6; d < ISLAND_R - 1.5; d += 3.1) {
       if (Math.abs(d - WALL_R) < 1.4) continue;
       for (const side of [-1, 1]) {
         const p = new THREE.Vector3(Math.sin(gate) * d + Math.cos(gate) * side * 1.05, 0, Math.cos(gate) * d - Math.sin(gate) * side * 1.05);
         const lamp = new THREE.Group();
-        lamp.add(cyl(0.05, 0.07, 1.5, 6, C.dark));
-        lamp.add(box(0.2, 0.22, 0.2, C.dark, 0, 1.5, 0), box(0.14, 0.16, 0.14, C.dark, 0, 1.53, 0, WINDOW_GLOW));
+        lamp.add(box(0.26, 0.12, 0.26, C.marbleDark), cyl(0.07, 0.09, 1.2, 8, C.marble, 0, 0.12, 0), box(0.2, 0.06, 0.2, C.marble, 0, 1.32, 0));
+        lamp.add(cyl(0.2, 0.09, 0.16, 8, '#8a6a3a', 0, 1.38, 0, { metalness: 0.5, roughness: 0.45 }), cyl(0.15, 0.15, 0.04, 8, C.dark, 0, 1.52, 0, WINDOW_GLOW));
         place(lamp, p);
       }
     }
 
-    // Bosque (más denso junto al aserradero)
-    const leafColors = ['#3f8a3a', '#4f9a3a', '#2f7a43', '#5a9e3c'];
+    // Arboleda mediterránea (más densa junto al aserradero): olivos, cipreses y pinos piñoneros
     const forest = polar(ISLAND_R - 3.5, LAYOUT.aserradero.angle + 8);
     let trees = 0;
     for (let tries = 0; tries < 2600 && trees < 190; tries++) {
       const p = tries % 3 === 0 ? forest.clone().add(polar(rand() * 7, rand() * 360)) : polar(3.5 + rand() * (ISLAND_R - 4), rand() * 360);
       if (!free(p)) continue;
       blockers.push({ p, r: 0.85 });
-      place(pine(leafColors[trees % 4], rand() < 0.2), p, rand() * Math.PI, 0.7 + rand() * 0.6);
+      place(mediterraneanTree(rand()), p, rand() * Math.PI, 0.7 + rand() * 0.6);
       trees++;
     }
     // Arbustos y flores
-    const flowers = ['#e86a8a', '#f2c94c', '#ffffff', '#b07ad9', '#ff8a5a'];
+    const flowers = ['#e86a8a', '#f2c94c', '#ffffff', '#b07ad9', '#f08fb0'];
     for (let i = 0, placed = 0; i < 900 && placed < 90; i++) {
       const p = polar(3 + rand() * (ISLAND_R - 3.5), rand() * 360);
       if (!free(p, 0.3)) continue;
       placed++;
       const bush = new THREE.Group();
-      bush.add(mesh(new THREE.DodecahedronGeometry(0.32), placed % 3 ? '#4f9a3a' : '#3f8a3a'));
+      bush.add(mesh(new THREE.DodecahedronGeometry(0.32), placed % 3 ? '#6b8f45' : '#5a7f3a'));
       bush.children[0].position.y = 0.2;
       if (placed % 2) for (let k = 0; k < 3; k++) bush.add(box(0.1, 0.1, 0.1, flowers[(placed + k) % 5], Math.sin(k * 2.1) * 0.25, 0.3, Math.cos(k * 2.1) * 0.25));
       place(bush, p, 0, 0.7 + rand() * 0.6);
@@ -919,24 +920,44 @@ export class World {
       this.houseGroup.remove(c);
       disposeTree(c);
     }
-    const roofs = [C.roofRed, C.roofBlue, C.roofRed, '#a0522d', C.roofGrey];
+    // Casas del Mediterráneo: paredes encaladas u ocres, tejados bajos de terracota o azoteas, puertas y contraventanas azules
+    const walls = ['#f6f1e7', '#f2e8d2', '#f3dcb0', '#ece0cf', '#f6f1e7', '#efd9bd'];
+    const roofs = [C.roofRed, '#b85a36', C.roofRed, null, '#cf7046'];
     const batch = new Batch(windowMaterial());
     this.houseSpots.slice(0, n).forEach((s, i) => {
       const h = new THREE.Group();
       const floors = s.tall && level >= 4 ? 2 : 1;
       const wallH = s.h * floors;
-      h.add(box(s.w, wallH, s.d, i % 4 === 0 ? C.wallDark : C.wall));
-      if (floors > 1) h.add(box(s.w + 0.04, 0.06, s.d + 0.04, C.woodDark, 0, s.h, 0));
-      h.add(gableRoof(s.w + 0.2, 0.5, s.d + 0.22, roofs[s.roof], 0, wallH, 0));
-      h.add(box(0.26, 0.42, 0.04, C.woodDark, 0, 0, s.d / 2 + 0.01));
-      for (let f = 0; f < floors; f++) {
-        for (const x of [-s.w * 0.3, s.w * 0.3]) h.add(box(0.18, 0.18, 0.04, C.dark, x, 0.3 + f * s.h + (f ? 0 : 0.05), s.d / 2 + 0.01, WINDOW_GLOW));
+      const wall = walls[i % walls.length];
+      const blue = i % 3 !== 1;
+      h.add(box(s.w, wallH, s.d, wall));
+      // Zócalo de piedra y cornisa bajo el tejado
+      h.add(box(s.w + 0.04, 0.1, s.d + 0.04, C.stone, 0, 0, 0));
+      h.add(box(s.w + 0.06, 0.05, s.d + 0.06, C.marbleDark, 0, wallH - 0.05, 0));
+      if (floors > 1) h.add(box(s.w + 0.04, 0.05, s.d + 0.04, C.marbleDark, 0, s.h, 0));
+      if (roofs[s.roof]) h.add(hipRoof(s.w + 0.18, s.d + 0.18, 0.32, roofs[s.roof], 0, wallH, 0));
+      else {
+        // Azotea con su pretil (y una pérgola en algunas)
+        h.add(box(s.w + 0.06, 0.12, s.d + 0.06, wall, 0, wallH, 0));
+        h.add(box(s.w - 0.1, 0.02, s.d - 0.1, '#c9a27a', 0, wallH + 0.11, 0));
+        if (i % 2) for (const [x, z] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) h.add(box(0.04, 0.35, 0.04, C.woodDark, x * s.w * 0.35, wallH + 0.12, z * s.d * 0.3));
+        if (i % 2) h.add(box(s.w * 0.8, 0.04, s.d * 0.7, '#6b8f45', 0, wallH + 0.47, 0));
       }
-      if (s.chimney) h.add(box(0.16, 0.5, 0.16, C.stone, s.w * 0.25, wallH + 0.1, -s.d * 0.2));
+      h.add(box(0.34, 0.48, 0.03, C.marble, 0, 0, s.d / 2 + 0.005), box(0.26, 0.42, 0.04, blue ? C.roofBlue : C.woodDark, 0, 0, s.d / 2 + 0.012));
+      for (let f = 0; f < floors; f++) {
+        for (const x of [-s.w * 0.3, s.w * 0.3]) {
+          const y = 0.3 + f * s.h + (f ? 0 : 0.05);
+          h.add(box(0.16, 0.18, 0.04, C.dark, x, y, s.d / 2 + 0.01, WINDOW_GLOW));
+          if (blue && f) for (const k of [-1, 1]) h.add(box(0.06, 0.19, 0.03, C.roofBlue, x + k * 0.12, y, s.d / 2 + 0.02));
+        }
+      }
+      // Macetas de flores junto a la puerta
+      if (i % 4 === 0) h.add(amphoraPot(s.w * 0.35, s.d / 2 + 0.12));
+      if (s.chimney && i % 3 === 0) h.add(box(0.16, 0.4, 0.16, wall, s.w * 0.25, wallH + 0.1, -s.d * 0.2));
       h.position.copy(s.p);
       h.rotation.y = s.rot;
       // Humo en algunas chimeneas (no en todas, para no recargar)
-      if (s.chimney && i % 2 === 0) {
+      if (s.chimney && i % 6 === 0) {
         const top = new THREE.Vector3(s.w * 0.25, wallH + 0.7, -s.d * 0.2).applyEuler(new THREE.Euler(0, s.rot, 0)).add(s.p);
         const smoke = smokeColumn(top.x, top.y, top.z, i * 0.37);
         smoke.scale.setScalar(0.7);
@@ -1139,12 +1160,15 @@ export class World {
     if (level >= 3) {
       for (let a = 45; a < 360; a += 45) {
         if (blocked(a)) continue;
+        // Torres redondas con cornisa y un tejado bajo de terracota
         const tower = cyl(0.8, 0.9, h + 1.1, 8, C.stone);
         tower.position.add(polar(WALL_R, a));
-        const roof = new THREE.Mesh(new THREE.ConeGeometry(1.0, 1.0, 8), mat(C.roofBlue));
-        roof.position.copy(polar(WALL_R, a, h + 1.6));
+        const cornice = cyl(0.98, 0.98, 0.16, 8, C.marbleDark);
+        cornice.position.add(polar(WALL_R, a, h + 1.1));
+        const roof = new THREE.Mesh(new THREE.ConeGeometry(1.05, 0.6, 8), mat(C.roofRed));
+        roof.position.copy(polar(WALL_R, a, h + 1.56));
         roof.castShadow = true;
-        this.wallGroup.add(tower, roof);
+        this.wallGroup.add(tower, cornice, roof);
       }
     }
     bakeStatic(this.wallGroup);
@@ -1603,22 +1627,12 @@ export class World {
 
 // ── Piezas de decoración de la isla ─────────────────────────────────────────
 
-function pine(color, round) {
-  const t = new THREE.Group();
-  t.add(cyl(0.1, 0.15, 0.6, 6, C.woodDark));
-  if (round) {
-    const crown = mesh(new THREE.DodecahedronGeometry(0.75), color);
-    crown.position.y = 1.2;
-    t.add(crown);
-    return t;
-  }
-  const leaves = mesh(new THREE.ConeGeometry(0.75, 1.5, 7), color);
-  leaves.position.y = 1.25;
-  const top = mesh(new THREE.ConeGeometry(0.75, 1.5, 7), color);
-  top.position.y = 1.85;
-  top.scale.setScalar(0.7);
-  t.add(leaves, top);
-  return t;
+/** Maceta de barro con flores, para la puerta de las casas. */
+function amphoraPot(x, z) {
+  const g = new THREE.Group();
+  g.add(cyl(0.1, 0.07, 0.16, 7, '#b9643a', x, 0, z));
+  g.add(box(0.16, 0.1, 0.16, '#e86a8a', x, 0.16, z));
+  return g;
 }
 
 function palm() {

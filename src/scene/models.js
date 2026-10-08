@@ -4,22 +4,25 @@ import { bakeStatic } from './util.js';
 // Modelos low-poly procedurales. Cada edificio crece en detalle con su nivel.
 // Convención: los helpers reciben la posición de la BASE del objeto (y = suelo).
 
+// Paleta del Mediterráneo clásico: caliza y mármol claros, tejas de terracota y azul egeo
 export const C = {
-  wall: '#efe2c4',
-  wallDark: '#dccaa2',
-  stone: '#aaa59b',
-  stoneDark: '#7d7a73',
+  wall: '#f2e8d2',
+  wallDark: '#e4d4b4',
+  stone: '#d2c7ae',
+  stoneDark: '#9f9480',
+  marble: '#f4efe4',
+  marbleDark: '#ddd3c0',
   wood: '#8b5a2b',
   woodDark: '#5e3b1c',
   woodLight: '#c08a4a',
-  roofRed: '#b8442f',
-  roofBlue: '#3f6fa8',
-  roofGrey: '#5b6470',
+  roofRed: '#c2603a',
+  roofBlue: '#2f6db3',
+  roofGrey: '#a5573a',
   gold: '#f2c94c',
   crystal: '#6fd6ff',
   dark: '#2b2620',
-  barn: '#a0522d',
-  white: '#f4efe6',
+  barn: '#d9b98a',
+  white: '#f6f1e7',
   dirt: '#b59a6e',
   cloth: ['#d94f4f', '#4f8fd9', '#e3b23c', '#6bbf59'],
 };
@@ -82,45 +85,256 @@ function log(len, r, x, y, z, rotY = 0) {
   return m;
 }
 
+
+// ── Arquitectura clásica ─────────────────────────────────────────────────────
+// Piezas comunes para que la ciudad parezca griega o romana: escalinatas,
+// columnas con basa y capitel, frontones, tejados bajos de terracota y cúpulas.
+
+/** Escalinata de `steps` peldaños; devuelve la altura de arriba. */
+export function stylobate(g, w, d, steps = 3, x = 0, z = 0, stepH = 0.15) {
+  for (let i = 0; i < steps; i++) g.add(box(w - i * 0.28, stepH, d - i * 0.28, i % 2 ? C.marbleDark : C.marble, x, i * stepH, z));
+  return steps * stepH;
+}
+
+/** Columna con basa, fuste y capital. */
+export function column(x, y, z, h, r = 0.12, color = C.marble) {
+  const g = new THREE.Group();
+  g.add(box(r * 2.5, 0.07, r * 2.5, color, 0, 0, 0));
+  g.add(cyl(r * 0.85, r, h - 0.17, 10, color, 0, 0.07, 0));
+  g.add(cyl(r * 1.35, r * 0.85, 0.06, 10, color, 0, h - 0.1, 0));
+  g.add(box(r * 2.6, 0.06, r * 2.6, color, 0, h - 0.06, 0));
+  g.position.set(x, y, z);
+  return g;
+}
+
+/** Fila de `n` columnas de x0 a x1 (o, con `alongZ`, de z0 a z1 en la x dada). */
+export function colonnade(g, { from, to, at, n, y, h, r = 0.12, alongZ = false, color }) {
+  for (let i = 0; i < n; i++) {
+    const t = n === 1 ? 0.5 : i / (n - 1);
+    const v = from + (to - from) * t;
+    g.add(alongZ ? column(at, y, v, h, r, color) : column(v, y, at, h, r, color));
+  }
+}
+
+/** Tejado bajo a cuatro aguas de terracota. */
+export function hipRoof(w, d, h, color = C.roofRed, x = 0, y = 0, z = 0) {
+  const geo = new THREE.ConeGeometry(1, 1, 4);
+  geo.rotateY(Math.PI / 4);
+  geo.scale(w * 0.7071, h, d * 0.7071);
+  geo.translate(0, h / 2, 0);
+  const m = mesh(geo, color);
+  m.position.set(x, y, z);
+  return m;
+}
+
+/**
+ * Tejado a dos aguas con frontón de mármol en los extremos (cumbrera a lo largo de Z):
+ * el triángulo de la fachada queda mirando a +Z.
+ */
+export function pedimentRoof(w, h, d, x = 0, y = 0, z = 0, roof = C.roofRed) {
+  const g = new THREE.Group();
+  g.add(gableRoof(w, h, d, roof, 0, 0, 0));
+  for (const s of [-1, 1]) {
+    // Marco de mármol, tímpano pintado de azul y acroterias doradas en las esquinas
+    g.add(gableRoof(w * 0.96, h * 0.92, 0.05, C.marble, 0, 0.02, s * (d / 2 + 0.02)));
+    g.add(gableRoof(w * 0.74, h * 0.62, 0.02, '#4f6f9e', 0, 0.09, s * (d / 2 + 0.052)));
+    const apex = mesh(new THREE.ConeGeometry(0.07, 0.16, 5), C.gold, { metalness: 0.5, roughness: 0.4 });
+    apex.position.set(0, h + 0.06, s * (d / 2 + 0.02));
+    g.add(apex);
+    for (const k of [-1, 1]) g.add(box(0.07, 0.1, 0.07, C.gold, k * (w / 2 - 0.04), 0, s * (d / 2 + 0.02), { metalness: 0.5, roughness: 0.4 }));
+  }
+  // Tejas de cumbrera y antefijas a lo largo del alero
+  const ridge = cyl(0.04, 0.04, d + 0.04, 6, '#a5502f', 0, 0, 0);
+  ridge.rotation.x = Math.PI / 2;
+  ridge.position.y = h;
+  g.add(ridge);
+  for (let k = 0; k <= Math.floor(d / 0.32); k++) for (const s of [-1, 1]) g.add(box(0.05, 0.07, 0.04, C.marble, s * (w / 2 + 0.01), -0.02, -d / 2 + 0.16 + k * 0.32));
+  g.position.set(x, y, z);
+  return g;
+}
+
+/**
+ * Friso dórico alrededor de un arquitrabe de w × d (de y a y + h): triglifos azules
+ * y metopas rojas, pintados como en los templos griegos.
+ */
+export function frieze(g, w, d, y, h = 0.2, x = 0, z = 0) {
+  const step = 0.3;
+  const faces = [
+    [w, (u) => [x + u, z + d / 2 + 0.012], 0],
+    [w, (u) => [x + u, z - d / 2 - 0.012], 0],
+    [d, (u) => [x + w / 2 + 0.012, z + u], Math.PI / 2],
+    [d, (u) => [x - w / 2 - 0.012, z + u], Math.PI / 2],
+  ];
+  for (const [len, at, rot] of faces) {
+    const n = Math.max(2, Math.floor(len / step));
+    for (let k = 0; k < n; k++) {
+      const u = -len / 2 + (k + 0.5) * (len / n);
+      const [px, pz] = at(u);
+      const piece = box(k % 2 ? 0.11 : 0.07, h * 0.7, 0.02, k % 2 ? '#a8432f' : '#3f5f8f', px, y + h * 0.15, pz);
+      piece.rotation.y = rot;
+      g.add(piece);
+    }
+  }
+}
+
+/** Cúpula sobre un tambor; devuelve el grupo (su base va en y). */
+export function dome(r, color = C.roofBlue, x = 0, y = 0, z = 0, drumH = 0.35, extra) {
+  const g = new THREE.Group();
+  g.add(cyl(r * 1.02, r * 1.05, drumH, 14, C.marble, 0, 0, 0));
+  g.add(cyl(r * 1.1, r * 1.1, 0.06, 14, C.marbleDark, 0, drumH, 0));
+  const cap = mesh(new THREE.SphereGeometry(r, 14, 7, 0, Math.PI * 2, 0, Math.PI / 2), color, extra);
+  cap.position.y = drumH + 0.06;
+  g.add(cap);
+  g.add(cyl(0.05, 0.08, 0.25, 6, C.gold, 0, drumH + 0.06 + r * 0.95, 0, { metalness: 0.5, roughness: 0.4 }));
+  g.position.set(x, y, z);
+  return g;
+}
+
+const AMPHORA = (() => {
+  const pts = [
+    [0.0, 0.0],
+    [0.05, 0.02],
+    [0.1, 0.12],
+    [0.13, 0.25],
+    [0.12, 0.36],
+    [0.07, 0.44],
+    [0.045, 0.5],
+    [0.06, 0.54],
+  ].map(([x, y]) => new THREE.Vector2(x, y));
+  return new THREE.LatheGeometry(pts, 8);
+})();
+
+/** Ánfora de barro (unos 0,55 de alto). */
+export function amphora(x, y, z, color = '#b9643a', s = 1) {
+  const m = new THREE.Mesh(AMPHORA.clone(), mat(color));
+  m.castShadow = true;
+  m.position.set(x, y, z);
+  m.scale.setScalar(s);
+  return m;
+}
+
+/** Estatua de mármol o bronce sobre su pedestal. */
+export function statue(x, z, color = C.marble, h = 0.9, extra) {
+  const g = new THREE.Group();
+  g.add(box(0.36, 0.32, 0.36, C.marbleDark, 0, 0, 0));
+  g.add(cyl(0.09, 0.16, h * 0.62, 7, color, 0, 0.32, 0, extra));
+  const head = mesh(new THREE.SphereGeometry(0.08, 8, 6), color, extra);
+  head.position.y = 0.32 + h * 0.62 + 0.07;
+  g.add(head);
+  const arm = box(0.05, h * 0.42, 0.05, color, 0.14, 0.32 + h * 0.3, 0, extra);
+  arm.rotation.z = -0.5;
+  g.add(arm);
+  g.position.set(x, 0, z);
+  return g;
+}
+
+/** Pérgola con parra (sombra para las mesas). */
+export function pergola(w, d, h, x = 0, z = 0) {
+  const g = new THREE.Group();
+  for (const [px, pz] of [[-w / 2, -d / 2], [w / 2, -d / 2], [-w / 2, d / 2], [w / 2, d / 2]]) g.add(cyl(0.05, 0.06, h, 6, C.marble, px, 0, pz));
+  for (const pz of [-d / 2, d / 2]) g.add(box(w + 0.2, 0.06, 0.07, C.woodDark, 0, h, pz));
+  for (let i = 0; i < 5; i++) g.add(box(0.05, 0.05, d + 0.2, C.woodDark, -w / 2 + (w * i) / 4, h + 0.06, 0));
+  const vines = ['#5f8f3a', '#6f9f45', '#4f7f32'];
+  for (let i = 0; i < 7; i++) {
+    const leaf = mesh(new THREE.DodecahedronGeometry(0.22), vines[i % 3]);
+    leaf.position.set(-w / 2 + ((i * 0.61) % 1) * w, h + 0.12, -d / 2 + ((i * 0.37) % 1) * d);
+    leaf.scale.y = 0.45;
+    g.add(leaf);
+  }
+  g.position.set(x, 0, z);
+  return g;
+}
+
+// ── Árboles del Mediterráneo ─────────────────────────────────────────────────
+
+/** Ciprés: alto, estrecho y verde oscuro. */
+export function cypress(color = '#2f5e34') {
+  const t = new THREE.Group();
+  t.add(cyl(0.06, 0.08, 0.3, 5, C.woodDark));
+  const body = mesh(new THREE.ConeGeometry(0.34, 2.4, 7), color);
+  body.position.y = 1.45;
+  const belly = mesh(new THREE.SphereGeometry(0.34, 7, 5), color);
+  belly.position.y = 0.55;
+  belly.scale.y = 1.4;
+  t.add(body, belly);
+  return t;
+}
+
+/** Olivo: tronco retorcido y copa gris verdosa. */
+export function olive(color = '#829a5c') {
+  const t = new THREE.Group();
+  const trunk = cyl(0.08, 0.13, 0.7, 5, '#6b5a45');
+  trunk.rotation.z = 0.25;
+  t.add(trunk);
+  for (const [x, y, z, s] of [[0.15, 0.85, 0, 0.5], [-0.25, 0.75, 0.15, 0.4], [0.05, 1.0, -0.25, 0.38]]) {
+    const crown = mesh(new THREE.DodecahedronGeometry(s), color);
+    crown.position.set(x, y, z);
+    crown.scale.y = 0.7;
+    t.add(crown);
+  }
+  return t;
+}
+
+/** Un árbol del Mediterráneo al azar: olivo, ciprés o pino piñonero. */
+export function mediterraneanTree(r) {
+  if (r < 0.4) return olive(r < 0.2 ? '#829a5c' : '#76925a');
+  if (r < 0.75) return cypress(r < 0.58 ? '#2f5e34' : '#36683a');
+  return stonePine(r < 0.88 ? '#476f3a' : '#3f6633');
+}
+
+/** Pino piñonero: tronco alto y copa ancha y plana, como una sombrilla. */
+export function stonePine(color = '#476f3a') {
+  const t = new THREE.Group();
+  const trunk = cyl(0.07, 0.12, 1.7, 5, '#7a5a3c');
+  trunk.rotation.z = -0.12;
+  t.add(trunk);
+  const crown = mesh(new THREE.DodecahedronGeometry(0.85), color);
+  crown.position.set(0.2, 1.95, 0);
+  crown.scale.set(1.25, 0.42, 1.1);
+  t.add(crown);
+  return t;
+}
+
 // ── Edificios ────────────────────────────────────────────────────────────────
 
 function ayuntamiento(level) {
+  // Palacio de gobierno: escalinata, sala rodeada de columnas, tejado de terracota y cúpula
   const g = new THREE.Group();
-  g.add(box(4.4, 0.35, 4.4, C.stone));
-  g.add(box(1.8, 0.18, 0.7, C.stone, 0, 0, 2.5));
-
-  const floors = 1 + Math.min(3, Math.floor(level / 3));
-  let y = 0.35;
-  let w = 3.3;
-  let lastW = w;
-  for (let i = 0; i < floors; i++) {
-    g.add(box(w, 1.1, w, i % 2 ? C.wallDark : C.wall, 0, y, 0));
-    for (const x of [-w / 3, 0, w / 3]) {
-      const isDoor = i === 0 && x === 0;
-      const h = isDoor ? 0.75 : 0.42;
-      g.add(box(isDoor ? 0.6 : 0.32, h, 0.05, C.dark, x, y + (isDoor ? 0 : 0.38), w / 2 + 0.01, isDoor ? undefined : WINDOW_GLOW));
-      g.add(box(0.05, 0.42, 0.32, C.dark, w / 2 + 0.01, y + 0.38, x, WINDOW_GLOW));
-      g.add(box(0.05, 0.42, 0.32, C.dark, -w / 2 - 0.01, y + 0.38, x, WINDOW_GLOW));
-    }
-    y += 1.1;
-    g.add(box(w + 0.24, 0.14, w + 0.24, C.stone, 0, y, 0));
-    y += 0.14;
-    lastW = w;
-    w *= 0.8;
+  const y0 = stylobate(g, 4.6, 4.6, 3);
+  g.add(box(1.6, 0.3, 0.6, C.marble, 0, 0, 2.55));
+  const h = 1.5;
+  // Sala con puerta y ventanas entre las columnas
+  g.add(box(2.9, h, 2.9, C.wall, 0, y0, 0));
+  g.add(box(0.6, 0.85, 0.05, C.woodDark, 0, y0, 1.46));
+  for (const x of [-0.9, 0.9]) g.add(box(0.3, 0.42, 0.05, C.dark, x, y0 + 0.65, 1.46, WINDOW_GLOW));
+  for (const s of [-1, 1]) for (const z of [-0.8, 0.8]) g.add(box(0.05, 0.42, 0.3, C.dark, s * 1.46, y0 + 0.65, z, WINDOW_GLOW));
+  // Peristilo: más columnas al frente con el nivel
+  const front = Math.min(6, 4 + Math.floor(level / 4));
+  colonnade(g, { from: -1.95, to: 1.95, at: 1.95, n: front, y: y0, h });
+  colonnade(g, { from: -1.95, to: 1.95, at: -1.95, n: 4, y: y0, h });
+  for (const x of [-1.95, 1.95]) colonnade(g, { from: -0.65, to: 0.65, at: x, n: 2, y: y0, h, alongZ: true });
+  // Arquitrabe con friso y tejado
+  g.add(box(4.25, 0.22, 4.25, C.marbleDark, 0, y0 + h, 0));
+  frieze(g, 4.25, 4.25, y0 + h, 0.22);
+  g.add(box(4.35, 0.06, 4.35, C.marble, 0, y0 + h + 0.22, 0));
+  const top = y0 + h + 0.28;
+  g.add(hipRoof(4.4, 4.4, 0.7, C.roofRed, 0, top, 0));
+  // Cúpula desde el nivel 3 (dorada desde el 8) con su linterna de columnas a partir del 6
+  let peak = top + 0.7;
+  if (level >= 3) {
+    const r = 0.95 + Math.min(level, 12) * 0.02;
+    const drum = level >= 6 ? 0.7 : 0.35;
+    const golden = level >= 8;
+    g.add(dome(r, golden ? C.gold : C.roofBlue, 0, top + 0.35, 0, drum, golden ? { metalness: 0.55, roughness: 0.35 } : undefined));
+    peak = top + 0.35 + drum + 0.06 + r + 0.2;
   }
-
-  if (level >= 2) {
-    for (const x of [-1.4, -0.7, 0.7, 1.4]) g.add(cyl(0.11, 0.13, 1.1, 8, C.white, x, 0.35, 2.0));
-    g.add(box(3.4, 0.16, 0.5, C.stone, 0, 1.45, 2.0));
-  }
-
-  g.add(pyramidRoof(lastW + 0.3, 1.5, C.roofBlue, 0, y, 0));
-
-  const top = y + 1.4;
-  g.add(cyl(0.04, 0.04, 1.3, 6, C.dark, 0, top, 0));
-  const flag = box(0.7, 0.4, 0.03, C.cloth[0], 0, 0, 0);
+  // Estatuas a los lados de la escalinata
+  if (level >= 5) for (const x of [-1.6, 1.6]) g.add(statue(x, 2.55, level >= 9 ? C.gold : C.marble, 0.8, level >= 9 ? { metalness: 0.5, roughness: 0.4 } : undefined));
+  // Estandarte
+  g.add(cyl(0.035, 0.035, 1.2, 6, C.dark, 0, peak, 0));
+  const flag = box(0.7, 0.4, 0.03, '#a8231a', 0, 0, 0);
   flag.geometry.translate(0.35, 0, 0);
-  flag.position.set(0, top + 1.0, 0);
+  flag.position.set(0, peak + 0.95, 0);
   flag.userData.wave = true;
   g.add(flag);
   return g;
@@ -312,12 +526,25 @@ function stall(color) {
 }
 
 function mercado(level) {
+  // Ágora: puestos con toldos delante de una stoa porticada
   const g = new THREE.Group();
+  g.add(box(4.0, 0.04, 3.4, '#ddd0b4', 0, 0, 0));
+  // Stoa al fondo
+  g.add(box(3.8, 0.15, 1.1, C.marbleDark, 0, 0, -1.55));
+  g.add(box(3.6, 1.35, 0.25, C.wall, 0, 0.15, -1.95));
+  for (const x of [-1.2, 0, 1.2]) g.add(box(0.5, 0.7, 0.05, C.dark, x, 0.15, -1.81));
+  colonnade(g, { from: -1.75, to: 1.75, at: -1.15, n: Math.min(7, 4 + Math.floor(level / 3)), y: 0.15, h: 1.35, r: 0.1 });
+  g.add(box(3.8, 0.16, 1.1, C.marbleDark, 0, 1.5, -1.55));
+  frieze(g, 3.8, 1.1, 1.5, 0.16, 0, -1.55);
+  const roof = gableRoof(1.25, 0.4, 3.9, C.roofRed, 0, 1.66, -1.55);
+  roof.rotation.y = Math.PI / 2;
+  g.add(roof);
+  // Puestos
   const spots = [
-    [-1.0, -0.8, 0],
-    [1.0, -0.8, 0],
-    [-1.1, 0.9, Math.PI],
-    [1.1, 0.9, Math.PI],
+    [-1.1, 0.2, 0],
+    [1.1, 0.2, 0],
+    [-1.15, 1.4, Math.PI],
+    [1.15, 1.4, Math.PI],
   ];
   const n = Math.min(spots.length, 1 + Math.floor(level / 2));
   for (let i = 0; i < n; i++) {
@@ -327,40 +554,48 @@ function mercado(level) {
     s.rotation.y = rot;
     g.add(s);
   }
-  // Montón de oro central, crece con el nivel
-  const h = 0.3 + Math.min(level, 12) * 0.05;
-  g.add(cyl(0.6, 0.65, 0.12, 12, C.stone, 0, 0, 0));
-  g.add(mesh(new THREE.ConeGeometry(0.45, h, 9), C.gold, { metalness: 0.6, roughness: 0.35 }));
-  g.children.at(-1).position.set(0, 0.12 + h / 2, 0);
+  // Fuente con el oro del mercado (crece con el nivel)
+  const hgt = 0.3 + Math.min(level, 12) * 0.05;
+  g.add(cyl(0.6, 0.65, 0.18, 12, C.marble, 0, 0, 0.8));
+  g.add(mesh(new THREE.ConeGeometry(0.42, hgt, 9), C.gold, { metalness: 0.6, roughness: 0.35 }));
+  g.children.at(-1).position.set(0, 0.18 + hgt / 2, 0.8);
+  // Ánforas en venta
+  for (let i = 0; i < Math.min(5, 1 + level); i++) g.add(amphora(-1.85 + i * 0.22, 0, 0.75 + (i % 2) * 0.2, i % 2 ? '#b9643a' : '#a5542f', 0.9));
   return g;
 }
 
 function almacen(level) {
+  // Horreum: almacén de piedra con frontón y puerta en arco
   const g = new THREE.Group();
-  g.add(box(3.0, 1.6, 2.3, C.barn, 0, 0, -0.2));
-  g.add(gableRoof(3.4, 1.1, 2.6, C.roofGrey, 0, 1.6, -0.2));
-  g.add(box(1.1, 1.15, 0.05, C.woodDark, 0, 0, 0.96));
-  for (const s of [1, -1]) {
-    const brace = box(0.08, 1.45, 0.03, C.white, 0, 0, 0.99);
-    brace.position.y = 0.57;
-    brace.rotation.z = s * 0.75;
-    g.add(brace);
-  }
-  for (const x of [-1.5, 1.5]) g.add(box(0.12, 1.6, 0.12, C.white, x, 0, 0.95));
-
+  g.add(box(3.3, 0.2, 2.6, C.marbleDark, 0, 0, -0.2));
+  g.add(box(3.0, 1.55, 2.2, C.stone, 0, 0.2, -0.2));
+  // Pilastras
+  for (const x of [-1.5, -0.5, 0.5, 1.5]) g.add(box(0.16, 1.55, 0.08, C.marble, x, 0.2, 0.92));
+  g.add(box(3.15, 0.18, 2.35, C.marbleDark, 0, 1.75, -0.2));
+  g.add(pedimentRoof(3.2, 0.7, 2.45, 0, 1.93, -0.2));
+  // Puerta en arco
+  g.add(box(0.8, 0.8, 0.05, C.woodDark, 0, 0.2, 0.92));
+  const arch = mesh(new THREE.CylinderGeometry(0.4, 0.4, 0.05, 12, 1, false, 0, Math.PI), C.woodDark);
+  arch.rotation.set(Math.PI / 2, 0, Math.PI / 2);
+  arch.position.set(0, 1.0, 0.92);
+  g.add(arch);
+  // Ventanucos
+  for (const x of [-1.0, 1.0]) g.add(box(0.3, 0.3, 0.05, C.dark, x, 1.0, 0.92, WINDOW_GLOW));
+  // Ánforas y fardos alrededor (más con el nivel)
   const spots = [
     [-1.9, 0.6],
     [1.9, 0.5],
-    [-1.8, -1.2],
-    [1.9, -1.0],
-    [-1.3, 1.5],
-    [1.3, 1.5],
+    [-1.85, -1.2],
+    [1.95, -1.0],
+    [-1.3, 1.45],
+    [1.3, 1.45],
   ];
   const n = Math.min(spots.length, level);
   for (let i = 0; i < n; i++) {
     const [x, z] = spots[i];
-    if (i % 2) g.add(cyl(0.22, 0.22, 0.55, 10, C.woodLight, x, 0, z));
-    else g.add(box(0.5, 0.5, 0.5, C.woodLight, x, 0, z));
+    if (i % 2) {
+      g.add(amphora(x - 0.13, 0, z, '#b9643a'), amphora(x + 0.13, 0, z + 0.1, '#a5542f'), amphora(x, 0, z - 0.18, '#c2703f'));
+    } else g.add(box(0.5, 0.45, 0.5, '#c9b48a', x, 0, z));
   }
   return g;
 }
@@ -441,33 +676,25 @@ function fundicion(level) {
 }
 
 function academia(level) {
+  // Biblioteca y escuela: templete con pórtico, frontón y cúpula
   const g = new THREE.Group();
-  g.add(box(3.4, 0.3, 2.6, C.stone, 0, 0, 0));
-  g.add(box(2.6, 1.6, 1.8, C.wall, 0, 0.3, -0.2));
-  // Pórtico de columnas
-  const cols = Math.min(6, 2 + Math.floor(level / 2));
-  for (let i = 0; i < cols; i++) {
-    const x = -1.25 + (2.5 * i) / Math.max(1, cols - 1);
-    g.add(cyl(0.12, 0.14, 1.6, 8, C.white, x, 0.3, 0.95));
-  }
-  g.add(box(2.9, 0.18, 0.6, C.wallDark, 0, 1.9, 0.95));
-  const pediment = gableRoof(0.62, 0.55, 2.9, C.wall, 0, 2.08, 0.95);
-  pediment.rotation.y = Math.PI / 2;
-  g.add(pediment);
-  // Cúpula (dorada desde el nivel 4)
+  const y0 = stylobate(g, 3.6, 2.9, 2);
+  g.add(box(2.6, 1.6, 1.8, C.wall, 0, y0, -0.25));
+  g.add(box(0.5, 0.8, 0.05, C.woodDark, 0, y0, 0.66));
+  for (const x of [-0.85, 0.85]) g.add(box(0.28, 0.45, 0.05, C.dark, x, y0 + 0.6, 0.66, WINDOW_GLOW));
+  const cols = Math.min(6, 4 + Math.floor(level / 3));
+  colonnade(g, { from: -1.3, to: 1.3, at: 1.05, n: cols, y: y0, h: 1.6 });
+  // Arquitrabe con friso y tejado con el frontón mirando al frente
+  g.add(box(3.05, 0.2, 2.75, C.marbleDark, 0, y0 + 1.6, -0.05));
+  frieze(g, 3.05, 2.75, y0 + 1.6, 0.2, 0, -0.05);
+  g.add(pedimentRoof(3.1, 0.6, 2.8, 0, y0 + 1.8, -0.05));
+  // Cúpula que asoma del tejado (dorada desde el nivel 4)
   const golden = level >= 4;
-  const dome = mesh(
-    new THREE.SphereGeometry(0.85, 12, 6, 0, Math.PI * 2, 0, Math.PI / 2),
-    golden ? C.gold : C.roofBlue,
-    golden ? { metalness: 0.5, roughness: 0.4 } : undefined,
-  );
-  dome.position.set(0, 1.9, -0.3);
-  g.add(dome);
-  g.add(cyl(0.05, 0.05, 0.5, 6, C.dark, 0, 2.7, -0.3));
+  g.add(dome(0.75, golden ? C.gold : C.roofBlue, 0, y0 + 2.05, -0.45, 0.45, golden ? { metalness: 0.5, roughness: 0.4 } : undefined));
   // Telescopio desde el nivel 3
   if (level >= 3) {
     const scope = new THREE.Group();
-    scope.position.set(1.35, 0.3, -1.0);
+    scope.position.set(1.45, y0, -1.0);
     scope.add(box(0.06, 0.6, 0.06, C.wood, 0, 0, 0));
     const tube = cyl(0.08, 0.11, 0.9, 8, '#b08a3a', 0, 0, 0, { metalness: 0.6, roughness: 0.4 });
     tube.position.set(0, 0.75, 0.15);
@@ -476,40 +703,40 @@ function academia(level) {
     scope.userData.swing = { speed: 0.3, amp: 0.8 };
     g.add(scope);
   }
+  if (level >= 6) g.add(statue(-1.55, 1.2));
   return g;
 }
 
 function cuartel(level) {
+  // Castro: barracones de piedra con pórtico y patio de armas cerrado por un muro bajo
   const g = new THREE.Group();
-  // Barracón
-  g.add(box(2.6, 1.0, 1.1, C.wood, 0, 0, -1.4));
-  const roof = gableRoof(1.4, 0.7, 2.9, C.roofRed, 0, 1.0, -1.4);
-  roof.rotation.y = Math.PI / 2;
-  g.add(roof);
-  g.add(box(0.4, 0.65, 0.05, C.dark, 0, 0, -0.83));
-  // Patio de armas con empalizada
-  g.add(box(3.4, 0.03, 2.4, '#c7ad7c', 0, 0, 0.5));
-  for (let i = 0; i < 12; i++) {
-    const x = -1.7 + (3.4 * i) / 11;
-    if (Math.abs(x) > 0.45) g.add(cyl(0.07, 0.07, 0.75, 5, C.woodDark, x, 0, 1.75));
-  }
-  for (const s of [-1, 1]) for (let i = 0; i < 5; i++) g.add(cyl(0.07, 0.07, 0.75, 5, C.woodDark, s * 1.7, 0, -0.65 + i * 0.6));
-  // Estandartes
+  g.add(box(2.9, 0.15, 1.3, C.marbleDark, 0, 0, -1.45));
+  g.add(box(2.7, 1.05, 0.85, C.wall, 0, 0.15, -1.6));
+  colonnade(g, { from: -1.25, to: 1.25, at: -0.95, n: 5, y: 0.15, h: 1.05, r: 0.09 });
+  g.add(box(2.95, 0.14, 1.3, C.marbleDark, 0, 1.2, -1.45));
+  g.add(hipRoof(3.0, 1.4, 0.45, C.roofRed, 0, 1.34, -1.45));
+  g.add(box(0.4, 0.65, 0.05, C.woodDark, 0, 0.15, -1.17));
+  // Patio de arena y muro bajo con puerta
+  g.add(box(3.4, 0.03, 2.4, '#d8c49a', 0, 0, 0.5));
+  for (const [x, z, w, d] of [[-1.1, 1.72, 1.2, 0.18], [1.1, 1.72, 1.2, 0.18], [-1.72, 0.45, 0.18, 2.4], [1.72, 0.45, 0.18, 2.4]]) g.add(box(w, 0.5, d, C.stone, x, 0, z));
+  for (const x of [-0.5, 0.5]) g.add(box(0.26, 0.85, 0.26, C.marble, x, 0, 1.72));
+  // Estandartes rojos con el águila dorada
   const banners = Math.min(4, 1 + Math.floor(level / 2));
   for (let i = 0; i < banners; i++) {
     const x = -1.2 + i * 0.8;
-    g.add(cyl(0.03, 0.03, 1.4, 5, C.dark, x, 1.0, -0.86));
-    const flag = box(0.35, 0.45, 0.02, C.cloth[i % 4], 0, 0, 0);
+    g.add(cyl(0.03, 0.03, 1.5, 5, C.dark, x, 1.4, -0.85));
+    g.add(box(0.12, 0.1, 0.06, C.gold, x, 2.9, -0.85, { metalness: 0.5, roughness: 0.4 }));
+    const flag = box(0.34, 0.45, 0.02, '#a8231a', 0, 0, 0);
     flag.geometry.translate(0.17, 0, 0);
-    flag.position.set(x, 2.15, -0.86);
+    flag.position.set(x, 2.55, -0.85);
     flag.userData.wave = true;
     g.add(flag);
   }
-  // Muñeco de entrenamiento
-  g.add(cyl(0.04, 0.04, 0.8, 5, C.wood, 1.35, 0, -0.25));
-  g.add(box(0.5, 0.06, 0.06, C.wood, 1.35, 0.55, -0.25));
+  // Poste de entrenamiento
+  g.add(cyl(0.05, 0.05, 0.8, 5, C.wood, 1.3, 0, -0.25));
+  g.add(box(0.5, 0.06, 0.06, C.wood, 1.3, 0.55, -0.25));
   const dummy = mesh(new THREE.SphereGeometry(0.12, 8, 6), '#d8c08a');
-  dummy.position.set(1.35, 0.9, -0.25);
+  dummy.position.set(1.3, 0.9, -0.25);
   g.add(dummy);
   // Posiciones para las tropas que hay en casa
   g.userData.yard = [];
@@ -525,10 +752,13 @@ function puerto(level) {
     for (const x of [-0.55, 0.55]) g.add(cyl(0.08, 0.08, 1.4, 6, C.woodDark, x, -1.0, z));
   }
   g.add(box(1.3, 0.12, len + 0.6, C.woodLight, 0, 0.3, -len / 2 + 0.1));
-  // Almacén del muelle y mercancías
-  g.add(box(1.4, 1.0, 1.1, C.wood, 2.0, 0, 0.3));
-  g.add(gableRoof(1.6, 0.6, 1.3, C.roofGrey, 2.0, 1.0, 0.3));
-  g.add(cyl(0.18, 0.18, 0.4, 8, C.woodLight, -1.4, 0, 0.6), box(0.4, 0.4, 0.4, C.woodLight, -1.9, 0, 0.2));
+  // Muelle de piedra en la orilla, almacén porticado y mercancías
+  g.add(box(4.6, 0.3, 1.0, C.stone, 0, 0.12, -0.35));
+  g.add(box(1.5, 0.95, 1.0, C.wall, 2.05, 0, 0.45));
+  colonnade(g, { from: 1.45, to: 2.65, at: -0.15, n: 3, y: 0, h: 0.95, r: 0.07 });
+  g.add(box(1.6, 0.1, 1.35, C.marbleDark, 2.05, 0.95, 0.3));
+  g.add(hipRoof(1.65, 1.4, 0.4, C.roofRed, 2.05, 1.05, 0.3));
+  g.add(amphora(-1.45, 0.42, 0.0, '#b9643a'), amphora(-1.25, 0.42, 0.1, '#a5542f'), box(0.4, 0.4, 0.4, '#c9b48a', -1.9, 0.42, -0.1));
   // Grúa
   const crane = new THREE.Group();
   crane.position.set(0.5, 0.42, -1.2);
@@ -545,11 +775,14 @@ function puerto(level) {
     // En la punta del muelle, sobre un islote de rocas
     const fx = 0;
     const fz = -len - 0.9;
+    // Torrecilla de piedra con el fuego arriba
     g.add(cyl(0.7, 0.95, 1.3, 8, C.stoneDark, fx, -1.1, fz));
-    for (let i = 0; i < 4; i++) g.add(cyl(0.32, 0.36, 0.55, 8, i % 2 ? C.roofRed : C.white, fx, 0.2 + i * 0.55, fz));
-    g.add(cyl(0.3, 0.3, 0.35, 8, '#fff2a8', fx, 2.4, fz, { emissive: '#ffd34a', emissiveIntensity: 1.5 }));
-    const top = mesh(new THREE.ConeGeometry(0.4, 0.45, 8), C.roofRed);
-    top.position.set(fx, 2.98, fz);
+    g.add(box(0.75, 1.3, 0.75, C.marble, fx, 0.2, fz));
+    g.add(box(0.9, 0.1, 0.9, C.marbleDark, fx, 1.5, fz));
+    g.add(cyl(0.3, 0.34, 0.8, 8, C.marble, fx, 1.6, fz));
+    g.add(cyl(0.26, 0.26, 0.35, 8, '#fff2a8', fx, 2.4, fz, { emissive: '#ffd34a', emissiveIntensity: 1.5 }));
+    const top = mesh(new THREE.ConeGeometry(0.38, 0.35, 8), C.roofRed);
+    top.position.set(fx, 2.93, fz);
     g.add(top);
   }
   // Amarres para los barcos que hay en casa
@@ -560,39 +793,31 @@ function puerto(level) {
 
 function templo(level) {
   const g = new THREE.Group();
-  // Escalinata de tres peldaños
-  for (let i = 0; i < 3; i++) g.add(box(3.6 - i * 0.3, 0.16, 2.8 - i * 0.3, i % 2 ? C.wallDark : C.wall, 0, i * 0.16, 0));
-  const base = 0.48;
+  const base = stylobate(g, 3.6, 2.8, 3, 0, 0, 0.16);
   const w = 2.6;
   const d = 1.9;
   // Naos y columnata (más columnas con el nivel)
   g.add(box(w - 0.9, 1.4, d - 0.8, C.wall, 0, base, -0.05));
+  g.add(box(0.4, 0.75, 0.05, C.woodDark, 0, base, d / 2 - 0.44));
   const perSide = Math.min(6, 3 + Math.floor(level / 2));
-  for (let i = 0; i < perSide; i++) {
-    const x = -w / 2 + (w * i) / (perSide - 1);
-    for (const z of [-d / 2, d / 2]) g.add(cyl(0.1, 0.12, 1.4, 8, C.white, x, base, z));
-  }
-  for (const x of [-w / 2, w / 2]) g.add(cyl(0.1, 0.12, 1.4, 8, C.white, x, base, 0));
-  g.add(box(w + 0.3, 0.22, d + 0.3, C.wallDark, 0, base + 1.4, 0));
+  for (const z of [-d / 2, d / 2]) colonnade(g, { from: -w / 2, to: w / 2, at: z, n: perSide, y: base, h: 1.4, r: 0.11 });
+  for (const x of [-w / 2, w / 2]) g.add(column(x, base, 0, 1.4, 0.11));
+  g.add(box(w + 0.3, 0.22, d + 0.3, C.marbleDark, 0, base + 1.4, 0));
+  frieze(g, w + 0.3, d + 0.3, base + 1.4, 0.22);
   const gold = level >= 5;
-  g.add(gableRoof(d + 0.3, 0.6, w + 0.4, gold ? C.gold : C.roofRed, 0, base + 1.62, 0));
-  g.children.at(-1).rotation.y = Math.PI / 2;
+  // Frontones a los lados largos: la cumbrera va a lo ancho, como en los templos griegos
+  const roof = pedimentRoof(d + 0.3, 0.6, w + 0.4, 0, base + 1.62, 0, gold ? C.gold : C.roofRed);
+  roof.rotation.y = Math.PI / 2;
+  g.add(roof);
   // Altar con fuego sagrado delante del templo
-  g.add(box(0.5, 0.45, 0.5, C.stone, 0, 0, 1.75));
+  g.add(box(0.5, 0.45, 0.5, C.marble, 0, 0, 1.75));
   const fire = mesh(new THREE.ConeGeometry(0.18, 0.45, 6), '#ffb347', { emissive: '#ff7a00', emissiveIntensity: 1.6 });
   fire.position.set(0, 0.68, 1.75);
   fire.userData.flicker = true;
   g.add(fire);
   // Estatua del dios desde el nivel 3
-  if (level >= 3) {
-    g.add(box(0.35, 0.3, 0.35, C.stone, 1.55, 0, 1.4));
-    const statue = mesh(new THREE.CylinderGeometry(0.1, 0.18, 0.7, 6), gold ? C.gold : '#cfd4da', gold ? { metalness: 0.6, roughness: 0.35 } : undefined);
-    statue.position.set(1.55, 0.65, 1.4);
-    g.add(statue);
-    const head = mesh(new THREE.SphereGeometry(0.1, 8, 6), gold ? C.gold : '#cfd4da');
-    head.position.set(1.55, 1.08, 1.4);
-    g.add(head);
-  }
+  if (level >= 3) g.add(statue(1.55, 1.4, gold ? C.gold : C.marble, 1.0, gold ? { metalness: 0.6, roughness: 0.35 } : undefined));
+  if (level >= 7) g.add(statue(-1.55, 1.4, gold ? C.gold : C.marble, 1.0, gold ? { metalness: 0.6, roughness: 0.35 } : undefined));
   return g;
 }
 
@@ -668,17 +893,195 @@ function coloso(level) {
 
 // ── Vida en la isla ──────────────────────────────────────────────────────────
 
-const CLOTHES = ['#b8442f', '#3f6fa8', '#e3b23c', '#6bbf59', '#8a5ab8', '#d9d2c3'];
+// ── Gente de la época ────────────────────────────────────────────────────────
+// Figuras de unos 0,6 de alto que miran a +Z, con la mano derecha en +X: túnicas,
+// togas, vestidos largos, velos, armaduras y lo que llevan en las manos.
 
-/** Aldeano diminuto (0,5 de alto). */
-export function createVillager(i) {
+const SKIN = ['#e8c39e', '#d9a87e', '#c48a5e', '#f0cfaa'];
+const HAIR = ['#3a2a1e', '#5a3a22', '#2a2420', '#7a5a32', '#a8743a'];
+const BRONZE_C = '#c9a24a';
+const IRON = '#8a8f96';
+const LEATHER = '#7a5230';
+
+/** Brazo colgando del hombro (s = 1 derecho, -1 izquierdo); `pose`: abajo, adelante, arriba o en jarra. */
+function arm(g, s, pose, sleeve, skin) {
+  const a = new THREE.Group();
+  a.position.set(s * 0.1, 0.43, 0);
+  a.add(cyl(0.024, 0.026, 0.08, 5, sleeve, 0, -0.08, 0));
+  a.add(cyl(0.019, 0.022, 0.13, 5, skin, 0, -0.2, 0));
+  const hand = mesh(new THREE.SphereGeometry(0.022, 5, 4), skin);
+  hand.position.y = -0.21;
+  a.add(hand);
+  if (pose === 'abajo') a.rotation.z = s * 0.12;
+  if (pose === 'adelante') a.rotation.set(-1.15, 0, s * 0.15);
+  if (pose === 'arriba') a.rotation.set(0, 0, s * 2.6);
+  if (pose === 'saludo') a.rotation.set(-0.3, 0, s * 2.3);
+  if (pose === 'cadera') a.rotation.set(0, 0, s * 0.6);
+  g.add(a);
+  return a;
+}
+
+/**
+ * Una persona. Opciones: skin, hair, female, beard, long (vestido largo), color (ropa),
+ * skirt (falda de otro color), drape (toga o manto cruzado), veil, shawl, belt, cloak,
+ * cuirass, pteruges, greaves, helmet ('corintio' | 'legionario' | 'gorro' | 'panuelo'),
+ * crest, arms: [derecho, izquierdo] (poses).
+ */
+export function figure(o) {
   const g = new THREE.Group();
-  g.add(cyl(0.07, 0.1, 0.28, 6, CLOTHES[i % CLOTHES.length]));
-  const head = mesh(new THREE.SphereGeometry(0.06, 6, 5), '#e8c39e');
-  head.position.y = 0.34;
+  const skin = o.skin ?? SKIN[0];
+  const hair = o.hair ?? HAIR[0];
+  const top = o.cuirass ? (o.cuirassColor ?? BRONZE_C) : o.color;
+  // Piernas y sandalias (o grebas)
+  for (const s of [-1, 1]) {
+    g.add(cyl(0.022, 0.026, 0.22, 5, o.greaves ? (o.cuirassColor ?? BRONZE_C) : skin, s * 0.04, 0.02, 0));
+    g.add(box(0.05, 0.022, 0.085, '#5e3b1c', s * 0.04, 0, 0.012));
+  }
+  // Ropa: vestido hasta los pies o túnica hasta la rodilla
+  if (o.long) g.add(cyl(0.08, 0.118, 0.32, 9, o.skirt ?? o.color, 0, 0.02, 0));
+  else g.add(cyl(0.074, 0.098, 0.16, 9, o.color, 0, 0.2, 0));
+  if (o.pteruges) for (let k = 0; k < 8; k++) {
+    const a = (k / 8) * Math.PI * 2;
+    const strip = box(0.035, 0.09, 0.015, o.pteruges, Math.sin(a) * 0.088, 0.17, Math.cos(a) * 0.088);
+    strip.rotation.y = a;
+    g.add(strip);
+  }
+  // Torso y hombros
+  g.add(cyl(0.068, 0.076, 0.16, 9, top, 0, 0.3, 0));
+  g.add(box(0.19, 0.05, 0.09, top, 0, 0.415, 0));
+  if (o.belt) g.add(cyl(0.079, 0.079, 0.022, 9, o.belt, 0, 0.32, 0));
+  // Toga o manto cruzado del hombro izquierdo a la cadera derecha, y su caída por la izquierda
+  if (o.drape) {
+    const band = box(0.07, 0.3, 0.16, o.drape, 0, 0, 0);
+    band.position.set(0.0, 0.31, 0.0);
+    band.rotation.z = -0.6;
+    band.scale.set(1, 1, 1);
+    g.add(band);
+    g.add(box(0.06, 0.34, 0.13, o.drape, -0.09, 0.1, 0));
+  }
+  if (o.shawl) g.add(box(0.22, 0.07, 0.17, o.shawl, 0, 0.39, 0), box(0.05, 0.2, 0.12, o.shawl, 0.1, 0.2, 0.02));
+  // Capa a la espalda
+  if (o.cloak) {
+    const c = box(0.2, 0.36, 0.025, o.cloak, 0, 0.08, -0.075);
+    c.rotation.x = 0.12;
+    g.add(c);
+  }
+  // Brazos
+  const [right = 'abajo', left = 'abajo'] = o.arms ?? [];
+  const sleeve = o.cuirass ? (o.sleeve ?? o.color) : o.color;
+  const ra = arm(g, 1, right, sleeve, skin);
+  const la = arm(g, -1, left, sleeve, skin);
+  // Cuello, cabeza, cara y pelo
+  g.add(cyl(0.024, 0.028, 0.05, 5, skin, 0, 0.44, 0));
+  const head = mesh(new THREE.SphereGeometry(0.058, 9, 7), skin);
+  head.position.y = 0.535;
   g.add(head);
-  if (i % 3 === 0) g.add(box(0.14, 0.14, 0.14, C.woodLight, 0, 0.36, -0.04));
-  for (const m of g.children) m.castShadow = false;
+  for (const s of [-1, 1]) g.add(box(0.012, 0.012, 0.01, '#2a2018', s * 0.022, 0.538, 0.054));
+  g.add(box(0.012, 0.022, 0.016, skin, 0, 0.52, 0.058));
+  if (o.beard) g.add(box(0.075, 0.045, 0.04, hair, 0, 0.485, 0.035));
+  if (!o.helmet && !o.veil) {
+    const cap = mesh(new THREE.SphereGeometry(0.062, 9, 6, 0, Math.PI * 2, 0, Math.PI / 2), hair);
+    cap.position.set(0, 0.54, -0.006);
+    cap.scale.set(1, 0.9, 1.02);
+    g.add(cap);
+    if (o.female) {
+      const bun = mesh(new THREE.SphereGeometry(0.034, 7, 5), hair);
+      bun.position.set(0, 0.565, -0.062);
+      g.add(bun);
+      if (o.band) g.add(cyl(0.063, 0.063, 0.014, 9, o.band, 0, 0.565, -0.004));
+    }
+  }
+  if (o.veil) {
+    const v = mesh(new THREE.SphereGeometry(0.068, 9, 6, 0, Math.PI * 2, 0, Math.PI / 2), o.veil);
+    v.position.y = 0.535;
+    g.add(v, box(0.13, 0.2, 0.03, o.veil, 0, 0.37, -0.058));
+  }
+  if (o.helmet) {
+    const metal = o.helmet === 'corintio' ? BRONZE_C : o.helmet === 'legionario' ? IRON : o.helmet === 'gorro' ? LEATHER : '#b8442f';
+    const h = mesh(new THREE.SphereGeometry(0.066, 9, 6, 0, Math.PI * 2, 0, Math.PI / 2), metal);
+    h.position.y = 0.535;
+    g.add(h);
+    if (o.helmet === 'corintio') g.add(box(0.03, 0.06, 0.02, metal, -0.045, 0.49, 0.05), box(0.03, 0.06, 0.02, metal, 0.045, 0.49, 0.05));
+    if (o.helmet === 'legionario') g.add(box(0.12, 0.04, 0.04, metal, 0, 0.5, -0.05));
+    if (o.helmet === 'panuelo') g.add(box(0.03, 0.05, 0.04, metal, 0.05, 0.53, -0.05));
+    if (o.crest) {
+      // Penacho de crin: de delante atrás (griego) o de lado a lado (centurión)
+      if (o.helmet === 'corintio') {
+        g.add(box(0.022, 0.06, 0.15, o.crest, 0, 0.59, 0));
+        g.add(box(0.022, 0.04, 0.06, o.crest, 0, 0.56, -0.09));
+      } else g.add(box(0.11, 0.035, 0.018, o.crest, 0, 0.59, 0));
+    }
+  }
+  g.userData.hands = { right: ra, left: la };
+  return g;
+}
+
+/** Algo en una mano: se pega al final del brazo, siguiendo su postura. */
+function inHand(armGroup, obj, y = -0.22) {
+  obj.position.y += y;
+  armGroup.add(obj);
+}
+
+/** Lanza (en la mano derecha, vertical). */
+function spear(g, h = 0.95) {
+  g.add(cyl(0.011, 0.011, h, 4, C.woodDark, 0.135, 0.0, 0.03));
+  g.add(mesh(new THREE.ConeGeometry(0.022, 0.08, 4), '#c9ced6'));
+  g.children.at(-1).position.set(0.135, h + 0.04, 0.03);
+}
+
+/** Escudo redondo de bronce (aspis) en el brazo izquierdo, con su emblema. */
+function aspis(g, color = BRONZE_C, emblem = '#a8231a') {
+  const s = mesh(new THREE.CylinderGeometry(0.16, 0.16, 0.025, 14), color);
+  s.rotation.x = Math.PI / 2;
+  s.position.set(-0.12, 0.3, 0.07);
+  g.add(s);
+  const e = mesh(new THREE.CylinderGeometry(0.06, 0.06, 0.01, 8), emblem);
+  e.rotation.x = Math.PI / 2;
+  e.position.set(-0.12, 0.3, 0.085);
+  g.add(e);
+}
+
+const VILLAGERS = [
+  // Ciudadano con toga blanca sobre túnica anaranjada, saludando
+  { color: '#d9822b', drape: '#f6f1e7', arms: ['saludo', 'abajo'], hair: HAIR[1] },
+  // Mujer de amarillo y verde con velo claro
+  { female: true, long: true, color: '#e8c547', skirt: '#4f8f4a', belt: '#3f6fa8', veil: '#f6f1e7', arms: ['cadera', 'abajo'] },
+  // Guerrero con coraza, faldellín de cuero, capa roja y lanza
+  { color: '#8a4a2a', cuirass: true, pteruges: LEATHER, cloak: '#b8442f', beard: true, hair: HAIR[3], arms: ['abajo', 'abajo'], extra: (g) => spear(g) },
+  // Mujer de rojo con velo blanco y una jarra
+  { female: true, long: true, color: '#c4552d', skirt: '#e3b23c', veil: '#f6f1e7', arms: ['adelante', 'abajo'], extra: (g) => inHand(g.userData.hands.right, amphora(0, -0.12, 0, '#c2703f', 0.3)) },
+  // Guardia con casco de penacho y escudo redondo
+  { color: '#a8231a', cuirass: true, pteruges: LEATHER, greaves: true, helmet: 'corintio', crest: '#a8231a', arms: ['abajo', 'adelante'], extra: (g) => (spear(g), aspis(g)) },
+  // Aguadora de blanco con el ánfora al hombro
+  { female: true, long: true, color: '#f6f1e7', belt: '#c9a24a', band: '#3f6fa8', hair: HAIR[4], arms: ['abajo', 'arriba'], extra: (g) => {
+    const a = amphora(-0.12, 0.44, -0.02, '#b9643a', 0.45);
+    a.rotation.z = 0.5;
+    g.add(a);
+  } },
+  // Mujer de azul con chal anaranjado y pañuelo verde
+  { female: true, long: true, color: '#3f7fc0', shawl: '#e08a3a', veil: '#4f8f4a', arms: ['adelante', 'adelante'] },
+  // Erudito con toga blanca y un pergamino
+  { color: '#ece4d4', long: true, drape: '#f6f1e7', beard: true, hair: HAIR[2], arms: ['adelante', 'abajo'], extra: (g) => {
+    const scroll = cyl(0.016, 0.016, 0.11, 6, '#efe2c4', 0, 0, 0);
+    scroll.rotation.z = Math.PI / 2;
+    inHand(g.userData.hands.right, scroll, -0.23);
+  } },
+  // Sirvienta de gris con ribete verde y una bandeja con copas
+  { female: true, long: true, color: '#9c9a94', belt: '#4f8f4a', band: '#4f8f4a', hair: HAIR[1], arms: ['adelante', 'adelante'], extra: (g) => {
+    g.add(cyl(0.09, 0.09, 0.012, 10, BRONZE_C, 0, 0.36, 0.16));
+    g.add(cyl(0.015, 0.012, 0.04, 6, C.gold, 0.03, 0.372, 0.16), cyl(0.015, 0.012, 0.04, 6, C.gold, -0.03, 0.372, 0.17));
+  } },
+];
+
+/** Vecino de la ciudad (cada `i` es una persona distinta, con su ropa y lo que lleva). */
+export function createVillager(i) {
+  const kind = VILLAGERS[i % VILLAGERS.length];
+  const g = figure({ ...kind, skin: SKIN[i % SKIN.length], hair: kind.hair ?? HAIR[(i * 3) % HAIR.length] });
+  kind.extra?.(g);
+  // Una sola pieza por persona (son muchas) y del tamaño de las puertas de la ciudad
+  bakeStatic(g);
+  g.traverse((m) => (m.castShadow = false));
+  g.scale.setScalar(0.75);
   return g;
 }
 
@@ -774,44 +1177,47 @@ function lantern(x, y, z) {
 }
 
 function taberna(level) {
+  // Casa de comidas mediterránea: dos plantas encaladas, contraventanas azules y una pérgola con parra
   const g = new THREE.Group();
-  g.add(box(3.2, 0.2, 2.6, C.stone, 0, 0, -0.3));
-  // Planta baja de piedra y piso de entramado de madera
-  g.add(box(2.4, 1.1, 1.7, C.wall, 0, 0.2, -0.6));
-  g.add(box(2.6, 0.95, 1.9, C.wallDark, 0, 1.3, -0.6));
-  for (const x of [-1.25, -0.4, 0.4, 1.25]) g.add(box(0.08, 0.95, 0.06, C.woodDark, x, 1.3, 0.36));
-  g.add(box(2.62, 0.08, 0.06, C.woodDark, 0, 1.75, 0.36));
-  const roof = gableRoof(2.0, 0.85, 3.0, C.roofRed, 0, 2.25, -0.6);
-  roof.rotation.y = Math.PI / 2;
-  g.add(roof);
-  // Puerta, ventanas y balcón
-  g.add(box(0.55, 0.8, 0.05, C.woodDark, 0, 0.2, 0.26));
-  for (const x of [-0.8, 0.8]) g.add(box(0.36, 0.36, 0.05, C.dark, x, 0.55, 0.26, WINDOW_GLOW), box(0.36, 0.36, 0.05, C.dark, x, 1.5, 0.36, WINDOW_GLOW));
-  g.add(box(1.4, 0.06, 0.5, C.wood, 0, 1.3, 0.6), box(1.4, 0.3, 0.04, C.woodLight, 0, 1.36, 0.84));
+  g.add(box(3.2, 0.15, 2.6, C.marbleDark, 0, 0, -0.3));
+  g.add(box(2.4, 1.1, 1.6, C.wall, 0, 0.15, -0.7));
+  g.add(box(1.7, 0.85, 1.4, '#f3dcb0', -0.3, 1.25, -0.8));
+  g.add(hipRoof(1.95, 1.65, 0.45, C.roofRed, -0.3, 2.1, -0.8));
+  // Azotea con barandilla a la derecha
+  g.add(box(0.7, 0.2, 1.5, C.wall, 0.85, 1.25, -0.7));
+  // Puerta, ventanas con contraventanas azules
+  g.add(box(0.55, 0.8, 0.05, C.woodDark, 0.3, 0.15, 0.11));
+  for (const x of [-0.7]) {
+    g.add(box(0.34, 0.36, 0.05, C.dark, x, 0.5, 0.11, WINDOW_GLOW));
+    for (const s of [-1, 1]) g.add(box(0.13, 0.38, 0.04, C.roofBlue, x + s * 0.25, 0.49, 0.13));
+  }
+  for (const x of [-0.65, 0.05]) {
+    g.add(box(0.3, 0.32, 0.05, C.dark, x, 1.5, -0.08, WINDOW_GLOW));
+    for (const s of [-1, 1]) g.add(box(0.11, 0.34, 0.04, C.roofBlue, x + s * 0.21, 1.49, -0.06));
+  }
   // Chimenea humeante
-  g.add(box(0.35, 1.2, 0.35, C.stone, 0.9, 2.2, -1.2));
-  g.add(smokeColumn(0.9, 3.5, -1.2, 0.8));
+  g.add(box(0.3, 0.6, 0.3, C.wall, -0.9, 2.1, -1.2));
+  g.add(smokeColumn(-0.9, 2.85, -1.2, 0.8));
   // Letrero colgante con una jarra
-  g.add(box(0.06, 0.06, 0.6, C.woodDark, -1.2, 1.15, 0.55));
+  g.add(box(0.06, 0.06, 0.6, C.woodDark, -1.2, 1.15, 0.35));
   const sign = box(0.5, 0.36, 0.04, C.woodLight, 0, 0, 0);
-  sign.position.set(-1.2, 0.72, 0.8);
+  sign.position.set(-1.2, 0.72, 0.6);
   sign.userData.wave = true;
   g.add(sign);
-  g.add(box(0.16, 0.2, 0.05, C.gold, -1.2, 0.8, 0.83));
-  // Terraza: mesas, bancos y barriles (más cuanto más nivel)
+  g.add(box(0.16, 0.2, 0.05, C.gold, -1.2, 0.8, 0.63));
+  // Terraza bajo la parra: mesas y bancos (más con el nivel)
+  g.add(pergola(2.6, 1.1, 1.35, 0, 1.25));
   const tables = Math.min(3, 1 + Math.floor(level / 3));
   for (let i = 0; i < tables; i++) {
-    const x = -1.0 + i * 1.0;
-    g.add(cyl(0.28, 0.28, 0.05, 8, C.woodLight, x, 0.42, 1.3), cyl(0.05, 0.05, 0.42, 5, C.woodDark, x, 0, 1.3));
-    g.add(box(0.6, 0.06, 0.16, C.wood, x, 0.25, 1.75), box(0.6, 0.06, 0.16, C.wood, x, 0.25, 0.85));
-    g.add(cyl(0.05, 0.05, 0.14, 6, '#e8d9a8', x + 0.08, 0.47, 1.3));
+    const x = -0.9 + i * 0.9;
+    g.add(cyl(0.26, 0.26, 0.05, 8, C.marble, x, 0.42, 1.25), cyl(0.05, 0.05, 0.42, 5, C.marbleDark, x, 0, 1.25));
+    g.add(box(0.55, 0.06, 0.16, C.wood, x, 0.25, 1.65), box(0.55, 0.06, 0.16, C.wood, x, 0.25, 0.85));
+    g.add(cyl(0.05, 0.04, 0.14, 6, '#b9643a', x + 0.08, 0.47, 1.25));
   }
-  const barrels = Math.min(6, 2 + level);
-  for (let i = 0; i < barrels; i++) {
-    const b = cyl(0.2, 0.2, 0.5, 8, C.wood, 1.55, (i >= 3 ? 0.5 : 0), -1.2 + (i % 3) * 0.45);
-    g.add(b);
-  }
-  g.add(lantern(-0.5, 2.05, 0.4), lantern(0.5, 2.05, 0.4));
+  // Ánforas de vino
+  const jars = Math.min(6, 2 + level);
+  for (let i = 0; i < jars; i++) g.add(amphora(1.4 + (i % 2) * 0.22, 0, -1.3 + Math.floor(i / 2) * 0.32, i % 3 ? '#b9643a' : '#a5542f'));
+  g.add(lantern(-0.5, 1.9, 0.15), lantern(0.6, 1.9, 0.15));
   return g;
 }
 
@@ -896,32 +1302,47 @@ function torre(level) {
 }
 
 function faro(level) {
+  // Faro de piedra al estilo del de Alejandría: base cuadrada, cuerpo octogonal y linterna redonda con fuego
   const g = new THREE.Group();
-  // Peñas y casita del farero
-  for (const [x, z, s] of [[-0.9, 0.6, 0.7], [0.8, 0.8, 0.55], [0.2, -1.0, 0.6]]) {
+  for (const [x, z, s] of [[-1.0, 0.7, 0.7], [0.9, 0.9, 0.55], [0.3, -1.1, 0.6]]) {
     const r = mesh(new THREE.DodecahedronGeometry(s), C.stoneDark);
     r.position.set(x, s * 0.4, z);
     r.scale.y = 0.6;
     g.add(r);
   }
-  g.add(box(1.2, 0.8, 1.0, C.wall, 1.3, 0, -0.2), gableRoof(1.4, 0.5, 1.2, C.roofBlue, 1.3, 0.8, -0.2));
-  g.add(box(0.25, 0.25, 0.05, C.dark, 1.3, 0.35, 0.31, WINDOW_GLOW));
-  // Torre a franjas
-  const h = 4.4 + Math.min(level, 10) * 0.2;
-  const bands = 5;
-  for (let i = 0; i < bands; i++) {
-    const r0 = 0.75 - (i / bands) * 0.25;
-    const r1 = 0.75 - ((i + 1) / bands) * 0.25;
-    g.add(cyl(r1, r0, h / bands, 10, i % 2 ? C.roofRed : C.white, 0, (h * i) / bands, 0));
+  // Casita del farero
+  g.add(box(1.1, 0.75, 0.9, C.wall, 1.35, 0, -0.3), hipRoof(1.25, 1.05, 0.35, C.roofRed, 1.35, 0.75, -0.3));
+  g.add(box(0.22, 0.22, 0.05, C.dark, 1.35, 0.32, 0.16, WINDOW_GLOW));
+  const k = 1 + Math.min(level, 10) * 0.04;
+  // Base cuadrada con su cornisa
+  const h1 = 2.0 * k;
+  g.add(box(1.5, 0.25, 1.5, C.marbleDark, 0, 0, 0));
+  g.add(box(1.3, h1, 1.3, C.marble, 0, 0.25, 0));
+  for (let i = 1; i < 4; i++) g.add(box(0.08, 0.22, 0.05, C.dark, 0, 0.25 + (h1 * i) / 4, 0.66, WINDOW_GLOW));
+  let y = 0.25 + h1;
+  g.add(box(1.5, 0.12, 1.5, C.marbleDark, 0, y, 0));
+  y += 0.12;
+  // Cuerpo octogonal
+  const h2 = 1.5 * k;
+  g.add(cyl(0.55, 0.6, h2, 8, C.marble, 0, y, 0));
+  y += h2;
+  g.add(cyl(0.72, 0.72, 0.1, 8, C.marbleDark, 0, y, 0));
+  y += 0.1;
+  // Linterna de columnas con el fuego
+  for (let a = 0; a < 6; a++) {
+    const ang = (a / 6) * Math.PI * 2;
+    g.add(cyl(0.04, 0.04, 0.6, 5, C.marble, Math.cos(ang) * 0.38, y, Math.sin(ang) * 0.38));
   }
-  // Linterna con su luz y el haz que gira
-  g.add(cyl(0.62, 0.62, 0.12, 10, C.dark, 0, h, 0));
-  g.add(cyl(0.38, 0.38, 0.6, 10, '#fff2a8', 0, h + 0.12, 0, { emissive: '#ffd34a', emissiveIntensity: 1.8 }));
-  const cap = mesh(new THREE.ConeGeometry(0.5, 0.55, 10), C.roofRed);
-  cap.position.y = h + 1.0;
-  g.add(cap);
+  g.add(cyl(0.3, 0.3, 0.45, 10, '#fff2a8', 0, y + 0.05, 0, { emissive: '#ffd34a', emissiveIntensity: 1.8 }));
+  const lamp = y + 0.3;
+  y += 0.6;
+  g.add(mesh(new THREE.ConeGeometry(0.5, 0.35, 10), C.roofRed));
+  g.children.at(-1).position.y = y + 0.17;
+  // Estatua de bronce en lo alto
+  const god = cyl(0.06, 0.1, 0.45, 6, C.gold, 0, y + 0.3, 0, { metalness: 0.55, roughness: 0.4 });
+  g.add(god);
   const beam = new THREE.Group();
-  beam.position.y = h + 0.42;
+  beam.position.y = lamp;
   const ray = new THREE.Mesh(new THREE.ConeGeometry(0.9, 9, 12, 1, true), mat('#fff3b0', { transparent: true, opacity: 0.16, emissive: '#fff3b0', emissiveIntensity: 1, depthWrite: false, side: THREE.DoubleSide }));
   ray.rotation.z = Math.PI / 2;
   ray.position.x = 4.6;
@@ -984,18 +1405,74 @@ export function createBuilding(id, level) {
 
 // ── Tropas y barcos ──────────────────────────────────────────────────────────
 
-const UNIT_COLORS = {
-  hondero: '#9a7b4f',
-  hoplita: '#b08d3c',
-  lancero: '#b8442f',
-  arquero: '#3f8a3a',
-  espadachin: '#6a7380',
-  caballero: '#3f6fa8',
-  barbaro: '#7a5230',
-  pirata: '#2b2620',
+/** Escudo rectangular de legionario (scutum) con su umbo dorado. */
+function scutum(g, color = '#a8231a') {
+  g.add(box(0.17, 0.3, 0.03, color, -0.12, 0.15, 0.08));
+  g.add(box(0.02, 0.3, 0.032, C.gold, -0.12, 0.15, 0.081));
+  const boss = mesh(new THREE.SphereGeometry(0.03, 6, 4), C.gold);
+  boss.position.set(-0.12, 0.3, 0.1);
+  g.add(boss);
+}
+
+/** Caballo (de pie, mirando a +Z). Devuelve la altura del lomo. */
+function horse(g, color = '#7a5230') {
+  g.add(box(0.2, 0.2, 0.52, color, 0, 0.3, 0));
+  for (const [x, z] of [[-0.07, -0.2], [0.07, -0.2], [-0.07, 0.2], [0.07, 0.2]]) {
+    g.add(cyl(0.025, 0.03, 0.3, 5, color, x, 0, z));
+    g.add(box(0.05, 0.03, 0.05, '#2a2420', x, 0, z));
+  }
+  const neck = box(0.1, 0.24, 0.12, color, 0, 0, 0);
+  neck.position.set(0, 0.46, 0.25);
+  neck.rotation.x = 0.5;
+  g.add(neck);
+  const head = box(0.09, 0.09, 0.2, color, 0, 0, 0);
+  head.position.set(0, 0.56, 0.36);
+  head.rotation.x = 0.35;
+  g.add(head);
+  g.add(box(0.03, 0.18, 0.1, '#2a2420', 0, 0.44, 0.22));
+  const tail = box(0.05, 0.2, 0.05, '#2a2420', 0, 0.24, -0.28);
+  tail.rotation.x = -0.4;
+  g.add(tail);
+  g.add(box(0.22, 0.03, 0.22, '#a8231a', 0, 0.5, 0));
+  return 0.42;
+}
+
+const TROOPS = {
+  lancero: { color: '#b8442f', helmet: 'corintio', greaves: true, arms: ['abajo', 'adelante'], extra: (g) => (spear(g), aspis(g, '#8b5a2b', '#e3b23c')) },
+  hondero: { color: '#c9b48a', belt: LEATHER, hair: HAIR[3], arms: ['arriba', 'abajo'], extra: (g) => {
+    g.add(cyl(0.006, 0.006, 0.22, 4, C.woodDark, 0.2, 0.62, 0));
+    g.add(box(0.05, 0.05, 0.05, C.stone, 0.2, 0.84, 0));
+    g.add(box(0.08, 0.09, 0.05, LEATHER, -0.09, 0.2, 0.07));
+  } },
+  arquero: { color: '#3f8a3a', helmet: 'gorro', belt: LEATHER, arms: ['abajo', 'adelante'], extra: (g) => {
+    const bow = mesh(new THREE.TorusGeometry(0.17, 0.011, 4, 12, Math.PI), C.woodDark);
+    bow.position.set(-0.13, 0.32, 0.15);
+    bow.rotation.set(0, Math.PI / 2, Math.PI / 2);
+    g.add(bow);
+    const quiver = cyl(0.03, 0.03, 0.22, 6, LEATHER, 0.05, 0.28, -0.08);
+    quiver.rotation.z = -0.35;
+    g.add(quiver);
+    for (let k = 0; k < 3; k++) g.add(box(0.012, 0.06, 0.012, '#e8e2d0', 0.1 + k * 0.012, 0.5, -0.08));
+  } },
+  espadachin: { color: '#a8231a', cuirass: true, cuirassColor: IRON, pteruges: LEATHER, greaves: true, helmet: 'legionario', crest: '#a8231a', arms: ['adelante', 'adelante'], extra: (g) => {
+    scutum(g);
+    g.add(box(0.03, 0.03, 0.18, '#c9ced6', 0.12, 0.3, 0.17));
+  } },
+  hoplita: { color: '#a8231a', cuirass: true, pteruges: '#e8e2d0', greaves: true, helmet: 'corintio', crest: '#a8231a', cloak: '#a8231a', arms: ['abajo', 'adelante'], extra: (g) => (spear(g, 1.05), aspis(g)) },
+  barbaro: { color: '#6b4a2a', skin: SKIN[2], beard: true, hair: '#c8862a', belt: '#3a2a1e', arms: ['abajo', 'abajo'], extra: (g) => {
+    g.add(box(0.22, 0.08, 0.12, '#a07a50', 0, 0.39, 0));
+    g.add(cyl(0.012, 0.012, 0.32, 4, C.woodDark, 0.12, 0.05, 0.03));
+    g.add(box(0.03, 0.08, 0.07, '#c9ced6', 0.12, 0.3, 0.07));
+  } },
+  pirata: { color: '#e8e2d0', belt: '#b8442f', helmet: 'panuelo', beard: true, hair: HAIR[2], arms: ['abajo', 'abajo'], extra: (g) => {
+    const blade = box(0.025, 0.24, 0.05, '#c9ced6', 0.13, 0.04, 0.04);
+    blade.rotation.z = 0.15;
+    g.add(blade);
+    g.add(box(0.06, 0.02, 0.06, C.gold, 0.13, 0.28, 0.04));
+  } },
 };
 
-/** Figurita de una unidad de tierra (unos 0,6 de alto). */
+/** Figurita de una unidad de tierra (unos 0,5 de alto). */
 export function createSoldier(id) {
   const g = new THREE.Group();
   if (id === 'catapulta') {
@@ -1013,43 +1490,21 @@ export function createSoldier(id) {
     g.add(box(0.14, 0.1, 0.14, C.stone, 0, 0.55, -0.3));
     return g;
   }
-  const color = UNIT_COLORS[id] ?? C.roofRed;
-  let base = 0;
   if (id === 'caballero') {
-    g.add(box(0.2, 0.22, 0.6, '#7a5230', 0, 0.22, 0));
-    for (const [x, z] of [[-0.07, -0.22], [0.07, -0.22], [-0.07, 0.22], [0.07, 0.22]]) g.add(box(0.05, 0.22, 0.05, '#5e3b1c', x, 0, z));
-    g.add(box(0.12, 0.2, 0.18, '#7a5230', 0, 0.4, 0.3));
-    base = 0.44;
+    // Jinete con capa azul y lanza sobre su caballo
+    const back = horse(g);
+    const rider = figure({ color: '#3f6fa8', cuirass: true, helmet: 'corintio', crest: '#f6f1e7', cloak: '#3f6fa8', arms: ['adelante', 'abajo'] });
+    spear(rider, 0.9);
+    rider.scale.setScalar(0.72);
+    rider.position.set(0, back - 0.1, -0.02);
+    g.add(rider);
+    return g;
   }
-  g.add(cyl(0.09, 0.12, 0.32, 7, color, 0, base, 0));
-  const head = mesh(new THREE.SphereGeometry(0.075, 8, 6), '#e8c39e');
-  head.position.y = base + 0.4;
-  g.add(head);
-  g.add(cyl(0.085, 0.085, 0.05, 7, id === 'pirata' ? '#b8442f' : '#8a8f96', 0, base + 0.44, 0));
-  if (id === 'lancero' || id === 'caballero') g.add(cyl(0.015, 0.015, 0.8, 4, C.woodDark, 0.13, base, 0.02));
-  if (id === 'espadachin' || id === 'pirata' || id === 'barbaro') g.add(box(0.03, 0.3, 0.05, '#c9ced6', 0.14, base + 0.12, 0.05));
-  if (id === 'espadachin' || id === 'lancero') g.add(box(0.03, 0.2, 0.16, color, -0.12, base + 0.08, 0));
-  if (id === 'hondero') {
-    // Honda girando sobre la cabeza y zurrón de piedras
-    g.add(cyl(0.008, 0.008, 0.3, 4, C.woodDark, 0.12, base + 0.32, 0));
-    g.add(box(0.06, 0.06, 0.06, C.stone, 0.12, base + 0.62, 0));
-    g.add(box(0.1, 0.1, 0.06, '#7a5230', -0.1, base + 0.06, 0.06));
-  }
-  if (id === 'hoplita') {
-    // Gran escudo redondo de bronce, penacho y lanza
-    const shield = mesh(new THREE.CylinderGeometry(0.17, 0.17, 0.03, 12), '#c9a24a', { metalness: 0.5, roughness: 0.45 });
-    shield.rotation.x = Math.PI / 2;
-    shield.position.set(0, base + 0.2, 0.13);
-    g.add(shield);
-    g.add(box(0.03, 0.1, 0.16, '#b8442f', 0, base + 0.48, 0));
-    g.add(cyl(0.015, 0.015, 0.9, 4, C.woodDark, 0.13, base, 0.02));
-  }
-  if (id === 'arquero') {
-    const bow = mesh(new THREE.TorusGeometry(0.14, 0.012, 4, 10, Math.PI), C.woodDark);
-    bow.position.set(0.12, base + 0.22, 0);
-    bow.rotation.set(0, Math.PI / 2, Math.PI / 2);
-    g.add(bow);
-  }
+  const t = TROOPS[id] ?? TROOPS.lancero;
+  const fig = figure({ ...t, skin: t.skin ?? SKIN[0], hair: t.hair ?? HAIR[0] });
+  t.extra?.(fig);
+  fig.scale.setScalar(0.82);
+  g.add(fig);
   return g;
 }
 

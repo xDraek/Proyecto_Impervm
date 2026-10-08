@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { C, box, createShip, createSoldier, cyl, gableRoof, mat, mesh, smokeColumn } from './models.js';
+import { C, box, colonnade, createShip, createSoldier, cyl, dome, gableRoof, hipRoof, mat, mediterraneanTree, mesh, smokeColumn, stylobate } from './models.js';
 import { wonderLevel, wonderOf } from '../game/rules.js';
 import { Batch, bakeStatic, hashString, mountainGeometry, paintByNormal, plateauGeometry, polar, rng } from './util.js';
 
@@ -14,7 +14,7 @@ const FEATURE_SCALE = 1.4;
 const SEA = (WATER_Y - ISLAND_TOP) / FEATURE_SCALE; // nivel del mar en coordenadas del grupo
 
 const PALETTES = {
-  default: { grass: '#6fae4a', cliff: '#8a6a46', rock: '#7c7466' },
+  default: { grass: '#86ab4e', cliff: '#a17f55', rock: '#8c8070' },
   piratas: { grass: '#5d8f3e', cliff: '#6e5a44', rock: '#5f5a52' },
   ruinas: { grass: '#9bb05a', cliff: '#9a8160', rock: '#857b6b' },
   kraken: { grass: '#4b5a4a', cliff: '#3f3a40', rock: '#2f2c33' },
@@ -82,7 +82,7 @@ export function createIslandBase(isl) {
   for (let i = 0; i < trees; i++) {
     const p = polar(R * (0.5 + rand() * 0.4), rand() * 360, ISLAND_TOP);
     if (onHill(p)) continue;
-    const t = tree(leafColors[i % leafColors.length], isl.type === 'ruinas' || rand() < 0.25);
+    const t = isl.type === 'ruinas' || rand() < 0.2 ? tree(leafColors[i % leafColors.length], true) : mediterraneanTree(rand());
     t.position.copy(p);
     t.scale.setScalar(0.8 + rand() * 0.6);
     t.rotation.y = rand() * Math.PI;
@@ -539,8 +539,11 @@ export function ownerColor(isl) {
 }
 
 /** Ciudad de otro jugador: casas, ayuntamiento y muralla según su tamaño. */
+// Tejas de terracota en varios tonos y paredes encaladas u ocres
+const TILES = [C.roofRed, '#b85a36', '#cf7046', C.roofRed];
+const WALLS = ['#f6f1e7', '#f2e8d2', '#f3dcb0', '#ece0cf'];
+
 function city(g, isl, R, rand, size) {
-  const roofs = [C.roofRed, C.roofBlue, C.roofGrey, '#a0522d'];
   const batch = new Batch();
   // Calles en cruz hasta la muralla
   for (const a of [0, 90, 180, 270]) {
@@ -555,8 +558,8 @@ function city(g, isl, R, rand, size) {
     const w = 1.0 + rand() * 0.5;
     const tall = size >= 2 && rand() < 0.35;
     const hh = (0.8 + rand() * 0.4) * (tall ? 1.7 : 1);
-    h.add(box(w, hh, 0.9, i % 5 ? C.wall : C.wallDark));
-    h.add(gableRoof(w + 0.2, 0.55, 1.1, roofs[i % roofs.length], 0, hh, 0));
+    h.add(box(w, hh, 0.9, WALLS[i % WALLS.length]));
+    h.add(hipRoof(w + 0.18, 1.08, 0.38, TILES[i % TILES.length], 0, hh, 0));
     const ring = i % 4;
     h.position.copy(polar(R * (0.2 + ring * 0.1 + rand() * 0.04), (i / houses) * 360 * 3 + rand() * 10));
     h.rotation.y = rand() * Math.PI;
@@ -580,16 +583,17 @@ function city(g, isl, R, rand, size) {
     batch.add(temple);
   }
   g.add(batch.build());
-  // Ayuntamiento en el centro
-  g.add(box(2.4, 1.6, 2.4, C.wall, 0, 0, 0));
-  const roof = mesh(new THREE.ConeGeometry(1.9, 1.4, 4), C.roofBlue);
-  roof.rotation.y = Math.PI / 4;
-  roof.position.y = 2.3;
-  g.add(roof);
-  g.add(cyl(0.05, 0.05, 1.6, 6, C.dark, 0, 3.0, 0));
+  // Palacio de gobierno en el centro: escalinata, columnas, terracota y cúpula azul
+  const y0 = stylobate(g, 3.2, 3.2, 2);
+  g.add(box(2.1, 1.4, 2.1, C.wall, 0, y0, 0));
+  colonnade(g, { from: -1.3, to: 1.3, at: 1.35, n: 4, y: y0, h: 1.4, r: 0.1 });
+  g.add(box(2.95, 0.16, 2.95, C.marbleDark, 0, y0 + 1.4, 0));
+  g.add(hipRoof(3.05, 3.05, 0.5, C.roofRed, 0, y0 + 1.56, 0));
+  g.add(dome(0.7, C.roofBlue, 0, y0 + 1.8, 0, 0.3));
+  g.add(cyl(0.05, 0.05, 1.4, 6, C.dark, 0, y0 + 2.9, 0));
   const flag = box(1.0, 0.6, 0.03, ownerColor(isl), 0, 0, 0);
   flag.geometry.translate(0.5, 0, 0);
-  flag.position.y = 4.3;
+  flag.position.y = y0 + 4.0;
   flag.userData.wave = true;
   g.add(flag);
   // Muralla con torres en las ciudades grandes
@@ -609,8 +613,8 @@ function city(g, isl, R, rand, size) {
       const tower = cyl(0.55, 0.65, h + 0.9, 8, C.stone, 0, 0, 0);
       tower.position.copy(polar(r, a));
       wall.add(tower);
-      const roof = mesh(new THREE.ConeGeometry(0.75, 0.8, 8), C.roofBlue);
-      roof.position.copy(polar(r, a, h + 1.3));
+      const roof = mesh(new THREE.ConeGeometry(0.75, 0.5, 8), C.roofRed);
+      roof.position.copy(polar(r, a, h + 1.15));
       wall.add(roof);
     }
     g.add(wall.build());
@@ -625,11 +629,10 @@ function city(g, isl, R, rand, size) {
 
 function colony(g, isl, R, rand, flagColor) {
   specialty(g, isl, R, rand);
-  const roofs = [C.roofRed, C.roofBlue, C.roofRed, C.roofGrey];
   for (let i = 0; i < 4; i++) {
     const h = new THREE.Group();
-    h.add(box(1.3, 0.9, 1.0, C.wall));
-    h.add(gableRoof(1.5, 0.6, 1.2, roofs[i], 0, 0.9, 0));
+    h.add(box(1.3, 0.9, 1.0, WALLS[i]));
+    h.add(hipRoof(1.48, 1.18, 0.4, TILES[i], 0, 0.9, 0));
     h.position.copy(polar(R * 0.45, 200 + i * 40));
     h.rotation.y = rand() * Math.PI;
     g.add(h);
