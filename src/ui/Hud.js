@@ -3,6 +3,7 @@ import { clock, universe } from '../config.js';
 import { BUILDINGS, BUILDING_KEYS, ISLAND_TYPES, MISSION_TYPES, PLAYER_UNITS, POWERS, RESEARCH, RESOURCES, RESOURCE_KEYS, UNITS, VISITORS } from '../game/data.js';
 import { HOUR_MS, canAfford, multiplyCost, upcomingWorldEvents } from '../game/rules.js';
 import { api } from '../net/api.js';
+import { armyHtml, armySummary } from './army.js';
 import { buildingPanel } from './buildingPanel.js';
 import { bag, costItems, escapeHtml, fmtNum, fmtTime, unitList } from './format.js';
 import { fleetFor, islandPanel, readFleet, readPayload, readOpts } from './islandPanel.js';
@@ -80,6 +81,7 @@ export class Hud {
     });
     this.dock.addEventListener('click', (e) => this.#onDockClick(e));
     this.sidebar.addEventListener('click', (e) => {
+      if (e.target.closest('[data-action="army"]')) return this.openModal('army');
       const li = e.target.closest('[data-id], [data-select]');
       if (li) this.onSelect(li.dataset.id ?? li.dataset.select);
     });
@@ -87,6 +89,8 @@ export class Hud {
     this.viewBtn.addEventListener('click', () => this.onView(this.view === 'isla' ? 'mapa' : 'isla'));
     this.reportsBtn.addEventListener('click', () => this.openReports());
     this.questsBtn.addEventListener('click', () => this.openModal('quests'));
+    this.armyBtn = $('#army-btn');
+    this.armyBtn.addEventListener('click', () => this.openModal('army'));
     $('#rank-btn').addEventListener('click', () => this.openModal('ranking'));
     $('#map-btn').addEventListener('click', () => this.worldMap.open());
     this.favorEl.addEventListener('click', () => this.onSelect('templo'));
@@ -96,6 +100,20 @@ export class Hud {
       if (e.target === this.modal || e.target.closest('[data-action="close-modal"]')) return this.closeModal();
       const task = e.target.closest('[data-action="claim-task"]');
       if (task && !task.disabled) return this.#run(task, () => game.claimTask(task.dataset.id), null, 'coins');
+      // Ventana del ejército: retirar flotas, abrir el simulador o ir a un edificio o isla
+      if (this.modalKind === 'army') {
+        const recall = e.target.closest('[data-action="recall"]');
+        if (recall) return this.#run(recall, () => game.recall(Number(recall.dataset.mission)), 'La flota da media vuelta.', 'sail');
+        if (e.target.closest('[data-action="army-sim"]')) {
+          const attacker = Object.fromEntries(Object.entries(game.units).filter(([, n]) => n > 0));
+          return this.social.openSimulator({ attacker, title: 'Tu ejército en casa' });
+        }
+        const go = e.target.closest('[data-select]');
+        if (go) {
+          this.closeModal();
+          return this.onSelect(go.dataset.select);
+        }
+      }
       const claim = e.target.closest('[data-action="claim"]');
       if (claim && !claim.disabled) return this.#run(claim, () => game.claimQuest(claim.dataset.id), null, 'coins');
       const share = e.target.closest('[data-action="share-report"]');
@@ -294,6 +312,7 @@ export class Hud {
 
   #renderModal() {
     if (this.modalKind === 'quests') this.#setHtml(this.modal, 'modal', questsHtml(this.game));
+    else if (this.modalKind === 'army') this.#setHtml(this.modal, 'modal', armyHtml(this.game));
     else if (this.modalKind === 'ranking' && this.ranking) this.#setHtml(this.modal, 'modal', rankingHtml(this.ranking, this.rankTab));
   }
 
@@ -306,6 +325,9 @@ export class Hud {
     this.#renderVisitor();
     this.#renderVacation();
     this.#renderModal();
+    const armyBadge = this.armyBtn.querySelector('.badge');
+    armyBadge.hidden = !this.game.missions.length;
+    armyBadge.textContent = this.game.missions.length;
     const forum = (this.game.forumUnread ?? 0) + (this.game.allianceApplications ?? 0);
     const fBadge = this.allianceBtn.querySelector('.badge');
     fBadge.hidden = !forum;
@@ -346,6 +368,7 @@ export class Hud {
     this.#refreshLive(this.alert);
     this.#refreshLive(this.visitorEl);
     this.#refreshLive(this.vacationEl);
+    this.#refreshLive(this.modal);
     this.panelView?.refresh?.(this.panel);
   }
 
@@ -496,16 +519,11 @@ export class Hud {
         const tag = q?.id === id ? '🔨' : level > 0 ? level : locked ? '🔒' : '—';
         return `<li data-id="${id}" class="${cls}" title="${b.name}"><span class="b-icon">${b.icon}</span><span class="b-name">${b.name}</span><span class="b-lvl">${tag}</span></li>`;
       }).join('');
-      const army = PLAYER_UNITS.filter((id) => game.units[id] > 0)
-        .map((id) => `<li title="${UNITS[id].name}"><span>${UNITS[id].icon}</span><span class="b-name">${UNITS[id].name}</span><b>${fmtNum(game.units[id])}</b></li>`)
-        .join('');
-      const away = game.missions.length ? `<p class="muted small">${game.missions.length} ${game.missions.length === 1 ? 'flota' : 'flotas'} en el mar</p>` : '';
       const status = game.heroStatus();
       const heroLine = status
         ? `<p class="hero-line" data-select="ayuntamiento">🎖️ ${escapeHtml(game.hero.name)} · Nv ${game.hero.level}${game.hero.points ? ' · ⭐' : ''}<span class="muted small">${{ casa: 'en casa', mision: 'en el mar', herido: 'herido' }[status]}</span></p>`
         : '';
-      html = `<h2>Edificios</h2><ul class="list">${items}</ul>
-        <div class="army-block"><h2>Ejército</h2>${heroLine}${army ? `<ul class="army">${army}</ul>` : '<p class="muted small">Sin tropas en casa</p>'}${away}</div>`;
+      html = `${armySummary(game)}${heroLine}<h2>Edificios</h2><ul class="list">${items}</ul>`;
     } else {
       // Las islas que ves, de la más cercana a la más lejana
       const home = game.state.home;
@@ -528,7 +546,7 @@ export class Hud {
           return `<li data-id="${v.id}" class="${cls}" title="${escapeHtml(name)}"><span class="b-icon">${icon}</span><span class="b-name">${escapeHtml(name)}</span><span class="b-lvl">${tag || '·'}</span></li>`;
         })
         .join('');
-      html = `<h2>Archipiélago</h2><ul class="list">${items}</ul>
+      html = `${armySummary(game)}<h2>Archipiélago</h2><ul class="list">${items}</ul>
         <div class="army-block">
           <p class="muted small">⛵ Flotas: ${game.missions.length}/${game.fleetSlots()} · 🚩 Colonias: ${game.colonies().length}/${game.maxColonies()}</p>
         </div>`;

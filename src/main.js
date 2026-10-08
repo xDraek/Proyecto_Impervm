@@ -173,7 +173,7 @@ function startGame(game) {
   });
 
   // Atajos de la barra superior (1-7, en su orden) y rótulos que salen al momento con el ratón
-  const SHORTCUTS = ['quests-btn', 'chat-btn', 'mail-btn', 'alliance-btn', 'rank-btn', 'map-btn', 'reports-btn'];
+  const SHORTCUTS = ['quests-btn', 'chat-btn', 'mail-btn', 'alliance-btn', 'rank-btn', 'map-btn', 'reports-btn', 'army-btn'];
   for (const el of document.querySelectorAll('#topbar .top-actions .icon-btn[title], #view-btn')) {
     const key = SHORTCUTS.indexOf(el.id) + 1;
     el.dataset.tip = key ? `${el.title} · ${key}` : el.title;

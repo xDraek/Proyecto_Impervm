@@ -122,7 +122,7 @@ const TOPICS = [
     icon: '⌨️',
     title: 'Cámara y atajos de teclado',
     body: `<p><b>M</b>: cambiar entre tu isla y el archipiélago · <b>Esc</b>: cerrar ventanas y paneles · <b>?</b>: esta guía.</p>
-      <p><b>1</b> misiones · <b>2</b> chat · <b>3</b> correo · <b>4</b> alianza · <b>5</b> clasificación · <b>6</b> mapa del mundo · <b>7</b> informes.</p>
+      <p><b>1</b> misiones · <b>2</b> chat · <b>3</b> correo · <b>4</b> alianza · <b>5</b> clasificación · <b>6</b> mapa del mundo · <b>7</b> informes · <b>8</b> ejército.</p>
       <p><b>Cámara</b>: arrastra para moverte, arrastra con el botón derecho (o Mayús) para girar y usa la rueda para acercarte hacia el ratón. Con el teclado: <b>WASD</b> o flechas para moverte, <b>Q</b>/<b>E</b> para girar, <b>+</b>/<b>−</b> para acercar y <b>C</b> para centrar. Doble clic en el suelo o el mar para ir allí. En el móvil, un dedo mueve y dos acercan y giran.</p>`,
   },
 ];

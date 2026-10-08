@@ -3551,3 +3551,172 @@ body.landing-mode #cam-controls {
     display: none;
   }
 }
+
+/* ── Ejército ────────────────────────────────────────────────────────────── */
+
+.army-summary {
+  display: grid;
+  gap: 4px;
+  width: 100%;
+  margin-bottom: 12px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid rgba(242, 201, 76, 0.35);
+  background: linear-gradient(180deg, rgba(168, 35, 26, 0.28), rgba(90, 20, 14, 0.2));
+  text-align: left;
+  transition: border-color 0.15s ease, filter 0.15s ease;
+}
+
+.army-summary:hover {
+  border-color: var(--gold);
+  filter: brightness(1.12);
+}
+
+.army-summary-title {
+  font-family: var(--font-title);
+  font-weight: 700;
+  color: var(--gold);
+  font-size: 13px;
+  letter-spacing: 0.06em;
+}
+
+.army-summary-counts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.army-summary-counts .sea {
+  color: #9fd3ff;
+}
+
+.army-stats {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+  margin: 12px 0 4px;
+}
+
+.army-stats > div {
+  display: grid;
+  gap: 2px;
+  padding: 10px 8px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  text-align: center;
+}
+
+.army-stats b {
+  font-size: 18px;
+  color: var(--gold);
+  font-variant-numeric: tabular-nums;
+}
+
+.army-stats span {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.army-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(185px, 1fr));
+  gap: 8px;
+}
+
+.army-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.army-card > div {
+  display: grid;
+  min-width: 0;
+}
+
+.army-card b {
+  font-size: 18px;
+  font-variant-numeric: tabular-nums;
+}
+
+.army-card span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.army-art {
+  flex: none;
+  width: 48px;
+  height: 48px;
+  border-radius: 9px;
+  background: radial-gradient(circle at 50% 35%, #3d5a73 0%, #1f2b38 80%);
+  border: 1px solid rgba(242, 201, 76, 0.25);
+  object-fit: cover;
+}
+
+.army-art.u-emoji {
+  display: grid;
+  place-items: center;
+  font-size: 26px;
+}
+
+.fleet-lines {
+  display: grid;
+  gap: 6px;
+}
+
+.fleet-line {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: rgba(80, 140, 200, 0.08);
+  border: 1px solid rgba(120, 180, 230, 0.18);
+  cursor: pointer;
+}
+
+.fleet-line:hover {
+  border-color: rgba(159, 211, 255, 0.5);
+}
+
+.fleet-when {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+}
+
+.army-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.army-actions .ghost {
+  flex: 1;
+}
+
+.army-modal .info-row {
+  cursor: pointer;
+}
+
+@media (max-width: 700px) {
+  .army-summary {
+    display: none;
+  }
+
+  .army-stats {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
