@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { universe } from '../src/config.js';
 import { BUILDINGS, HERO_SKILLS, MISSION_TYPES, PLAYER_UNITS, POWERS, RESEARCH, RESOURCES, UNITS } from '../src/game/data.js';
 import { readToken, signToken } from './auth.js';
+import { MAILS, publicUrl, sendMail } from './mail.js';
 import { openStore } from './store.js';
 import { UserError, WorldServer } from './WorldServer.js';
 
@@ -178,10 +179,37 @@ async function readJson(req) {
 function authUser(req) {
   const header = req.headers.authorization ?? '';
   const uid = readToken(header.replace(/^Bearer /, ''), world.secret);
-  if (uid == null || !world.games.has(uid) || world.isBanned(uid)) return null;
+  if (uid == null || !world.games.has(uid) || world.isBanned(uid) || !world.hasEmail(uid)) return null;
   world.seen(uid);
   return uid;
 }
+
+/** Manda el correo de un enlace (registro, correo nuevo o contraseña). */
+async function mailLink(req, kind, { token, email, username }) {
+  const param = kind === 'clave' ? 'clave' : 'verificar';
+  const link = `${publicUrl(req)}/?${param}=${encodeURIComponent(token)}`;
+  try {
+    await sendMail(email, MAILS[kind]({ username, link }));
+  } catch {
+    throw new UserError('No se ha podido mandar el correo ahora mismo. Inténtalo dentro de un rato.');
+  }
+  mailsTo(email).push(Date.now());
+}
+
+// Cada correo recibe como mucho 3 envíos cada 10 minutos, para que nadie llene el buzón de otro
+// (solo cuentan los que se mandan de verdad, no los intentos con algún error)
+const MAIL_WINDOW = 10 * 60_000;
+const mailLog = new Map();
+function mailsTo(email) {
+  const key = String(email ?? '').trim().toLowerCase();
+  const list = (mailLog.get(key) ?? []).filter((t) => Date.now() - t < MAIL_WINDOW);
+  mailLog.set(key, list);
+  return list;
+}
+const mailLimited = (email) => mailsTo(email).length >= 3;
+setInterval(() => {
+  for (const key of mailLog.keys()) if (!mailsTo(key).length) mailLog.delete(key);
+}, MAIL_WINDOW).unref();
 
 const ip = (req) => (req.headers['x-forwarded-for']?.split(',')[0] ?? req.socket.remoteAddress ?? '').trim();
 
@@ -190,26 +218,55 @@ async function api(req, res, url) {
   try {
     if (route === 'GET /api/stats') return send(res, 200, world.stats());
 
-    if (route === 'POST /api/register' || route === 'POST /api/login') {
+    // Cuentas: todo lo que va por correo (registro, confirmar, contraseña olvidada)
+    if (route.startsWith('POST /api/') && ['register', 'login', 'verify', 'email/start', 'forgot', 'reset'].includes(url.pathname.slice(5))) {
       if (limited(`auth:${ip(req)}`, 10, 60_000)) return send(res, 429, { error: 'Demasiados intentos. Espera un minuto.' });
       const body = await readJson(req);
-      const registering = route === 'POST /api/register';
-      const uid = registering ? await world.register(body.username, body.password, body.city) : world.login(body.username, body.password);
-      world.seen(uid);
-      // Al crear la cuenta se entrega el código de recuperación (solo esta vez)
-      const recovery = registering ? await world.issueRecovery(uid) : undefined;
-      return send(res, 200, { token: signToken(uid, world.secret), recovery });
-    }
-    if (route === 'POST /api/recover') {
-      if (limited(`auth:${ip(req)}`, 10, 60_000)) return send(res, 429, { error: 'Demasiados intentos. Espera un minuto.' });
-      const body = await readJson(req);
-      const { id, recovery } = await world.recover(body.username, body.code, body.password);
-      world.seen(id);
-      return send(res, 200, { token: signToken(id, world.secret), recovery });
+      if (route === 'POST /api/register') {
+        if (mailLimited(body.email)) return send(res, 429, { error: 'Ya te hemos mandado varios correos. Espera unos minutos.' });
+        const pending = await world.startRegistration(body);
+        await mailLink(req, 'registro', pending);
+        return send(res, 200, { sent: true, email: pending.email });
+      }
+      if (route === 'POST /api/verify') {
+        const { id, created } = await world.confirm(body.token);
+        world.seen(id);
+        return send(res, 200, { token: signToken(id, world.secret), created });
+      }
+      if (route === 'POST /api/login') {
+        const uid = world.login(body.username, body.password);
+        // Cuenta de antes del correo: primero tiene que añadir uno
+        if (!world.hasEmail(uid)) return send(res, 200, { needEmail: true, permit: await world.emailPermit(uid) });
+        world.seen(uid);
+        return send(res, 200, { token: signToken(uid, world.secret) });
+      }
+      if (route === 'POST /api/email/start') {
+        if (mailLimited(body.email)) return send(res, 429, { error: 'Ya te hemos mandado varios correos. Espera unos minutos.' });
+        const pending = await world.requestEmail({ permit: String(body.permit ?? ''), email: body.email });
+        await mailLink(req, 'correo', pending);
+        return send(res, 200, { sent: true, email: pending.email });
+      }
+      if (route === 'POST /api/forgot') {
+        if (mailLimited(body.email)) return send(res, 429, { error: 'Ya te hemos mandado varios correos. Espera unos minutos.' });
+        const pending = await world.forgotPassword(body.email);
+        if (pending) await mailLink(req, 'clave', pending);
+        // La misma respuesta haya cuenta o no, para no desvelar qué correos están registrados
+        return send(res, 200, { sent: true });
+      }
+      if (route === 'POST /api/reset') {
+        const id = await world.resetPassword(body.token, body.password, body.password2);
+        world.seen(id);
+        return send(res, 200, { token: signToken(id, world.secret) });
+      }
     }
 
     const uid = authUser(req);
-    if (uid == null) return send(res, 401, { error: 'Tienes que iniciar sesión.' });
+    if (uid == null) {
+      // Una sesión de antes del correo: que vuelva a entrar para añadirlo
+      const raw = readToken(String(req.headers.authorization ?? '').replace(/^Bearer /, ''), world.secret);
+      const needEmail = raw != null && world.games.has(raw) && !world.hasEmail(raw);
+      return send(res, 401, { error: needEmail ? 'Ahora cada cuenta necesita un correo: vuelve a entrar para añadir el tuyo.' : 'Tienes que iniciar sesión.' });
+    }
 
     if (route === 'GET /api/state') return send(res, 200, world.snapshot(uid));
 
@@ -273,10 +330,14 @@ async function api(req, res, url) {
       world.renameCity(uid, name);
       return send(res, 200, { snapshot: world.snapshot(uid) });
     }
-    if (route === 'POST /api/recovery') {
+    if (route === 'GET /api/email') return send(res, 200, { email: world.maskedEmail(uid) });
+    if (route === 'POST /api/email') {
       if (limited(`auth:${ip(req)}`, 10, 60_000)) return send(res, 429, { error: 'Demasiados intentos. Espera un minuto.' });
-      const { password } = await readJson(req);
-      return send(res, 200, { recovery: await world.regenerateRecovery(uid, password) });
+      const { password, email } = await readJson(req);
+      if (mailLimited(email)) return send(res, 429, { error: 'Ya te hemos mandado varios correos. Espera unos minutos.' });
+      const pending = await world.requestEmail({ userId: uid, password, email });
+      await mailLink(req, 'correo', pending);
+      return send(res, 200, { sent: true, email: pending.email });
     }
     if (route === 'POST /api/password') {
       if (limited(`auth:${ip(req)}`, 10, 60_000)) return send(res, 429, { error: 'Demasiados intentos. Espera un minuto.' });
@@ -430,7 +491,7 @@ server.on('upgrade', (req, socket, head) => {
   const url = new URL(req.url, 'http://localhost');
   if (url.pathname !== '/ws') return; // otras conexiones (p. ej. la recarga de Vite) no son nuestras
   const uid = readToken(url.searchParams.get('token'), world.secret);
-  if (uid == null || !world.games.has(uid) || world.isBanned(uid)) {
+  if (uid == null || !world.games.has(uid) || world.isBanned(uid) || !world.hasEmail(uid)) {
     socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
     return socket.destroy();
   }

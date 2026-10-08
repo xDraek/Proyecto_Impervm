@@ -31,22 +31,25 @@
               <button type="button" data-tab="login">Entrar</button>
               <button type="button" data-tab="register">Crear cuenta</button>
             </div>
-            <form id="auth-form" autocomplete="on">
-              <label>Nombre de jugador <input name="username" autocomplete="username" required minlength="3" maxlength="20" /></label>
-              <label class="reg">Nombre de tu ciudad <input name="city" maxlength="20" placeholder="Si lo dejas vacío, tu nombre" /></label>
-              <label class="rec">Código de recuperación <input name="code" autocomplete="off" placeholder="XXXX-XXXX-XXXX" maxlength="20" /></label>
-              <label><span class="pw-label">Contraseña</span> <input name="password" type="password" autocomplete="current-password" required minlength="6" maxlength="100" /></label>
-              <label class="pw2">Repite la contraseña <input name="password2" type="password" autocomplete="new-password" maxlength="100" /></label>
+            <form id="auth-form" autocomplete="on" novalidate>
+              <p class="auth-note" hidden></p>
+              <label data-modes="register forgot email">Correo electrónico <input name="email" type="email" autocomplete="email" maxlength="120" /></label>
+              <label data-modes="login register"><span data-label-login="Nombre de jugador o correo">Nombre de jugador</span> <input name="username" autocomplete="username" minlength="3" maxlength="120" /></label>
+              <label data-modes="register" data-optional>Nombre de tu ciudad <input name="city" maxlength="20" placeholder="Si lo dejas vacío, tu nombre" /></label>
+              <label data-modes="login register reset"><span data-label-reset="Contraseña nueva">Contraseña</span> <input name="password" type="password" autocomplete="current-password" minlength="6" maxlength="100" /></label>
+              <label data-modes="register reset">Repite la contraseña <input name="password2" type="password" autocomplete="new-password" maxlength="100" /></label>
               <button class="primary" type="submit">Entrar</button>
               <div class="form-error" role="alert"></div>
-              <button type="button" class="link small forgot" data-action="go-recover">¿Has olvidado tu contraseña?</button>
+              <button type="button" class="link small" data-modes="login" data-action="go-forgot">¿Has olvidado tu contraseña?</button>
+              <button type="button" class="link small" data-modes="forgot reset email" data-action="go-login">← Volver a entrar</button>
             </form>
-            <div class="recovery-card" hidden>
-              <h3>🔑 Tu código de recuperación</h3>
-              <p>Guárdalo en un sitio seguro (apúntalo o haz una captura). Es la <b>única forma</b> de recuperar tu cuenta si olvidas la contraseña, y no se vuelve a mostrar.</p>
-              <div class="recovery-code"></div>
-              <button type="button" class="ghost" data-action="copy-code">📋 Copiar</button>
-              <button type="button" class="primary" data-action="code-saved">Ya lo he guardado · entrar</button>
+            <div class="mail-card" hidden>
+              <div class="mail-icon">✉️</div>
+              <h3>Revisa tu correo</h3>
+              <p class="mail-text"></p>
+              <p class="muted small">¿No llega? Mira en la carpeta de spam o promociones. Puede tardar un par de minutos.</p>
+              <button type="button" class="ghost" data-action="mail-resend">Mandarlo otra vez</button>
+              <button type="button" class="link small" data-action="mail-back">← Usar otro correo</button>
             </div>
           </div>
           <div id="world-stats" class="world-stats"></div>
@@ -80,7 +83,7 @@
         <button class="ghost small" data-action="profile-me">👤 Mi perfil</button>
         <button class="ghost small" data-action="guide">📖 Guía del juego</button>
         <button class="ghost small" data-action="vacation">🏖️ Modo vacaciones</button>
-        <button class="ghost small" data-action="password">🔑 Cambiar contraseña</button>
+        <button class="ghost small" data-action="password">🔑 Cuenta y contraseña</button>
         <button class="ghost small" data-action="logout">Cerrar sesión</button>
       </div>
       <div id="banners">

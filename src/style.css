@@ -2918,33 +2918,54 @@ input[type='text'] {
   opacity: 0.6;
 }
 
-/* ── Recuperar la cuenta ─────────────────────────────────────────────────── */
+/* ── Cuenta por correo ────────────────────────────────────────────────────── */
 
-.forgot {
+#auth-form .link {
   justify-self: center;
   margin-top: 4px;
 }
 
-.recovery-card {
+.auth-note {
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: rgba(242, 201, 76, 0.08);
+  border: 1px solid rgba(242, 201, 76, 0.2);
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.mail-card {
   display: grid;
   gap: 10px;
-}
-
-.recovery-card h3 {
-  margin: 0;
-}
-
-.recovery-code {
-  padding: 12px;
-  border-radius: 10px;
-  border: 1px dashed var(--gold);
-  background: rgba(242, 201, 76, 0.08);
-  font-family: ui-monospace, monospace;
-  font-size: 20px;
-  letter-spacing: 2px;
   text-align: center;
+}
+
+.mail-card h3 {
+  margin: 0;
+  font-family: var(--font-title);
   color: var(--gold);
-  user-select: all;
+}
+
+.mail-card p {
+  margin: 0;
+  line-height: 1.5;
+}
+
+.mail-card .mail-icon {
+  font-size: 40px;
+  animation: mail-bob 2.4s ease-in-out infinite;
+}
+
+.mail-card .link {
+  justify-self: center;
+}
+
+@keyframes mail-bob {
+  50% {
+    transform: translateY(-4px) rotate(-4deg);
+  }
 }
 
 /* ── Reliquias ───────────────────────────────────────────────────────────── */

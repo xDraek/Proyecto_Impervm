@@ -39,12 +39,18 @@ export class FileStore {
     return structuredClone(this.data);
   }
 
-  async createUser({ username, pass, created }) {
+  async createUser({ username, pass, created, email = null }) {
     const id = (this.data.meta.nextUserId ?? 1) + 0;
     this.data.meta.nextUserId = id + 1;
-    this.data.users.push({ id, username, pass, created });
+    this.data.users.push({ id, username, pass, created, email });
     await this.#write();
     return id;
+  }
+
+  async updateEmail(id, email) {
+    const user = this.data.users.find((u) => u.id === id);
+    if (user) user.email = email;
+    await this.#write();
   }
 
   async updatePassword(id, pass) {
@@ -98,6 +104,8 @@ export class PgStore {
         pass text not null,
         created bigint not null
       );
+      alter table users add column if not exists email text;
+      create unique index if not exists users_email on users (email) where email is not null;
       create table if not exists players (user_id integer primary key, state jsonb not null, updated bigint not null);
       create table if not exists islands (id text primary key, data jsonb not null, state jsonb);
       create table if not exists meta (key text primary key, value jsonb not null);
@@ -109,7 +117,7 @@ export class PgStore {
     const q = (sql) => this.pool.query(sql).then((r) => r.rows);
     const [meta, users, players, islands, chat] = await Promise.all([
       q('select key, value from meta'),
-      q('select id, username, pass, created from users order by id'),
+      q('select id, username, pass, created, email from users order by id'),
       q('select user_id, state from players'),
       q('select id, data, state from islands'),
       q('select msg from chat order by id desc limit 200'),
@@ -126,14 +134,19 @@ export class PgStore {
     return data;
   }
 
-  async createUser({ username, pass, created }) {
-    const { rows } = await this.pool.query('insert into users (username, username_lc, pass, created) values ($1, $2, $3, $4) returning id', [
+  async createUser({ username, pass, created, email = null }) {
+    const { rows } = await this.pool.query('insert into users (username, username_lc, pass, created, email) values ($1, $2, $3, $4, $5) returning id', [
       username,
       username.toLowerCase(),
       pass,
       created,
+      email,
     ]);
     return rows[0].id;
+  }
+
+  async updateEmail(id, email) {
+    await this.pool.query('update users set email = $2 where id = $1', [id, email]);
   }
 
   async updatePassword(id, pass) {

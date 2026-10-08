@@ -446,24 +446,27 @@ export class Social {
     this.hud.showModal('vacation', `<div class="modal-card narrow">${head('🏖️', 'Modo vacaciones', st.active ? 'Tu isla descansa' : 'Para cuando no puedas jugar')}${body}</div>`);
   }
 
-  openPassword() {
+  async openPassword() {
+    const email = (await api('GET', '/api/email').catch(() => null))?.email;
     this.hud.showModal(
       'password',
       `<div class="modal-card narrow">
-        ${head('🔑', 'Cambiar contraseña', escapeHtml(this.game.username))}
+        ${head('🔑', 'Cuenta y contraseña', escapeHtml(this.game.username))}
+        <h4>🔑 Contraseña</h4>
         <form class="stack" data-form="password">
           <input type="password" name="current" placeholder="Contraseña actual" autocomplete="current-password" required />
           <input type="password" name="next" placeholder="Contraseña nueva (6 o más caracteres)" autocomplete="new-password" minlength="6" required />
           <input type="password" name="next2" placeholder="Repite la nueva" autocomplete="new-password" required />
           <button class="primary">Cambiar</button>
         </form>
-        <h4>🔑 Código de recuperación</h4>
-        <p class="desc small">Si olvidas la contraseña, con tu nombre y este código puedes poner otra desde la pantalla de inicio. Al generar uno nuevo, el anterior deja de valer.</p>
-        <form class="stack" data-form="recovery">
+        <h4>✉️ Correo</h4>
+        <p class="desc small">${email ? `Tu cuenta usa <b>${escapeHtml(email)}</b>. Si olvidas la contraseña, te mandamos allí un enlace para poner otra.` : 'Tu cuenta aún no tiene correo.'}</p>
+        <form class="stack" data-form="email">
+          <input type="email" name="email" placeholder="Correo nuevo" autocomplete="email" maxlength="120" required />
           <input type="password" name="password" placeholder="Tu contraseña actual" autocomplete="current-password" required />
-          <button class="ghost">Generar un código nuevo</button>
+          <button class="ghost">Cambiar el correo</button>
         </form>
-        <div class="recovery-code" hidden></div>
+        <p class="hint small email-sent" hidden></p>
       </div>`,
     );
   }
@@ -778,12 +781,12 @@ export class Social {
       } else if (form.dataset.form === 'rename-city') {
         const res = await this.#call('POST', '/api/city', { name: data.name }, '🏰 Tu ciudad tiene nombre nuevo');
         if (res) this.openProfile(this.game.username);
-      } else if (form.dataset.form === 'recovery') {
-        const res = await this.#call('POST', '/api/recovery', { password: data.password }, '🔑 Código nuevo generado: guárdalo');
-        const box = this.hud.modal.querySelector('.recovery-code');
-        if (res && box) {
-          box.hidden = false;
-          box.textContent = res.recovery;
+      } else if (form.dataset.form === 'email') {
+        const res = await this.#call('POST', '/api/email', { email: data.email, password: data.password }, '✉️ Te hemos mandado un correo para confirmarlo');
+        const hint = this.hud.modal.querySelector('.email-sent');
+        if (res && hint) {
+          hint.hidden = false;
+          hint.innerHTML = `Abre el enlace que te hemos mandado a <b>${escapeHtml(res.email)}</b> para confirmar el cambio. Hasta entonces sigues con el correo de antes.`;
           form.reset();
         }
       } else if (form.dataset.form === 'mail') {

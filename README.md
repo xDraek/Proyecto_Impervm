@@ -9,7 +9,7 @@ npm install
 npm run dev
 ```
 
-Abre `http://localhost:5173`, crea una cuenta y a jugar. `npm run dev` arranca el servidor del juego con Vite dentro (recarga en caliente) y guarda el mundo en `server/data/world.json`. Para ver a otros jugadores, crea otra cuenta en otra ventana privada.
+Abre `http://localhost:5173`, crea una cuenta y a jugar (en local no se manda el correo de confirmación: el enlace sale en la consola del servidor). `npm run dev` arranca el servidor del juego con Vite dentro (recarga en caliente) y guarda el mundo en `server/data/world.json`. Para ver a otros jugadores, crea otra cuenta en otra ventana privada.
 
 Para probar más rápido: `GAME_SPEED=50 npm run dev` (en PowerShell: `$env:GAME_SPEED=50; npm run dev`).
 
@@ -22,6 +22,7 @@ El juego es un único servidor Node que sirve la página y la API, más una base
 1. Sube el repositorio a GitHub.
 2. En [Render](https://render.com): **New → Blueprint** y elige el repositorio. El archivo `render.yaml` crea el servidor y una base de datos.
 3. Cuando termine, abre la dirección que te da Render.
+4. Configura el correo (hace falta para crear cuentas): mira **Correo** más abajo.
 
 En el plan gratuito, el servidor se duerme tras 15 minutos sin visitas y tarda un poco en despertar; al hacerlo se pone al día con todo lo que pasó. La base de datos gratuita de Render caduca a los 30 días: para algo duradero, crea una gratis en [Neon](https://neon.tech) o [Supabase](https://supabase.com) y pon su dirección en la variable `DATABASE_URL`.
 
@@ -36,8 +37,23 @@ Hay un `Dockerfile` para cualquier servicio que acepte contenedores (Railway, Fl
 | `GAME_SPEED` | Velocidad del universo (1 = normal). |
 | `ADMINS` | Nombres de los moderadores, separados por comas (pueden silenciar, suspender, borrar mensajes y hacer anuncios con `/anuncio texto` en el chat). |
 | `PORT` | Puerto (las nubes lo ponen solas). |
+| `BREVO_API_KEY` | Clave de la API de [Brevo](https://www.brevo.com) para mandar los correos (confirmar la cuenta, contraseña olvidada). |
+| `MAIL_FROM` | Remitente de los correos, verificado en Brevo (puede ser tu Gmail). |
+| `MAIL_FROM_NAME` | Nombre del remitente (por defecto, «Imperium»). |
+| `PUBLIC_URL` | Dirección pública del juego para los enlaces de los correos (en Render no hace falta: se usa `RENDER_EXTERNAL_URL`). |
 
 El servidor guarda el mundo en memoria y lo vuelca a la base de datos cada 10 segundos, así que debe haber **una sola instancia**.
+
+### Correo
+
+Cada cuenta va unida a un correo verificado: al registrarse llega un enlace para confirmarla (la ciudad se funda al abrirlo) y la contraseña olvidada se recupera por correo. Las cuentas anteriores al correo lo añaden al entrar. Los correos salen por [Brevo](https://www.brevo.com) (gratis hasta 300 al día; Render gratis no deja usar SMTP):
+
+1. Crea una cuenta en Brevo.
+2. En **Remitentes y dominios** (Senders), añade y verifica el correo que firmará los mensajes (por ejemplo, tu Gmail).
+3. En **SMTP y API → Claves API**, crea una clave.
+4. En Render, en las variables de entorno del servicio, pon `BREVO_API_KEY` (la clave) y `MAIL_FROM` (el remitente verificado).
+
+Sin `BREVO_API_KEY` no se manda ningún correo: el texto con el enlace se escribe en los registros del servidor.
 
 ## Cómo se juega
 
@@ -49,7 +65,7 @@ El servidor guarda el mundo en memoria y lo vuelca a la base de datos cada 10 se
 - **Maravillas** 🏛️: cada continente tiene una (Templo de Poseidón, Forja de Hefesto, Jardines de Deméter o Biblioteca de Atenea). La levantan entre todos los que tienen colonia allí aportando madera, piedra y cristal; con cada uno de sus 5 niveles todos ellos ganan más velocidad de flota, ataque, comida o investigación.
 - **Invasiones** 🔥: cada pocos días desembarca una horda bárbara en los continentes con colonias (más grande cuantos más colonos haya). Cualquiera puede atacarla durante 12 h: si cae, el botín se reparte según los bárbaros que abatió cada uno y el mejor puede llevarse una reliquia; si nadie la detiene, las colonias del continente se quedan un día sin producir.
 - **Reliquias** 🏺: diez objetos míticos (de raros a legendarios) que se encuentran en expediciones, ruinas, conquistas y en la guarida del Kraken. Se equipan hasta tres desde el ayuntamiento o se venden por oro.
-- **Cuenta segura**: al crearla recibes un código de recuperación; con tu nombre y ese código puedes poner otra contraseña desde la pantalla de inicio. Los moderadores pueden dar una contraseña temporal.
+- **Cuenta con correo**: se confirma con un enlace al correo, se entra con el nombre o el correo y la contraseña olvidada se recupera por correo. Los moderadores pueden dar una contraseña temporal.
 - **Encargos diarios** 📜: cada día tres tareas distintas (invertir, entrenar, saquear, explorar, comerciar…) con recompensa, y premio extra por cumplir las tres.
 - **Competición semanal** 🏅: cada semana se premia a los tres mejores en saqueo, militar y construcción (solo cuenta lo hecho esa semana). Los ganadores quedan en el salón de la fama, en la pestaña «Semana» de la clasificación.
 - **Efectos de combate**: humo, fuego y destellos en la isla donde se libra una batalla (también en tu muralla cuando te atacan).

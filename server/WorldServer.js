@@ -5,6 +5,7 @@ import { Game, newState } from '../src/game/Game.js';
 import { ACHIEVEMENTS, CONTEST_CATEGORIES, CONTEST_DAYS, CONTEST_PRIZES, HORDE, WONDERS } from '../src/game/data.js';
 import { playerCombat, wonderLevel, wonderOf, worldEventAt } from '../src/game/rules.js';
 import { footprint, freshIslandState, generateContinent, generateSector, homeIsland, sectorCenter, sectorVertices } from '../src/game/world.js';
+import { createHash, randomBytes } from 'node:crypto';
 import { hashPassword, newRecoveryCode, newSecret, normalizeCode, verifyPassword } from './auth.js';
 
 // El mundo de todos los jugadores, en memoria. Implementa la interfaz `world`
@@ -23,6 +24,12 @@ const INACTIVE_MS = 7 * 86_400_000; // una semana sin entrar: inactivo
 const MAX_THREADS = 40;
 const MAX_POSTS = 200;
 export const NAME_RE = /^[\p{L}\p{N}_ .-]{3,20}$/u;
+export const EMAIL_RE = /^[^\s@<>()"',;]{1,64}@[^\s@<>()"',;]+\.[^\s@<>()"',;]{2,}$/;
+const HOUR = 3_600_000;
+// Cuánto vale cada enlace o permiso que se manda por correo
+const TOKEN_HOURS = { registro: 24, correo: 24, clave: 1, permiso: 0.5 };
+const tokenHash = (token) => createHash('sha256').update(String(token)).digest('hex');
+const cleanEmail = (email) => String(email ?? '').trim().toLowerCase();
 const ALLIANCE_RE = /^[\p{L}\p{N}_ .'-]{3,30}$/u;
 const TAG_RE = /^[\p{L}\p{N}]{2,5}$/u;
 
@@ -31,6 +38,7 @@ export class WorldServer {
     this.store = store;
     this.users = new Map(); // id → { id, username, pass, created, lastSeen }
     this.byName = new Map(); // nombre en minúsculas → id
+    this.byEmail = new Map(); // correo en minúsculas → id
     this.games = new Map(); // id → Game
     this.islands = new Map(); // id → isla (datos fijos)
     this.islandStates = new Map(); // id → estado compartido
@@ -60,7 +68,11 @@ export class WorldServer {
     for (const u of data.users) {
       this.users.set(u.id, { ...u, lastSeen: 0 });
       this.byName.set(u.username.toLowerCase(), u.id);
+      if (u.email) this.byEmail.set(u.email, u.id);
     }
+    // Los códigos de recuperación ya no se usan: la cuenta se recupera por correo
+    delete this.meta.recovery;
+    this.meta.tokens ??= {};
     for (const [uid, state] of Object.entries(data.players)) {
       const id = Number(uid);
       if (this.users.has(id)) this.games.set(id, this.#makeGame(id, state));
@@ -94,19 +106,35 @@ export class WorldServer {
 
   // ── Cuentas ────────────────────────────────────────────────────────────────
 
-  async register(username, password, city) {
+  /** Comprueba los datos de una cuenta nueva y los deja limpios. */
+  #checkAccount(username, city, password, email) {
     username = String(username ?? '').trim();
     city = String(city ?? '').trim() || username;
     if (!NAME_RE.test(username)) throw new UserError('El nombre debe tener entre 3 y 20 letras o números.');
     if (!NAME_RE.test(city)) throw new UserError('El nombre de la ciudad debe tener entre 3 y 20 letras o números.');
-    if (typeof password !== 'string' || password.length < 6 || password.length > 100) throw new UserError('La contraseña debe tener al menos 6 caracteres.');
+    if (password != null && (typeof password !== 'string' || password.length < 6 || password.length > 100)) throw new UserError('La contraseña debe tener al menos 6 caracteres.');
     if (this.byName.has(username.toLowerCase())) throw new UserError('Ese nombre ya está cogido.');
+    if (email != null) this.#checkEmail(email);
+    return { username, city };
+  }
 
+  #checkEmail(email) {
+    if (!EMAIL_RE.test(email) || email.length > 120) throw new UserError('Ese correo no parece válido.');
+    if (this.byEmail.has(email)) throw new UserError('Ya hay una cuenta con ese correo. Si es tuya, entra o recupera la contraseña.');
+  }
+
+  /**
+   * Crea la cuenta y su sector. `pass` puede venir ya cifrada (al confirmar un registro).
+   * Con `email`, el correo queda verificado.
+   */
+  async register(username, password, city, { email = null, pass = null } = {}) {
+    ({ username, city } = this.#checkAccount(username, city, pass ? null : password, email));
     const created = Date.now();
-    const pass = hashPassword(password);
-    const id = await this.store.createUser({ username, pass, created });
-    this.users.set(id, { id, username, pass, created, lastSeen: created });
+    pass ??= hashPassword(password);
+    const id = await this.store.createUser({ username, pass, created, email });
+    this.users.set(id, { id, username, pass, created, lastSeen: created, email });
     this.byName.set(username.toLowerCase(), id);
+    if (email) this.byEmail.set(email, id);
 
     // Cada jugador nuevo abre un sector del archipiélago
     const sector = this.meta.sectors++;
@@ -157,45 +185,130 @@ export class WorldServer {
     }
   }
 
+  /** Entrar con el nombre o con el correo. */
   login(username, password) {
-    const id = this.byName.get(String(username ?? '').trim().toLowerCase());
+    const key = String(username ?? '').trim().toLowerCase();
+    const id = this.byName.get(key) ?? this.byEmail.get(key);
     const user = id != null ? this.users.get(id) : null;
     if (!user || typeof password !== 'string' || !verifyPassword(password, user.pass)) throw new UserError('Nombre o contraseña incorrectos.');
     if (this.isBanned(id)) throw new UserError(`Esta cuenta está suspendida${this.meta.mod[id].reason ? `: ${this.meta.mod[id].reason}` : '.'}`);
     return id;
   }
 
-  // ── Recuperar la cuenta ────────────────────────────────────────────────────
-  // Sin correo: al crear la cuenta se da un código que solo ve el jugador. Se
-  // guarda cifrado (como las contraseñas) y cada uso lo cambia por otro.
+  // ── Correo: registro, confirmación y contraseña olvidada ──────────────────
+  // Cada enlace lleva un código al azar; aquí solo se guarda su huella (sha256), con
+  // lo que hace falta para terminar la operación y cuándo caduca.
 
-  /** Un código nuevo para el jugador (el anterior deja de valer). */
-  async issueRecovery(userId) {
-    const code = newRecoveryCode();
-    this.meta.recovery ??= {};
-    this.meta.recovery[userId] = hashPassword(normalizeCode(code));
+  hasEmail(userId) {
+    return !!this.users.get(userId)?.email;
+  }
+
+  #issue(kind, data) {
+    const token = randomBytes(32).toString('base64url');
+    this.meta.tokens[tokenHash(token)] = { kind, ...data, expires: Date.now() + TOKEN_HOURS[kind] * HOUR };
+    return token;
+  }
+
+  /** Usa un código: lo devuelve (y lo borra, salvo `keep`) si es de ese tipo y no ha caducado. */
+  #take(token, kinds, keep = false) {
+    const key = tokenHash(token);
+    const t = this.meta.tokens[key];
+    if (!t || !kinds.includes(t.kind) || t.expires < Date.now()) return null;
+    if (!keep) delete this.meta.tokens[key];
+    return t;
+  }
+
+  /** Quita los códigos caducados y los que se sustituyen por uno nuevo. */
+  #dropTokens(match) {
+    const now = Date.now();
+    for (const [key, t] of Object.entries(this.meta.tokens)) if (t.expires < now || match?.(t)) delete this.meta.tokens[key];
+  }
+
+  /**
+   * Primer paso del registro: nada se crea hasta que el jugador abre el enlace del correo.
+   * Volver a registrarse con el mismo nombre o correo sustituye al intento anterior.
+   */
+  async startRegistration({ email, username, password, password2, city }) {
+    email = cleanEmail(email);
+    ({ username, city } = this.#checkAccount(username, city, password, email));
+    if (password !== password2) throw new UserError('Las contraseñas no coinciden.');
+    const lc = username.toLowerCase();
+    this.#dropTokens((t) => t.kind === 'registro' && (t.email === email || t.username.toLowerCase() === lc));
+    const token = this.#issue('registro', { email, username, city, pass: hashPassword(password) });
     await this.store.save({ meta: this.meta });
-    return code;
+    return { token, email, username };
   }
 
-  /** Poner una contraseña nueva con el código de recuperación. */
-  async recover(username, code, next) {
-    const id = this.byName.get(String(username ?? '').trim().toLowerCase());
-    const stored = id != null ? this.meta.recovery?.[id] : null;
-    if (!stored || !verifyPassword(normalizeCode(code), stored)) throw new UserError('El nombre o el código de recuperación no son correctos.');
-    if (this.isBanned(id)) throw new UserError('Esta cuenta está suspendida.');
-    if (typeof next !== 'string' || next.length < 6 || next.length > 100) throw new UserError('La contraseña nueva debe tener al menos 6 caracteres.');
-    const user = this.users.get(id);
-    user.pass = hashPassword(next);
-    await this.store.updatePassword(id, user.pass);
-    return { id, recovery: await this.issueRecovery(id) };
+  /** Abrir un enlace: confirma un registro (crea la cuenta) o un correo nuevo. Devuelve el jugador. */
+  async confirm(token) {
+    const t = this.#take(token, ['registro', 'correo']);
+    if (!t) throw new UserError('Este enlace ya no vale: ha caducado o ya se ha usado.');
+    if (t.kind === 'registro') {
+      const id = await this.register(t.username, null, t.city, { email: t.email, pass: t.pass });
+      return { id, created: true };
+    }
+    const user = this.users.get(t.uid);
+    if (!user) throw new UserError('Esa cuenta ya no existe.');
+    if (this.byEmail.has(t.email) && this.byEmail.get(t.email) !== t.uid) throw new UserError('Ese correo ya lo usa otra cuenta.');
+    if (user.email) this.byEmail.delete(user.email);
+    user.email = t.email;
+    this.byEmail.set(t.email, t.uid);
+    await this.store.updateEmail(t.uid, t.email);
+    await this.store.save({ meta: this.meta });
+    return { id: t.uid, created: false };
   }
 
-  /** Un código nuevo desde dentro del juego (pide la contraseña actual). */
-  async regenerateRecovery(userId, password) {
-    const user = this.users.get(userId);
-    if (typeof password !== 'string' || !verifyPassword(password, user.pass)) throw new UserError('La contraseña no es correcta.');
-    return this.issueRecovery(userId);
+  /** Permiso corto para añadir el correo a una cuenta antigua (tras entrar con su contraseña). */
+  async emailPermit(userId) {
+    const token = this.#issue('permiso', { uid: userId });
+    await this.store.save({ meta: this.meta });
+    return token;
+  }
+
+  /** Pedir un correo para una cuenta: con el permiso de entrada o, desde el juego, con la contraseña. */
+  async requestEmail({ permit, userId, password, email }) {
+    let uid = userId;
+    if (permit != null) uid = this.#take(permit, ['permiso'], true)?.uid;
+    else if (!this.users.has(uid) || typeof password !== 'string' || !verifyPassword(password, this.users.get(uid).pass)) throw new UserError('La contraseña no es correcta.');
+    if (uid == null || !this.users.has(uid)) throw new UserError('Ha pasado demasiado tiempo: vuelve a entrar con tu nombre y contraseña.');
+    email = cleanEmail(email);
+    if (this.users.get(uid).email === email) throw new UserError('Ese ya es el correo de tu cuenta.');
+    this.#checkEmail(email);
+    this.#dropTokens((t) => t.kind === 'correo' && t.uid === uid);
+    const token = this.#issue('correo', { uid, email });
+    await this.store.save({ meta: this.meta });
+    return { token, email, username: this.users.get(uid).username };
+  }
+
+  /** Contraseña olvidada: un enlace al correo de la cuenta (null si no hay ninguna con ese correo). */
+  async forgotPassword(email) {
+    email = cleanEmail(email);
+    const id = this.byEmail.get(email);
+    if (id == null || this.isBanned(id)) return null;
+    this.#dropTokens((t) => t.kind === 'clave' && t.uid === id);
+    const token = this.#issue('clave', { uid: id });
+    await this.store.save({ meta: this.meta });
+    return { token, email, username: this.users.get(id).username };
+  }
+
+  async resetPassword(token, password, password2) {
+    if (typeof password !== 'string' || password.length < 6 || password.length > 100) throw new UserError('La contraseña nueva debe tener al menos 6 caracteres.');
+    if (password !== password2) throw new UserError('Las contraseñas no coinciden.');
+    const t = this.#take(token, ['clave']);
+    if (!t || !this.users.has(t.uid)) throw new UserError('Este enlace ya no vale: ha caducado o ya se ha usado. Pide otro.');
+    const user = this.users.get(t.uid);
+    user.pass = hashPassword(password);
+    await this.store.updatePassword(t.uid, user.pass);
+    await this.store.save({ meta: this.meta });
+    return t.uid;
+  }
+
+  /** El correo de un jugador, para enseñárselo a él mismo (con parte oculta). */
+  maskedEmail(userId) {
+    const email = this.users.get(userId)?.email;
+    if (!email) return null;
+    const [name, domain] = email.split('@');
+    return `${name.slice(0, 2)}${'•'.repeat(Math.max(1, name.length - 2))}@${domain}`;
   }
 
   /** Moderación: una contraseña temporal para quien la ha perdido todo. */
@@ -705,6 +818,11 @@ export class WorldServer {
     }
     if (this.meta.contest && Date.now() >= this.meta.contest.end) this.#finishContest();
     this.#updateHordes(now);
+    // Enlaces de correo caducados (cada diez minutos)
+    if (Date.now() - (this.tokenSweep ?? 0) > 600_000) {
+      this.tokenSweep = Date.now();
+      this.#dropTokens();
+    }
     // Cuando empieza una temporada del archipiélago, se anuncia una sola vez
     const ev = worldEventAt(now);
     if (this.meta.eventAnnounced !== ev.start) {

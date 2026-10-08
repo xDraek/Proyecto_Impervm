@@ -114,7 +114,8 @@ const TOPICS = [
   {
     icon: '🔑',
     title: 'Tu cuenta',
-    body: `<p>Al crear la cuenta recibes un <b>código de recuperación</b>: guárdalo. Con tu nombre y ese código puedes poner otra contraseña desde la pantalla de inicio. Puedes generar uno nuevo en ⚙ → Cambiar contraseña.</p>`,
+    body: `<p>Tu cuenta va unida a tu <b>correo</b>: al crearla te mandamos un enlace para confirmarlo, y tu ciudad se funda al abrirlo. Puedes entrar con tu nombre o con tu correo.</p>
+      <p>Si olvidas la contraseña, pulsa «¿Has olvidado tu contraseña?» en la pantalla de inicio y te llegará un enlace para poner otra. El correo se cambia en ⚙ → Cuenta y contraseña.</p>`,
   },
   {
     icon: '⌨️',

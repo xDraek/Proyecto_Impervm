@@ -26,6 +26,14 @@ services:
       # Tu nombre de jugador (y el de otros moderadores), separados por comas
       - key: ADMINS
         sync: false
+      # Correo (confirmar cuentas y contraseña olvidada) con Brevo: la clave de su API
+      # y el remitente que hayas verificado allí. Sin ellos no se puede crear cuentas.
+      - key: BREVO_API_KEY
+        sync: false
+      - key: MAIL_FROM
+        sync: false
+      - key: MAIL_FROM_NAME
+        value: Imperium
       - key: DATABASE_URL
         fromDatabase:
           name: imperium-db

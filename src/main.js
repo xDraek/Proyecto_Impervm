@@ -6,7 +6,7 @@ import { Game, newState } from './game/Game.js';
 import { freshIslandState, generateSector } from './game/world.js';
 import { ClientGame } from './net/ClientGame.js';
 import { ClientWorld } from './net/ClientWorld.js';
-import { getToken, setToken } from './net/api.js';
+import { api, getToken, setToken } from './net/api.js';
 import { connectLive } from './net/socket.js';
 import { World } from './scene/World.js';
 import { warmPortraits } from './scene/portraits.js';
@@ -40,13 +40,27 @@ window.addEventListener('keydown', unlockAudio, { once: true });
 boot();
 
 async function boot() {
+  // Enlaces de los correos: ?verificar=… confirma la cuenta (o un correo nuevo); ?clave=… pide otra contraseña
+  const params = new URLSearchParams(location.search);
+  const verify = params.get('verificar');
+  const reset = params.get('clave');
+  if (verify || reset) history.replaceState(null, '', location.pathname);
+  if (reset) return startLanding(null, { mode: 'reset', resetToken: reset });
+  if (verify) {
+    try {
+      const { token } = await api('POST', '/api/verify', { token: verify });
+      setToken(token);
+    } catch (err) {
+      return startLanding(err.message);
+    }
+  }
   if (getToken()) {
     try {
       startGame(await ClientGame.connect());
       return;
     } catch (err) {
       if (err.status === 401) setToken(null);
-      startLanding(err.status === 401 ? 'Tu sesión ha caducado. Vuelve a entrar.' : err.message);
+      startLanding(err.status === 401 ? (/correo/.test(err.message) ? err.message : 'Tu sesión ha caducado. Vuelve a entrar.') : err.message);
       return;
     }
   }
@@ -56,7 +70,7 @@ async function boot() {
 // ── Pantalla principal ────────────────────────────────────────────────────────
 
 /** Una isla de muestra que gira detrás del formulario de entrada. */
-function startLanding(message) {
+function startLanding(message, opts = {}) {
   const now = clock.now();
   const world = new ClientWorld();
   const home = { id: 'escaparate', type: 'jugador', x: 0, z: 0, size: 10, owner: 0, name: 'Imperium' };
@@ -71,7 +85,7 @@ function startLanding(message) {
   view.setDayNight(false);
   view.renderer.setAnimationLoop((t) => view.update(0.016, t / 1000));
 
-  showLanding({ message, onLogin: () => location.reload() });
+  showLanding({ message, ...opts, onLogin: () => location.reload() });
 }
 
 // ── Partida ───────────────────────────────────────────────────────────────────
