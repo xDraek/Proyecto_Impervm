@@ -254,6 +254,7 @@ export class WorldServer {
       online: Date.now() - user.lastSeen < ONLINE_MS,
       vacation: !!game.state.vacation,
       inactive: this.isInactive(userId),
+      banner: game.state.banner ?? null,
       alliance: a ? { id: a.id, tag: a.tag, name: a.name } : null,
     };
   }
@@ -660,8 +661,48 @@ export class WorldServer {
       world: { islands, states, players },
       incoming: this.incoming(game.state.home),
       joint: this.#jointList(userId),
+      traffic: this.#traffic(userId, game.state.home),
       support: this.supportersAt(game.state.home, userId).map(({ game: g, mission }) => ({ from: g.name, units: mission.units })),
     };
+  }
+
+  /** Flotas de otros jugadores que navegan cerca de ti (sin decir qué llevan), para ver el mar con vida. */
+  #traffic(userId, homeId) {
+    const home = this.islands.get(homeId);
+    if (!home) return [];
+    const near = (isl) => isl && Math.hypot(isl.x - home.x, isl.z - home.z) <= VIEW_RADIUS;
+    const out = [];
+    for (const [uid, g] of this.games) {
+      if (uid === userId) continue;
+      const from = this.islands.get(g.state.home);
+      for (const m of g.state.missions) {
+        if (m.target === homeId || (m.phase !== 'ida' && m.phase !== 'vuelta')) continue;
+        const to = this.islands.get(m.target);
+        if (!to || !(near(from) || near(to))) continue;
+        const ship = ['dromon', 'galeon', 'trirreme', 'brulote', 'mercante', 'bote'].find((s) => m.units[s]) ?? 'mercante';
+        out.push({ id: `${uid}-${m.id}`, fx: from.x, fz: from.z, tx: to.x, tz: to.z, depart: m.depart, arrive: m.arrive, back: m.back, phase: m.phase, ship, ally: this.sameAlliance(userId, uid) });
+      }
+    }
+    return out.slice(0, 40);
+  }
+
+  /** Cambiar el nombre de tu ciudad (una vez por semana). */
+  renameCity(userId, name) {
+    name = String(name ?? '').trim();
+    if (!NAME_RE.test(name)) throw new UserError('El nombre de la ciudad debe tener entre 3 y 20 letras o números.');
+    const game = this.games.get(userId);
+    const wait = (game.state.renamedAt ?? 0) + 7 * 86_400_000 - Date.now();
+    if (wait > 0) throw new UserError(`Solo puedes cambiar el nombre una vez por semana (faltan ${Math.ceil(wait / 86_400_000)} días).`);
+    const isl = this.islands.get(game.state.home);
+    const old = isl.name;
+    isl.name = name;
+    game.state.renamedAt = Date.now();
+    game.dirty = true;
+    this.newIslands.push(isl); // se guarda de nuevo con su nombre
+    this.mapCache = null;
+    this.rankingCache = null;
+    this.announce(`🏰 ${game.name} rebautiza ${old} como ${name}`);
+    this.pendingPush.add(userId);
   }
 
   /** Flotas de otros jugadores que vienen a atacar esta isla. */
@@ -1185,6 +1226,8 @@ export class WorldServer {
             protected: g.isProtected(),
             vacation: !!g.state.vacation,
             inactive: this.isInactive(isl.owner),
+            color: g.state.banner?.color ?? null,
+            emblem: g.state.banner?.emblem ?? null,
             aid: a?.id ?? null,
             tag: a?.tag ?? null,
           });
@@ -1311,6 +1354,8 @@ export class WorldServer {
       loot: game.stats.loot ?? 0,
       achievements: game.achievements(),
       hero: game.state.hero ? { name: game.state.hero.name, level: game.state.hero.level } : null,
+      banner: game.state.banner ?? null,
+      history: (game.state.history ?? []).map((h) => ({ day: h.day, points: h.points })),
       muted: (this.meta.mod[id]?.mutedUntil ?? 0) > Date.now(),
       banned: this.isBanned(id),
     };

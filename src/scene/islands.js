@@ -311,7 +311,8 @@ export function islandLook(view) {
   return view.type;
 }
 
-export function createIslandFeature(isl, look) {
+export function createIslandFeature(isl, fullLook) {
+  const look = fullLook.split('|')[0];
   const R = islandRadius(isl) / FEATURE_SCALE;
   const rand = rng(hashString(isl.id) ^ 0x9e3779b9);
   const g = new THREE.Group();
@@ -321,13 +322,13 @@ export function createIslandFeature(isl, look) {
     niebla: () => mist(g, R, rand),
     barbaros: () => camp(g, R, rand),
     ciudadela: () => citadel(g, R, rand),
-    'ciudadela-propia': () => citadel(g, R, rand, C.cloth[0]),
+    'ciudadela-propia': () => citadel(g, R, rand, isl.bannerColor ?? C.cloth[0]),
     'ciudadela-otro': () => citadel(g, R, rand, ownerColor(isl)),
     piratas: () => fort(g, R),
     ruinas: () => ruins(g, R, rand, true),
     'ruinas-saqueadas': () => ruins(g, R, rand, false),
     libre: () => specialty(g, isl, R, rand),
-    colonia: () => colony(g, isl, R, rand, C.cloth[0]),
+    colonia: () => colony(g, isl, R, rand, isl.bannerColor ?? C.cloth[0]),
     'colonia-otro': () => colony(g, isl, R, rand, ownerColor(isl)),
     'ciudad-1': () => city(g, isl, R, rand, 1),
     'ciudad-2': () => city(g, isl, R, rand, 2),
@@ -529,6 +530,7 @@ const OWNER_COLORS = ['#4f8fd9', '#6bbf59', '#e3b23c', '#8a5ab8', '#d9734f', '#3
 
 /** Color de bandera de un jugador (siempre el mismo para cada uno). */
 export function ownerColor(isl) {
+  if (isl.bannerColor) return isl.bannerColor;
   const id = isl.owner ?? isl.colonizedBy ?? 0;
   return OWNER_COLORS[Math.abs(Number(id) || hashString(String(id))) % OWNER_COLORS.length];
 }

@@ -35,6 +35,7 @@ export class ClientGame extends Game {
     this.state = snap.state;
     this.incoming = snap.incoming ?? [];
     this.world.joints = snap.joint ?? [];
+    this.traffic = snap.traffic ?? [];
     this.support = snap.support ?? [];
     this.due = false;
     this.lastSync = Date.now();
@@ -148,6 +149,10 @@ export class ClientGame extends Game {
 
   heroSkill(skill) {
     return this.#act('heroSkill', skill);
+  }
+
+  setBanner(color, emblem) {
+    return this.#act('setBanner', color, emblem);
   }
 
   equipRelic(id, on) {

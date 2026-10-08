@@ -265,7 +265,7 @@ export class WorldMap {
     let text;
     if (hit.kind === 'city') {
       const c = hit.item;
-      text = `🏰 ${c.tag ? `[${c.tag}] ` : ''}${c.name} · ${c.city} · ${fmtNum(c.points)} pts${c.vacation ? ' · 🏖️' : c.inactive ? ' · 💤' : ''}`;
+      text = `${c.emblem ?? '🏰'} ${c.tag ? `[${c.tag}] ` : ''}${c.name} · ${c.city} · ${fmtNum(c.points)} pts${c.vacation ? ' · 🏖️' : c.inactive ? ' · 💤' : ''}`;
     } else {
       const [, , type, colonist] = hit.item;
       const t = ISLAND_TYPES[type];
@@ -296,7 +296,7 @@ export class WorldMap {
       const me = rel === 'yo';
       const visible = !!this.game.world.island(c.id);
       this.info.innerHTML = `<div class="wm-card">
-        <div><b>🏰 ${escapeHtml(c.city)}</b> <span class="rel-chip" style="--rel:${REL[rel].color}">${REL[rel].name}</span>
+        <div><b>${c.emblem ?? '🏰'} ${escapeHtml(c.city)}</b> <span class="rel-chip" style="--rel:${REL[rel].color}">${REL[rel].name}</span>
           <div class="small">${me ? 'Tu capital' : `de <b>${escapeHtml(c.name)}</b>`}${c.tag ? ` <span class="tag">[${escapeHtml(c.tag)}]</span>` : ''} · ${fmtNum(c.points)} puntos${c.protected ? ' · 🛡️ novato' : ''}${c.vacation ? ' · 🏖️ de vacaciones' : c.inactive ? ' · 💤 inactivo' : ''}</div>
           ${me ? '' : far}</div>
         <div class="row-actions">

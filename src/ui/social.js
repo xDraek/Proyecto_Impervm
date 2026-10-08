@@ -1,5 +1,5 @@
 import { universe } from '../config.js';
-import { ACHIEVEMENTS, DAILY_REWARDS, RESOURCES, RESOURCE_KEYS, VACATION } from '../game/data.js';
+import { ACHIEVEMENTS, BANNER_COLORS, BANNER_EMBLEMS, DAILY_REWARDS, RESOURCES, RESOURCE_KEYS, VACATION } from '../game/data.js';
 import { api } from '../net/api.js';
 import { bag, escapeHtml, fmtAgo, fmtDec, fmtNum, fmtTime } from './format.js';
 import { runSimulation, simulatorHtml } from './simulator.js';
@@ -319,7 +319,7 @@ export class Social {
     this.hud.showModal(
       'profile',
       `<div class="modal-card">
-        ${head('👤', `${escapeHtml(p.name)}${p.alliance ? ` <span class="tag">[${escapeHtml(p.alliance.tag)}]</span>` : ''}`, `${p.online ? '🟢 En línea' : 'Desconectado'} · en el archipiélago desde ${new Date(p.joined).toLocaleDateString('es-ES')}`)}
+        ${head(p.banner?.emblem ?? '👤', `${escapeHtml(p.name)}${p.alliance ? ` <span class="tag">[${escapeHtml(p.alliance.tag)}]</span>` : ''}`, `${p.online ? '🟢 En línea' : 'Desconectado'} · en el archipiélago desde ${new Date(p.joined).toLocaleDateString('es-ES')}`)}
         <div class="stat-grid">
           <div><b>${p.rank ?? '—'}</b><span>puesto</span></div>
           <div><b>${fmtNum(p.points)}</b><span>puntos</span></div>
@@ -332,6 +332,8 @@ export class Social {
         <div class="info-row"><span>🤝 Alianza</span><b>${p.alliance ? escapeHtml(p.alliance.name) : 'Ninguna'}</b></div>
         ${p.colonies.length ? `<div class="info-row"><span>🚩 Colonias</span><span>${p.colonies.map(escapeHtml).join(', ')}</span></div>` : ''}
         ${p.coloso ? `<div class="info-row"><span>🗽 Coloso</span><b>Nivel ${p.coloso}</b></div>` : ''}
+        ${historyChart(p.history)}
+        ${me ? this.#bannerHtml(p) : ''}
         <h4>Logros (${earned.size}/${ACHIEVEMENTS.length})</h4>
         <ul class="medals">${medals}</ul>
         ${p.hero ? `<div class="info-row"><span>🎖️ Almirante</span><b>${escapeHtml(p.hero.name)} · nivel ${p.hero.level}</b></div>` : ''}
@@ -351,6 +353,29 @@ export class Social {
           : ''}
       </div>`,
     );
+    bindCharts(this.hud.modal);
+  }
+
+  /** Tu estandarte (color y emblema) y el nombre de tu ciudad. */
+  #bannerHtml(p) {
+    const cur = p.banner ?? { color: BANNER_COLORS[0], emblem: '⚜' };
+    const colors = BANNER_COLORS.map(
+      (c) => `<button class="swatch ${c === cur.color ? 'on' : ''}" style="--c:${c}" data-action="banner" data-color="${c}" data-emblem="${escapeHtml(cur.emblem)}" title="Color"></button>`,
+    ).join('');
+    const emblems = BANNER_EMBLEMS.map(
+      (e) => `<button class="emblem ${e === cur.emblem ? 'on' : ''}" data-action="banner" data-color="${cur.color}" data-emblem="${e}">${e}</button>`,
+    ).join('');
+    return `<div class="section banner-edit">
+      <h4>🎨 Tu estandarte</h4>
+      <p class="desc small">Ondea en tus banderas, en tus colonias y en tu ciudad tal como la ven los demás.</p>
+      <div class="swatches">${colors}</div>
+      <div class="emblems">${emblems}</div>
+      <form class="inline-form" data-form="rename-city">
+        <input name="name" maxlength="20" placeholder="Nuevo nombre de tu ciudad" value="${escapeHtml(p.city ?? '')}" />
+        <button class="ghost small">Renombrar</button>
+      </form>
+      <p class="muted small">Puedes cambiar el nombre de la ciudad una vez por semana.</p>
+    </div>`;
   }
 
   // ── Recompensa diaria y bienvenida ─────────────────────────────────────────
@@ -654,6 +679,12 @@ export class Social {
       case 'mail-to':
         this.compose(btn.dataset.name);
         return true;
+      case 'banner': {
+        const res = await this.game.setBanner(btn.dataset.color, btn.dataset.emblem);
+        if (!res.ok) this.hud.toast(res.reason, 'error');
+        else this.openProfile(this.game.username);
+        return true;
+      }
       case 'mail-tab':
         this.mailTab = btn.dataset.tab;
         this.openMail = null;
@@ -734,6 +765,9 @@ export class Social {
         }
         const res = await this.#call('POST', '/api/password', { current: data.current, next: data.next }, '🔑 Contraseña cambiada');
         if (res) this.hud.closeModal();
+      } else if (form.dataset.form === 'rename-city') {
+        const res = await this.#call('POST', '/api/city', { name: data.name }, '🏰 Tu ciudad tiene nombre nuevo');
+        if (res) this.openProfile(this.game.username);
       } else if (form.dataset.form === 'recovery') {
         const res = await this.#call('POST', '/api/recovery', { password: data.password }, '🔑 Código nuevo generado: guárdalo');
         const box = this.hud.modal.querySelector('.recovery-code');
@@ -778,5 +812,73 @@ export class Social {
       else this.refreshOffers(true);
     }
     this.hud.render();
+  }
+}
+
+/**
+ * Evolución de los puntos día a día: una sola serie, así que sin leyenda (la
+ * nombra el título). Línea fina, cuadrícula discreta y lectura al pasar el ratón.
+ */
+function historyChart(history = []) {
+  if (history.length < 2) return '<h4>📈 Evolución</h4><p class="muted small">La gráfica aparecerá cuando lleve al menos dos días en el archipiélago.</p>';
+  const W = 320;
+  const H = 110;
+  const pad = { l: 34, r: 8, t: 10, b: 20 };
+  const vals = history.map((h) => h.points);
+  const max = Math.max(...vals);
+  const min = Math.min(...vals);
+  const span = Math.max(1, max - min);
+  const x = (i) => pad.l + (i / (history.length - 1)) * (W - pad.l - pad.r);
+  const y = (v) => pad.t + (1 - (v - min) / span) * (H - pad.t - pad.b);
+  const pts = history.map((h, i) => `${x(i).toFixed(1)},${y(h.points).toFixed(1)}`).join(' ');
+  const area = `${pad.l},${H - pad.b} ${pts} ${x(history.length - 1).toFixed(1)},${H - pad.b}`;
+  const today = Math.floor(Date.now() / 86_400_000);
+  const ago = (d) => (today - d === 0 ? 'hoy' : `hace ${today - d} d`);
+  const data = JSON.stringify(history.map((h, i) => ({ x: x(i), y: y(h.points), label: `${ago(h.day)} · ${fmtNum(h.points)} puntos` })));
+  return `<h4>📈 Puntos de los últimos ${history.length} días</h4>
+    <div class="chart" data-points='${escapeHtml(data)}'>
+      <svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Puntos de ${fmtNum(min)} a ${fmtNum(max)} en ${history.length} días">
+        ${[0, 0.5, 1].map((k) => `<line x1="${pad.l}" x2="${W - pad.r}" y1="${pad.t + k * (H - pad.t - pad.b)}" y2="${pad.t + k * (H - pad.t - pad.b)}" class="grid" />`).join('')}
+        <text x="${pad.l - 4}" y="${pad.t + 4}" class="axis" text-anchor="end">${fmtNum(max)}</text>
+        <text x="${pad.l - 4}" y="${H - pad.b}" class="axis" text-anchor="end">${fmtNum(min)}</text>
+        <text x="${pad.l}" y="${H - 4}" class="axis">${ago(history[0].day)}</text>
+        <text x="${W - pad.r}" y="${H - 4}" class="axis" text-anchor="end">hoy</text>
+        <polygon points="${area}" class="area" />
+        <polyline points="${pts}" class="line" />
+        <line class="cross" y1="${pad.t}" y2="${H - pad.b}" visibility="hidden" />
+        <circle class="dot" r="4" visibility="hidden" />
+        <rect class="hit" x="${pad.l}" y="0" width="${W - pad.l - pad.r}" height="${H}" />
+      </svg>
+      <div class="chart-tip" hidden></div>
+    </div>`;
+}
+
+/** Lectura de la gráfica al pasar el ratón (o el dedo): línea vertical, punto y valor. */
+export function bindCharts(root) {
+  for (const chart of root.querySelectorAll('.chart[data-points]')) {
+    const points = JSON.parse(chart.dataset.points);
+    const svg = chart.querySelector('svg');
+    const cross = svg.querySelector('.cross');
+    const dot = svg.querySelector('.dot');
+    const tip = chart.querySelector('.chart-tip');
+    const move = (e) => {
+      const r = svg.getBoundingClientRect();
+      const vx = ((e.clientX - r.left) / r.width) * svg.viewBox.baseVal.width;
+      const p = points.reduce((best, q) => (Math.abs(q.x - vx) < Math.abs(best.x - vx) ? q : best));
+      for (const el of [cross, dot]) el.setAttribute('visibility', 'visible');
+      cross.setAttribute('x1', p.x);
+      cross.setAttribute('x2', p.x);
+      dot.setAttribute('cx', p.x);
+      dot.setAttribute('cy', p.y);
+      tip.hidden = false;
+      tip.textContent = p.label;
+      tip.style.left = `${(p.x / svg.viewBox.baseVal.width) * 100}%`;
+    };
+    const leave = () => {
+      for (const el of [cross, dot]) el.setAttribute('visibility', 'hidden');
+      tip.hidden = true;
+    };
+    svg.querySelector('.hit').addEventListener('pointermove', move);
+    svg.querySelector('.hit').addEventListener('pointerleave', leave);
   }
 }

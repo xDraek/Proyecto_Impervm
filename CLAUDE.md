@@ -17,6 +17,7 @@ Juego de estrategia multijugador en el navegador al estilo de Ikariam/OGame: un 
 - Rendimiento: con 300 jugadores un segundo de juego cuesta unos 2 ms y un estado ~1 ms. Las respuestas JSON grandes, los archivos del juego y el WebSocket van comprimidos (brotli/gzip, `server/index.js`).
 - Rangos de alianza: `founder` es el líder, `officers` los oficiales (`#canManage`), `applications` las solicitudes y `open` si se entra sin pedir permiso. La ruta `/api/alliance/join` pasa por `requestJoin`; `joinAlliance` mete directamente (lo usa aceptar una solicitud).
 - Recuperar la cuenta: el código se guarda cifrado en `meta.recovery[uid]` (sin tocar la tabla de usuarios) y cada uso lo renueva. Rutas `/api/recover`, `/api/recovery` y `/api/admin/reset`.
+- Estandarte: `state.banner` ({color, emblem}); las banderas que ondean con `C.cloth[0]` se repintan con `paintBanner` (World.js) y las islas de otros usan `bannerColor` en `ownerColor`. `state.history` guarda una foto al día (puntos y ejército) para la gráfica del perfil.
 - Reliquias: `state.relics` ({id, equipped}); sus efectos los suma `relicBonus` en `rules.js`.
 - Three.js va en su propio archivo (`vite.config.js`) para que el navegador lo guarde entre versiones.
 - Encargos diarios: los elige el servidor al empezar el día (`Game.#ensureTasks`, en `state.tasks` con el punto de partida de cada estadística).

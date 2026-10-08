@@ -98,6 +98,7 @@ const ACTIONS = {
   dismissVisitor: (g) => g.dismissVisitor(),
   markReportsRead: (g) => g.markReportsRead(),
   upgradeColony: (g, [id]) => (typeof id === 'string' ? g.upgradeColony(id) : bad()),
+  setBanner: (g, [color, emblem]) => (typeof color === 'string' && typeof emblem === 'string' ? g.setBanner(color, emblem) : bad()),
   equipRelic: (g, [id, on]) => (typeof id === 'string' ? g.equipRelic(id, on === true) : bad()),
   sellRelic: (g, [id]) => (typeof id === 'string' ? g.sellRelic(id) : bad()),
   donateWonder: (g, [id, bag]) => (typeof id === 'string' ? g.donateWonder(id, resources(bag)) : bad()),
@@ -260,6 +261,11 @@ async function api(req, res, url) {
 
     // Perfil y cuenta
     if (route === 'GET /api/profile') return send(res, 200, { profile: world.profile(url.searchParams.get('name')) });
+    if (route === 'POST /api/city') {
+      const { name } = await readJson(req);
+      world.renameCity(uid, name);
+      return send(res, 200, { snapshot: world.snapshot(uid) });
+    }
     if (route === 'POST /api/recovery') {
       if (limited(`auth:${ip(req)}`, 10, 60_000)) return send(res, 429, { error: 'Demasiados intentos. Espera un minuto.' });
       const { password } = await readJson(req);

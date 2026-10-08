@@ -670,7 +670,7 @@ export class World {
   #buildHomeLabel() {
     const el = document.createElement('div');
     el.className = 'label isl home';
-    el.innerHTML = `<span class="label-name">⚜ ${escapeHtml(this.game.homeIsland?.name ?? 'Tu isla')}</span>`;
+    el.innerHTML = `<span class="label-name">${this.game.state.banner?.emblem ?? '⚜'} ${escapeHtml(this.game.homeIsland?.name ?? 'Tu isla')}</span>`;
     this.homeLabel = new CSS2DObject(el);
     this.homeLabel.position.set(0, 0, ISLAND_R + 9);
     this.homeLabel.visible = false;
@@ -1065,7 +1065,7 @@ export class World {
       const slot = this.slots[id];
       const level = this.game.level(id);
       const building = q?.id === id;
-      const key = `${level}|${building}`;
+      const key = `${level}|${building}|${this.game.state.banner?.color ?? ''}`;
       if (slot.key === key) continue;
       const leveledUp = slot.key !== null && Number(slot.key.split('|')[0]) < level;
       slot.key = key;
@@ -1081,6 +1081,7 @@ export class World {
       slot.extrasKey = null;
 
       slot.building = createBuilding(id, level);
+      paintBanner(slot.building, this.game.state.banner?.color);
       slot.building.position.y = id === 'ayuntamiento' ? 0.04 : id === 'puerto' || id === 'muralla' ? 0 : 0.12;
       slot.baseScale = slot.building.scale.x;
       slot.root.add(slot.building);
@@ -1192,14 +1193,17 @@ export class World {
     for (const [id, entry] of Object.entries(this.islands)) {
       const view = this.game.island(id);
       if (!view) continue;
-      const look = islandLook(view);
+      // El color de la bandera de quien gobierna la isla también cambia el modelo
+      const ownerId = view.type === 'jugador' ? view.owner : view.colonizedBy;
+      const bannerColor = ownerId === this.game.userId ? this.game.state.banner?.color : this.game.world.playerInfo(ownerId)?.banner?.color;
+      const look = `${islandLook(view)}|${bannerColor ?? ''}`;
       if (entry.look !== look) {
         entry.look = look;
         if (entry.feature) {
           entry.group.remove(entry.feature);
           disposeTree(entry.feature);
         }
-        entry.feature = createIslandFeature({ ...entry.isl, colonizedBy: view.colonizedBy }, look);
+        entry.feature = createIslandFeature({ ...entry.isl, colonizedBy: view.colonizedBy, bannerColor }, look);
         entry.group.add(entry.feature);
       }
       const t = ISLAND_TYPES[entry.isl.type];
@@ -1207,7 +1211,7 @@ export class World {
       const ally = view.alliance && view.alliance.id === this.game.alliance?.id;
       if (view.type === 'jugador') {
         const tag = view.alliance ? `[${view.alliance.tag}] ` : '';
-        status = `🏰 ${tag}${view.ownerName} · ${view.score} pts${view.protected ? ' · 🛡️' : ''}${view.vacation ? ' · 🏖️' : view.inactive ? ' · 💤' : ''}${view.relation === 'guerra' ? ' · ⚔️' : view.relation === 'pacto' ? ' · 🕊️' : ''}`;
+        status = `${this.game.world.playerInfo(view.owner)?.banner?.emblem ?? '🏰'} ${tag}${view.ownerName} · ${view.score} pts${view.protected ? ' · 🛡️' : ''}${view.vacation ? ' · 🏖️' : view.inactive ? ' · 💤' : ''}${view.relation === 'guerra' ? ' · ⚔️' : view.relation === 'pacto' ? ' · 🕊️' : ''}`;
       } else if (view.colonized) status = `🚩 Tu colonia · Nv ${view.colony?.level ?? 1}${view.colony?.upgradeEnd ? ' 🔨' : ''}`;
       else if (view.colonizedBy != null) status = `🚩 Colonia de ${view.colonistName}`;
       else if (view.explored && view.tier) status += ` · Nv ${view.tier}`;
@@ -1241,7 +1245,8 @@ export class World {
   #syncFleets() {
     const missions = this.game.missions;
     const incoming = this.game.incoming ?? [];
-    const alive = new Set([...missions.map((m) => m.id), ...incoming.map((m) => `in-${m.id}`)]);
+    const traffic = this.game.traffic ?? [];
+    const alive = new Set([...missions.map((m) => m.id), ...incoming.map((m) => `in-${m.id}`), ...traffic.map((m) => `tr-${m.id}`)]);
     for (const [id, f] of this.fleets) {
       if (alive.has(id)) continue;
       for (const o of [f.group, f.line]) {
@@ -1270,6 +1275,21 @@ export class World {
       line.computeLineDistances();
       this.scene.add(line);
       this.fleets.set(m.id, { group, line, route });
+    }
+    // Flotas de otros jugadores que pasan cerca: solo el barco, sin ruta ni detalles
+    const home = this.game.homeIsland;
+    for (const m of traffic) {
+      const key = `tr-${m.id}`;
+      if (this.fleets.has(key)) continue;
+      const from = new THREE.Vector3(m.fx - home.x, 0, m.fz - home.z);
+      const to = new THREE.Vector3(m.tx - home.x, 0, m.tz - home.z);
+      const dir = to.clone().sub(from).normalize();
+      const route = new Route([from.clone().addScaledVector(dir, 22), to.clone().addScaledVector(dir, -14)]);
+      const group = new THREE.Group();
+      group.add(createShip(m.ship));
+      this.scene.add(group);
+      const line = new THREE.Group(); // sin línea: no se sabe adónde va
+      this.fleets.set(key, { group, line, route, traffic: m });
     }
     for (const m of incoming) {
       const key = `in-${m.id}`;
@@ -1434,6 +1454,18 @@ export class World {
     }
 
     for (const f of this.fleets.values()) {
+      if (!f.traffic) continue;
+      const m = f.traffic;
+      const back = m.phase === 'vuelta';
+      const u = back ? 1 - (now - m.arrive) / Math.max(1, (m.back ?? m.arrive) - m.arrive) : (now - m.depart) / (m.arrive - m.depart);
+      f.route.at(THREE.MathUtils.clamp(u, 0, 1), pos, dir);
+      if (back) dir.negate();
+      f.group.position.set(pos.x, WATER_Y + Math.sin(t * 1.2 + pos.x) * 0.12, pos.z);
+      f.group.rotation.y = Math.atan2(dir.x, dir.z);
+      f.group.scale.setScalar(shipScale * 0.85);
+    }
+
+    for (const f of this.fleets.values()) {
       if (!f.incoming) continue;
       const m = f.incoming;
       f.route.at((now - m.depart) / (m.arrive - m.depart), pos, dir);
@@ -1564,4 +1596,13 @@ function cart() {
   }
   for (const [x, c] of [[-0.15, '#e9dcc0'], [0.17, '#d8c49a']]) g.add(box(0.28, 0.24, 0.32, c, x, 0.6, -0.5));
   return g;
+}
+
+/** Las banderas (las que ondean con el color principal) toman el color del estandarte del jugador. */
+function paintBanner(root, color) {
+  if (!color) return;
+  const base = mat(C.cloth[0]);
+  root.traverse((o) => {
+    if (o.isMesh && o.userData.wave && o.material === base) o.material = mat(color);
+  });
 }

@@ -696,6 +696,12 @@ export const DAILY_REWARDS = [
 // ── Logros ───────────────────────────────────────────────────────────────────
 // Se ganan solos al cumplirse y se enseñan en el perfil del jugador.
 
+// ── Estandarte ───────────────────────────────────────────────────────────────
+// Cada jugador elige el color de sus banderas y un emblema que le identifica.
+
+export const BANNER_COLORS = ['#d94f4f', '#4f8fd9', '#e3b23c', '#6bbf59', '#8a5ab8', '#d9734f', '#3fb6b6', '#c94f8a', '#f4efe6', '#2b2620'];
+export const BANNER_EMBLEMS = ['🦅', '🐂', '🦁', '🐬', '🔱', '⚓', '🌞', '🌙', '⭐', '🗡️', '🐍', '🦉'];
+
 // ── Reliquias ────────────────────────────────────────────────────────────────
 // Objetos legendarios que aparecen en expediciones, ruinas y conquistas. Se
 // equipan hasta RELIC_SLOTS a la vez; las que sobran se venden por oro.

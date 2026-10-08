@@ -1,6 +1,8 @@
 import { clock, universe } from '../config.js';
 import {
   ACHIEVEMENTS,
+  BANNER_COLORS,
+  BANNER_EMBLEMS,
   BUILDINGS,
   BUILDING_KEYS,
   COLONY,
@@ -318,6 +320,9 @@ export class Game extends EventTarget {
   #ensureTasks(now) {
     const day = Math.floor(now / 86_400_000);
     if (this.state.tasks?.day === day) return;
+    // Una foto al día del imperio, para la gráfica del perfil (las últimas cuatro semanas)
+    const army = Object.values(this.state.units).reduce((a, b) => a + b, 0) + this.state.missions.reduce((a, m) => a + count(m.units), 0);
+    this.state.history = [...(this.state.history ?? []).filter((h) => h.day !== day), { day, points: this.score(), army }].slice(-28);
     const eligible = Object.entries(DAILY_TASKS)
       .filter(([, t]) => Object.entries(t.requires ?? {}).every(([b, n]) => this.level(b) >= n))
       .map(([id]) => id);
@@ -608,6 +613,15 @@ export class Game extends EventTarget {
     this.state.stats.donated = (this.state.stats.donated ?? 0) + total;
     this.world.donateWonder?.(id, this.userId, total, now);
     this.#note(`${WONDERS[wonderOf(isl)].icon} Aportas ${fmtBag(gift)} a la maravilla`, 'success');
+    return this.#done();
+  }
+
+  // ── Estandarte ─────────────────────────────────────────────────────────────
+
+  setBanner(color, emblem, now = this.now()) {
+    this.#advance(now);
+    if (!BANNER_COLORS.includes(color) || !BANNER_EMBLEMS.includes(emblem)) return this.#fail('Ese estandarte no existe.');
+    this.state.banner = { color, emblem };
     return this.#done();
   }
 

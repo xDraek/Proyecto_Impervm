@@ -2922,3 +2922,99 @@ input[type='text'] {
   margin: 8px 0;
   line-height: 1.5;
 }
+
+/* ── Estandarte e historial ──────────────────────────────────────────────── */
+
+.swatches,
+.emblems {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 8px 0;
+}
+
+.swatch {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.25);
+  background: var(--c);
+}
+
+.swatch.on,
+.emblem.on {
+  outline: 2px solid var(--gold);
+  outline-offset: 2px;
+}
+
+.emblem {
+  width: 34px;
+  height: 34px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: rgba(255, 255, 255, 0.05);
+  font-size: 18px;
+}
+
+.chart {
+  position: relative;
+  margin: 6px 0 4px;
+}
+
+.chart svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.chart .grid {
+  stroke: rgba(255, 255, 255, 0.08);
+  stroke-width: 1;
+}
+
+.chart .axis {
+  fill: var(--muted);
+  font-size: 9px;
+}
+
+.chart .line {
+  fill: none;
+  stroke: #b8862a;
+  stroke-width: 2;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+
+.chart .area {
+  fill: rgba(184, 134, 42, 0.14);
+}
+
+.chart .cross {
+  stroke: rgba(255, 255, 255, 0.35);
+  stroke-width: 1;
+}
+
+.chart .dot {
+  fill: #b8862a;
+  stroke: var(--panel-solid);
+  stroke-width: 2;
+}
+
+.chart .hit {
+  fill: transparent;
+  cursor: crosshair;
+}
+
+.chart-tip {
+  position: absolute;
+  top: -4px;
+  transform: translate(-50%, -100%);
+  padding: 3px 8px;
+  border-radius: 6px;
+  background: rgba(10, 8, 6, 0.92);
+  border: 1px solid var(--panel-border);
+  color: var(--text);
+  font-size: 12px;
+  white-space: nowrap;
+  pointer-events: none;
+}
