@@ -90,20 +90,27 @@ export function researchMax(id) {
 
 export function unitSeconds(state, id) {
   const u = UNITS[id];
-  const speed = 1 + 0.1 * Math.max(0, lvl(state, u.building) - 1);
+  let speed = 1 + 0.1 * Math.max(0, lvl(state, u.building) - 1);
+  if (u.building === 'puerto') speed *= 1 + 0.08 * lvl(state, 'astillero');
   return Math.max(1, Math.round(u.time / speed / universe.speed));
 }
 
 /** Multiplicadores de combate de tus tropas. */
 export function playerCombat(state) {
   return {
-    atkMul: 1 + 0.1 * lvl(state, 'herreria'),
+    atkMul: 1 + 0.1 * lvl(state, 'herreria') + 0.03 * lvl(state, 'forja'),
     hpMul: 1 + 0.1 * lvl(state, 'armaduras'),
   };
 }
 
-export function wallBonus(level) {
-  return { hp: 0.1 * level, towers: 10 * level };
+/** Defensa de la muralla; la torre de vigía añade arqueros a las torres. */
+export function wallBonus(level, watch = 0) {
+  return { hp: 0.1 * level, towers: 10 * level + 8 * watch };
+}
+
+/** Comida que se ahorran las tropas gracias a la taberna (0 a 0,4). */
+export function tavernSaving(state) {
+  return Math.min(0.4, 0.04 * lvl(state, 'taberna'));
 }
 
 export function fleetSlots(state) {
@@ -119,7 +126,7 @@ export function colonyCost(colonies) {
 }
 
 export function fleetSpeedBonus(state) {
-  return 1 + 0.1 * lvl(state, 'navegacion');
+  return 1 + 0.1 * lvl(state, 'navegacion') + 0.04 * lvl(state, 'faro');
 }
 
 /** Segundos de viaje (solo ida) hasta una isla con una flota a cierta velocidad. */
@@ -203,7 +210,7 @@ export function totalUnits(state) {
 export function upkeepPerHour(state) {
   let total = 0;
   for (const [id, n] of Object.entries(totalUnits(state))) total += n * (UNITS[id].upkeep ?? 0);
-  return total * universe.speed;
+  return total * universe.speed * (1 - tavernSaving(state));
 }
 
 /** Multiplicador de toda la producción: Coloso y Cosecha abundante. */

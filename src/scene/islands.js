@@ -1,6 +1,7 @@
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { C, box, createShip, createSoldier, cyl, gableRoof, mat, mesh } from './models.js';
-import { hashString, mountainGeometry, paintByNormal, plateauGeometry, polar, rng } from './util.js';
+import { Batch, bakeStatic, hashString, mountainGeometry, paintByNormal, plateauGeometry, polar, rng } from './util.js';
 
 // Islas del archipiélago. La base (relieve, playa, árboles) no cambia; lo que hay
 // encima depende de lo que sepas de ella (niebla, campamento, colonia…).
@@ -20,60 +21,238 @@ const PALETTES = {
 
 /** Radio visible de una isla del mapa. */
 export function islandRadius(isl) {
-  return isl.size * 1.8;
+  return isl.size * 2.4;
 }
 
 /** Radio de la línea de costa (donde la arena corta el agua), para la espuma. */
 export function shoreRadius(isl) {
-  return isl.type === 'brumas' ? 0 : islandRadius(isl) * 1.19;
+  if (isl.type === 'brumas' || isl.land) return 0;
+  if (isl.type === 'continente') return islandRadius(isl) * 1.08;
+  return islandRadius(isl) * 1.19;
 }
 
 export function createIslandBase(isl) {
   const R = islandRadius(isl);
   const seed = hashString(isl.id);
   const rand = rng(seed);
-  if (isl.type === 'brumas') return seaStacks(R, rand);
+  if (isl.type === 'brumas') return bakeStatic(seaStacks(R, rand));
+  if (isl.land) return siteBase(isl, R, rand);
+  if (isl.type === 'continente') return bakeStatic(continentBase(isl, R, rand, seed));
   const pal = PALETTES[isl.type] ?? PALETTES.default;
   const g = new THREE.Group();
 
-  const geo = plateauGeometry(R, R * 0.86, 1.9, 22, seed % 1000, ISLAND_TOP);
+  const geo = plateauGeometry(R, R * 0.86, 1.9, 28, seed % 1000, ISLAND_TOP);
   paintByNormal(geo, (ny, cy) => (ny > 0.7 ? pal.grass : cy > -0.6 ? pal.cliff : pal.rock));
   const land = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 1 }));
   land.receiveShadow = true;
   g.add(land);
 
-  const sand = new THREE.Mesh(new THREE.CylinderGeometry(R * 1.16, R * 1.32, 1.3, 24), mat(isl.type === 'kraken' ? '#6b6470' : '#e8d49a'));
+  const sand = new THREE.Mesh(new THREE.CylinderGeometry(R * 1.16, R * 1.32, 1.3, 28), mat(isl.type === 'kraken' ? '#6b6470' : '#e8d49a'));
   sand.position.y = -0.45 - 0.65;
   g.add(sand);
 
-  // Un monte en un lado de la isla
+  // Uno o dos montes en un lado de la isla
+  const hills = [];
   if (isl.type !== 'ruinas') {
     const a = rand() * 360;
-    const hill = new THREE.Mesh(
-      mountainGeometry(R * 0.38, R * (isl.type === 'kraken' ? 0.75 : 0.5), seed % 97, {
-        snow: isl.type === 'kraken' ? '#2a2630' : '#e9ecef',
-        grass: pal.grass,
-        rock: pal.rock,
-      }),
-      new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 1 }),
-    );
-    hill.position.copy(polar(R * 0.62, a, ISLAND_TOP - 0.05));
-    g.add(hill);
+    hills.push({ p: polar(R * 0.62, a, ISLAND_TOP - 0.05), r: R * 0.42 });
     g.userData.hillAngle = a;
+    if (R > 15 && isl.type !== 'kraken') hills.push({ p: polar(R * 0.66, a + 40 + rand() * 30, ISLAND_TOP - 0.05), r: R * 0.26 });
+    hills.forEach((h, i) => {
+      const hill = new THREE.Mesh(
+        mountainGeometry(i ? R * 0.24 : R * 0.38, R * (isl.type === 'kraken' ? 0.75 : i ? 0.32 : 0.5), (seed + i * 31) % 97, {
+          snow: isl.type === 'kraken' ? '#2a2630' : '#e9ecef',
+          grass: pal.grass,
+          rock: pal.rock,
+        }),
+        new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 1 }),
+      );
+      hill.position.copy(h.p);
+      hill.castShadow = hill.receiveShadow = true;
+      g.add(hill);
+    });
   }
 
-  // Árboles por el borde, dejando libre el centro para lo que haya encima
-  const trees = isl.type === 'kraken' ? 0 : Math.round(R * 1.6);
-  const leafColors = isl.type === 'libre' && isl.specialty === 'madera' ? ['#2f7a43', '#3f8a3a'] : ['#3f8a3a', '#4f9a3a', '#2f7a43'];
+  // Árboles, arbustos y rocas por el borde (el centro queda libre para lo que haya encima)
+  const decor = new Batch();
+  const onHill = (p) => hills.some((h) => p.distanceTo(h.p) < h.r);
+  const trees = isl.type === 'kraken' ? 0 : Math.round(R * 2.4);
+  const leafColors = isl.type === 'libre' && isl.specialty === 'madera' ? ['#2f7a43', '#3f8a3a'] : ['#3f8a3a', '#4f9a3a', '#2f7a43', '#5a9e3c'];
   for (let i = 0; i < trees; i++) {
-    const p = polar(R * (0.5 + rand() * 0.38), rand() * 360, ISLAND_TOP);
-    if (g.userData.hillAngle !== undefined && p.distanceTo(polar(R * 0.62, g.userData.hillAngle, ISLAND_TOP)) < R * 0.42) continue;
-    const t = tree(leafColors[i % leafColors.length], isl.type === 'ruinas' || rand() < 0.3);
+    const p = polar(R * (0.5 + rand() * 0.4), rand() * 360, ISLAND_TOP);
+    if (onHill(p)) continue;
+    const t = tree(leafColors[i % leafColors.length], isl.type === 'ruinas' || rand() < 0.25);
     t.position.copy(p);
     t.scale.setScalar(0.8 + rand() * 0.6);
     t.rotation.y = rand() * Math.PI;
-    g.add(t);
+    decor.add(t);
   }
+  for (let i = 0; i < Math.round(R * 1.2); i++) {
+    const p = polar(R * (0.35 + rand() * 0.55), rand() * 360, ISLAND_TOP);
+    if (onHill(p)) continue;
+    const big = rand() < 0.3;
+    const m = mesh(new THREE.DodecahedronGeometry(big ? 0.45 : 0.32), big ? (isl.type === 'kraken' ? '#2f2c33' : '#8c8780') : i % 2 ? '#4f9a3a' : '#3f8a3a');
+    m.position.copy(p).setY(ISLAND_TOP + 0.15);
+    m.scale.set(1 + rand() * 0.6, 0.7 + rand() * 0.4, 1 + rand() * 0.6);
+    decor.add(m);
+  }
+  // Palmeras y peñas en la playa
+  if (isl.type !== 'kraken') {
+    for (let i = 0; i < Math.round(R * 0.7); i++) {
+      const t = tree('#4f9a3a', true);
+      t.position.copy(polar(R * (1.02 + rand() * 0.1), rand() * 360, -0.45));
+      t.scale.setScalar(0.9 + rand() * 0.5);
+      t.rotation.y = rand() * Math.PI;
+      decor.add(t);
+    }
+  }
+  for (let i = 0; i < 5; i++) {
+    const rock = mesh(new THREE.DodecahedronGeometry(0.6 + rand() * 0.8), isl.type === 'kraken' ? '#2f2c33' : '#7c7466');
+    rock.position.copy(polar(R * (1.25 + rand() * 0.2), rand() * 360, -0.8));
+    rock.scale.y = 0.6;
+    decor.add(rock);
+  }
+  g.add(decor.build());
+  return bakeStatic(g);
+}
+
+/** Un asentamiento dentro de un continente: solo un claro de tierra (el relieve es del continente). */
+function siteBase(isl, R) {
+  const g = new THREE.Group();
+  const clearing = new THREE.Mesh(new THREE.CircleGeometry(R * 0.72, 18), mat(isl.type === 'ciudadela' ? '#a48a62' : '#8fb85a'));
+  clearing.rotation.x = -Math.PI / 2;
+  clearing.position.y = ISLAND_TOP + 0.03;
+  clearing.receiveShadow = true;
+  g.add(clearing);
+  return g;
+}
+
+/** Un continente: costa irregular, montes, bosques, un lago y caminos entre sus asentamientos. */
+function continentBase(isl, R, rand, seed) {
+  const g = new THREE.Group();
+  const shape = isl.shape?.length ? isl.shape : Array(18).fill(1);
+  const n = shape.length;
+  // Contorno suavizado (cada radio del contorno, interpolado)
+  const radiusAt = (deg) => {
+    const f = (((deg % 360) + 360) % 360) / (360 / n);
+    const i = Math.floor(f);
+    const t = f - i;
+    const a = shape[i % n];
+    const b = shape[(i + 1) % n];
+    return R * (a + (b - a) * (t * t * (3 - 2 * t)));
+  };
+  const outline = (k) => {
+    const pts = [];
+    for (let i = 0; i < 72; i++) {
+      const deg = (i / 72) * 360;
+      const r = radiusAt(deg) * k;
+      const a = THREE.MathUtils.degToRad(deg);
+      pts.push(new THREE.Vector2(Math.sin(a) * r, -Math.cos(a) * r));
+    }
+    return new THREE.Shape(pts);
+  };
+  const slab = (k, depth, top, color, bevel) => {
+    let geo = new THREE.ExtrudeGeometry(outline(k), { depth, bevelEnabled: bevel > 0, bevelThickness: bevel * 0.4, bevelSize: bevel, bevelSegments: 1, curveSegments: 1 });
+    geo.rotateX(-Math.PI / 2);
+    geo.translate(0, top - depth - bevel * 0.4, 0);
+    geo = geo.index ? geo.toNonIndexed() : geo;
+    if (typeof color === 'function') paintByNormal(geo, color);
+    const m = new THREE.Mesh(geo, typeof color === 'function' ? new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 1 }) : mat(color));
+    m.receiveShadow = true;
+    return m;
+  };
+  g.add(slab(1.0, 2.0, ISLAND_TOP, (ny, cy) => (ny > 0.7 ? '#6fae4a' : cy > -0.6 ? '#8a6a46' : '#7c7466'), 0.8));
+  g.add(slab(1.1, 1.3, -0.45, '#e8d49a', 0));
+
+  const sites = (isl.sites ?? []).map(([x, z]) => new THREE.Vector3(x, ISLAND_TOP, z));
+  const inside = (p, k = 0.85) => {
+    const deg = THREE.MathUtils.radToDeg(Math.atan2(p.x, p.z));
+    return p.length() < radiusAt(deg) * k;
+  };
+  const busy = [...sites.map((p) => ({ p, r: 9 }))];
+  const freeAt = (p, k) => inside(p, k) && busy.every((b) => b.p.distanceTo(p) > b.r);
+
+  // Caminos de tierra desde cada asentamiento hasta un cruce central con un pozo
+  const decor = new Batch();
+  for (const s of sites) {
+    const len = s.length() - 4;
+    const road = box(1.2, 0.05, len, '#c9b48a', 0, 0, 0);
+    road.position.copy(s.clone().setLength(len / 2 + 1.2)).setY(ISLAND_TOP);
+    road.rotation.y = Math.atan2(s.x, s.z);
+    decor.add(road);
+    busy.push({ p: s.clone().multiplyScalar(0.5), r: 2.2 });
+  }
+  const well = new THREE.Group();
+  well.add(cyl(2.0, 2.0, 0.06, 14, '#c9b48a'), cyl(0.5, 0.55, 0.5, 10, C.stone), box(0.08, 1.0, 0.08, C.woodDark, -0.45, 0, 0), box(0.08, 1.0, 0.08, C.woodDark, 0.45, 0, 0));
+  well.add(gableRoof(1.1, 0.4, 0.8, C.roofRed, 0, 1.0, 0));
+  well.position.y = ISLAND_TOP;
+  decor.add(well);
+  busy.push({ p: new THREE.Vector3(0, ISLAND_TOP, 0), r: 3 });
+
+  // Un lago con juncos
+  for (let tries = 0; tries < 40; tries++) {
+    const p = polar(R * (0.25 + rand() * 0.4), rand() * 360, ISLAND_TOP);
+    if (!freeAt(p, 0.7)) continue;
+    const lake = new THREE.Mesh(new THREE.CircleGeometry(3 + rand() * 2, 12), mat('#4a9fc8', { roughness: 0.3 }));
+    lake.rotation.x = -Math.PI / 2;
+    lake.position.copy(p).setY(ISLAND_TOP + 0.04);
+    g.add(lake);
+    for (let k = 0; k < 8; k++) {
+      const reed = cyl(0.03, 0.03, 0.6, 4, '#5a7a3a');
+      reed.position.copy(p).add(polar(3.6 + rand(), rand() * 360, 0));
+      decor.add(reed);
+    }
+    busy.push({ p, r: 6 });
+    break;
+  }
+
+  // Montes
+  const mountains = 3 + Math.floor(rand() * 3);
+  for (let i = 0, made = 0; i < 60 && made < mountains; i++) {
+    const p = polar(R * (0.3 + rand() * 0.5), rand() * 360, ISLAND_TOP - 0.05);
+    const size = 3 + rand() * 4;
+    if (!freeAt(p, 0.75) || busy.some((b) => b.p.distanceTo(p) < b.r + size)) continue;
+    const hill = new THREE.Mesh(
+      mountainGeometry(size, size * (1.2 + rand() * 0.8), (seed + i * 17) % 97, { snow: '#eef1f4', grass: '#6fae4a', rock: '#8c8780' }),
+      new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 1 }),
+    );
+    hill.position.copy(p);
+    hill.castShadow = hill.receiveShadow = true;
+    g.add(hill);
+    busy.push({ p, r: size + 0.5 });
+    made++;
+  }
+
+  // Bosques y prados
+  const leafColors = ['#3f8a3a', '#4f9a3a', '#2f7a43', '#5a9e3c'];
+  const clusters = Array.from({ length: 5 }, () => polar(R * (0.3 + rand() * 0.5), rand() * 360, ISLAND_TOP));
+  for (let i = 0, made = 0; i < 1400 && made < R * 5; i++) {
+    const p = i % 2 ? clusters[i % 5].clone().add(polar(rand() * 8, rand() * 360)) : polar(R * rand() * 0.95, rand() * 360, ISLAND_TOP);
+    if (!freeAt(p, 0.9)) continue;
+    const t = tree(leafColors[made % 4], rand() < 0.15);
+    t.position.copy(p).setY(ISLAND_TOP);
+    t.scale.setScalar(0.9 + rand() * 0.7);
+    t.rotation.y = rand() * Math.PI;
+    decor.add(t);
+    made++;
+  }
+  for (let i = 0; i < 40; i++) {
+    const p = polar(R * rand() * 0.9, rand() * 360, ISLAND_TOP);
+    if (!freeAt(p, 0.9)) continue;
+    const m = mesh(new THREE.DodecahedronGeometry(0.4 + rand() * 0.4), i % 3 ? '#4f9a3a' : '#8c8780');
+    m.position.copy(p).setY(ISLAND_TOP + 0.15);
+    m.scale.y = 0.6;
+    decor.add(m);
+  }
+  // Palmeras en la playa
+  for (let i = 0; i < Math.round(R * 0.8); i++) {
+    const deg = rand() * 360;
+    const t = tree('#4f9a3a', true);
+    t.position.copy(polar(radiusAt(deg) * (1.03 + rand() * 0.04), deg, -0.45));
+    t.scale.setScalar(0.9 + rand() * 0.5);
+    decor.add(t);
+  }
+  g.add(decor.build());
   return g;
 }
 
@@ -137,6 +316,7 @@ export function createIslandFeature(isl, look) {
   const builders = {
     niebla: () => mist(g, R, rand),
     barbaros: () => camp(g, R, rand),
+    ciudadela: () => citadel(g, R, rand),
     piratas: () => fort(g, R),
     ruinas: () => ruins(g, R, rand, true),
     'ruinas-saqueadas': () => ruins(g, R, rand, false),
@@ -150,17 +330,21 @@ export function createIslandFeature(isl, look) {
     brumas: () => fogBank(g, R, rand),
   };
   builders[look]?.();
-  return g;
+  return bakeStatic(g);
 }
 
 function mist(g, R, rand) {
   const material = new THREE.MeshStandardMaterial({ color: '#f4f7fb', flatShading: true, roughness: 1, transparent: true, opacity: 0.88 });
-  const cloud = new THREE.Group();
+  // Las nubecillas van en una sola malla que gira entera
+  const puffs = [];
   for (let i = 0; i < 9; i++) {
-    const puff = new THREE.Mesh(new THREE.IcosahedronGeometry(R * (0.28 + rand() * 0.2), 0), material);
-    puff.position.copy(polar(R * (0.15 + rand() * 0.6), rand() * 360, 1.2 + rand() * 2.2));
-    cloud.add(puff);
+    const geo = new THREE.IcosahedronGeometry(R * (0.28 + rand() * 0.2), 0);
+    const p = polar(R * (0.15 + rand() * 0.6), rand() * 360, 1.2 + rand() * 2.2);
+    geo.translate(p.x, p.y, p.z);
+    puffs.push(geo);
   }
+  const cloud = new THREE.Mesh(mergeGeometries(puffs), material);
+  for (const geo of puffs) geo.dispose();
   cloud.userData.spin = { axis: 'y', speed: 0.08 };
   g.add(cloud);
 }
@@ -345,16 +529,45 @@ export function ownerColor(isl) {
 /** Ciudad de otro jugador: casas, ayuntamiento y muralla según su tamaño. */
 function city(g, isl, R, rand, size) {
   const roofs = [C.roofRed, C.roofBlue, C.roofGrey, '#a0522d'];
-  const houses = 6 + size * 4;
+  const batch = new Batch();
+  // Calles en cruz hasta la muralla
+  for (const a of [0, 90, 180, 270]) {
+    const road = box(0.9, 0.04, R * 0.62, '#c9b48a', 0, 0, 0);
+    road.position.copy(polar(R * 0.31 + 1, a + 20));
+    road.rotation.y = THREE.MathUtils.degToRad(a + 20);
+    batch.add(road);
+  }
+  const houses = 10 + size * 8;
   for (let i = 0; i < houses; i++) {
     const h = new THREE.Group();
-    const w = 1.1 + rand() * 0.5;
-    h.add(box(w, 0.8 + rand() * 0.5, 0.9, C.wall));
-    h.add(gableRoof(w + 0.2, 0.55, 1.1, roofs[i % roofs.length], 0, h.children[0].geometry.parameters.height, 0));
-    h.position.copy(polar(R * (0.25 + (i % 3) * 0.12 + rand() * 0.05), (i / houses) * 360 + rand() * 12));
+    const w = 1.0 + rand() * 0.5;
+    const tall = size >= 2 && rand() < 0.35;
+    const hh = (0.8 + rand() * 0.4) * (tall ? 1.7 : 1);
+    h.add(box(w, hh, 0.9, i % 5 ? C.wall : C.wallDark));
+    h.add(gableRoof(w + 0.2, 0.55, 1.1, roofs[i % roofs.length], 0, hh, 0));
+    const ring = i % 4;
+    h.position.copy(polar(R * (0.2 + ring * 0.1 + rand() * 0.04), (i / houses) * 360 * 3 + rand() * 10));
     h.rotation.y = rand() * Math.PI;
-    g.add(h);
+    batch.add(h);
   }
+  // Campos fuera de la muralla
+  for (let i = 0; i < 6 + size * 2; i++) {
+    const f = box(1.8, 0.12, 1.3, i % 2 ? '#e3c25a' : '#9fc04a', 0, 0, 0);
+    f.position.copy(polar(R * (0.72 + rand() * 0.08), i * (360 / (6 + size * 2)) + rand() * 10));
+    f.rotation.y = rand() * Math.PI;
+    batch.add(f);
+  }
+  // Templo en las ciudades grandes
+  if (size >= 2) {
+    const temple = new THREE.Group();
+    temple.add(box(2.2, 0.25, 1.6, C.wall));
+    for (let i = 0; i < 4; i++) for (const z of [-0.6, 0.6]) temple.add(cyl(0.09, 0.1, 1.0, 6, C.white, -0.8 + i * 0.53, 0.25, z));
+    temple.add(gableRoof(1.8, 0.5, 2.4, C.roofRed, 0, 1.25, 0));
+    temple.position.copy(polar(R * 0.3, 300));
+    temple.rotation.y = Math.PI / 2;
+    batch.add(temple);
+  }
+  g.add(batch.build());
   // Ayuntamiento en el centro
   g.add(box(2.4, 1.6, 2.4, C.wall, 0, 0, 0));
   const roof = mesh(new THREE.ConeGeometry(1.9, 1.4, 4), C.roofBlue);
@@ -367,16 +580,28 @@ function city(g, isl, R, rand, size) {
   flag.position.y = 4.3;
   flag.userData.wave = true;
   g.add(flag);
-  // Muralla en las ciudades grandes
+  // Muralla con torres en las ciudades grandes
   if (size >= 2) {
     const r = R * 0.62;
-    for (let a = 0; a < 360; a += 10) {
+    const wall = new Batch();
+    const h = 0.9 + size * 0.2;
+    for (let a = 0; a < 360; a += 8) {
       if (a > 150 && a < 190) continue;
-      const seg = box(r * 0.19, 0.9 + size * 0.2, 0.4, C.stone, 0, 0, 0);
-      seg.position.copy(polar(r, a, (0.9 + size * 0.2) / 2));
+      const seg = box(r * 0.15, h, 0.4, C.stone, 0, 0, 0);
+      seg.position.copy(polar(r, a));
       seg.rotation.y = (a * Math.PI) / 180;
-      g.add(seg);
+      wall.add(seg);
     }
+    for (let a = 30; a < 360; a += 60) {
+      if (a > 140 && a < 200) continue;
+      const tower = cyl(0.55, 0.65, h + 0.9, 8, C.stone, 0, 0, 0);
+      tower.position.copy(polar(r, a));
+      wall.add(tower);
+      const roof = mesh(new THREE.ConeGeometry(0.75, 0.8, 8), C.roofBlue);
+      roof.position.copy(polar(r, a, h + 1.3));
+      wall.add(roof);
+    }
+    g.add(wall.build());
   }
   const ship = createShip(size >= 3 ? 'galeon' : 'mercante');
   ship.scale.setScalar(2);
@@ -410,6 +635,75 @@ function colony(g, isl, R, rand, flagColor) {
   ship.rotation.y = Math.PI / 2;
   ship.userData.bob = { amp: 0.08, speed: 1.1, base: SEA };
   g.add(ship);
+}
+
+/** Ciudad bárbara del continente: empalizada doble, torres de madera, chozas y un gran salón. */
+function citadel(g, R, rand) {
+  const batch = new Batch();
+  for (const [r, h] of [[R * 0.62, 1.5], [R * 0.4, 1.1]]) {
+    for (let a = 0; a < 360; a += 7) {
+      if (a > 165 && a < 195) continue;
+      const stake = cyl(0.14, 0.14, h + rand() * 0.3, 5, C.woodDark, 0, 0, 0);
+      stake.position.copy(polar(r, a));
+      batch.add(stake);
+    }
+  }
+  for (const a of [140, 220, 60, 300]) {
+    const tower = new THREE.Group();
+    for (const [x, z] of [[-0.4, -0.4], [0.4, -0.4], [-0.4, 0.4], [0.4, 0.4]]) tower.add(box(0.12, 2.4, 0.12, C.woodDark, x, 0, z));
+    tower.add(box(1.2, 0.12, 1.2, C.wood, 0, 2.4, 0));
+    const roof = mesh(new THREE.ConeGeometry(0.95, 0.8, 4), '#8b6a44');
+    roof.position.y = 2.95;
+    roof.rotation.y = Math.PI / 4;
+    tower.add(roof);
+    tower.position.copy(polar(R * 0.62, a));
+    batch.add(tower);
+  }
+  // Gran salón con cuernos en el tejado
+  const hall = new THREE.Group();
+  hall.add(box(3.2, 1.4, 1.8, C.wood));
+  const roof = gableRoof(2.2, 1.1, 3.6, '#6e5a3a', 0, 1.4, 0);
+  roof.rotation.y = Math.PI / 2;
+  hall.add(roof);
+  for (const x of [-1.7, 1.7]) {
+    const horn = mesh(new THREE.ConeGeometry(0.12, 0.7, 5), '#efe8d8');
+    horn.position.set(x, 2.6, 0);
+    horn.rotation.z = x > 0 ? -0.6 : 0.6;
+    hall.add(horn);
+  }
+  batch.add(hall);
+  const hides = ['#a0784e', '#8b6a44', '#b89466'];
+  for (let i = 0; i < 9; i++) {
+    const hut = new THREE.Group();
+    hut.add(cyl(0.7, 0.8, 0.7, 7, hides[i % 3]));
+    const top = mesh(new THREE.ConeGeometry(0.9, 0.9, 7), '#6e5a3a');
+    top.position.y = 1.15;
+    hut.add(top);
+    hut.position.copy(polar(R * (0.48 + (i % 2) * 0.06), i * 40 + rand() * 10));
+    batch.add(hut);
+  }
+  g.add(batch.build());
+  // Hogueras y guerreros
+  for (const a of [0, 120, 240]) {
+    const fire = mesh(new THREE.ConeGeometry(0.25, 0.6, 6), '#ff8a2a', { emissive: '#ff5a00', emissiveIntensity: 1.6 });
+    fire.position.copy(polar(R * 0.25, a, 0.3));
+    fire.userData.flicker = true;
+    g.add(fire);
+  }
+  for (let i = 0; i < 5; i++) {
+    const b = createSoldier(i % 2 ? 'barbaro' : 'arquero');
+    b.scale.setScalar(1.8);
+    b.position.copy(polar(R * 0.3, 160 + i * 18));
+    b.rotation.y = rand() * Math.PI * 2;
+    g.add(b);
+  }
+  // Estandarte
+  g.add(cyl(0.05, 0.05, 3.4, 6, C.dark, 1.9, 0, 0));
+  const flag = box(1.0, 0.7, 0.03, '#7a2f22', 0, 0, 0);
+  flag.geometry.translate(0.5, 0, 0);
+  flag.position.set(1.9, 3.0, 0);
+  flag.userData.wave = true;
+  g.add(flag);
 }
 
 function lair(g, R, rand) {

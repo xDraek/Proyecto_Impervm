@@ -3,7 +3,7 @@ import { RESOURCES } from '../src/game/data.js';
 import { count } from '../src/game/combat.js';
 import { Game, newState } from '../src/game/Game.js';
 import { playerCombat, worldEventAt } from '../src/game/rules.js';
-import { freshIslandState, generateSector, homeIsland } from '../src/game/world.js';
+import { footprint, freshIslandState, generateContinent, generateSector, homeIsland, sectorCenter, sectorVertices } from '../src/game/world.js';
 import { hashPassword, newSecret, verifyPassword } from './auth.js';
 
 // El mundo de todos los jugadores, en memoria. Implementa la interfaz `world`
@@ -74,6 +74,8 @@ export class WorldServer {
     this.meta.offers ??= [];
     this.memberOf = new Map();
     for (const a of Object.values(this.meta.alliances)) for (const uid of a.members) this.memberOf.set(uid, a.id);
+    // Mundos de antes de los continentes: se añaden donde quepan
+    for (let s = 0; s < this.meta.sectors; s++) this.#addContinents(s, clock.now());
     // Ponerse al día con lo que pasó mientras el servidor estuvo apagado
     this.tick();
     await this.persist(true);
@@ -107,15 +109,11 @@ export class WorldServer {
     const sector = this.meta.sectors++;
     const now = clock.now();
     const home = homeIsland(sector, id, city);
-    const neutrals = generateSector(sector, this.meta.seed);
-    for (const isl of [home, ...neutrals]) {
-      this.islands.set(isl.id, isl);
-      this.newIslands.push(isl);
-      if (isl.type !== 'jugador') {
-        this.islandStates.set(isl.id, freshIslandState(isl, now));
-        this.dirtyIslands.add(isl.id);
-      }
-    }
+    const c = sectorCenter(sector);
+    const lands = this.#landsNear(c.x, c.z, 520).filter((o) => o.type === 'continente');
+    const neutrals = generateSector(sector, this.meta.seed, lands);
+    for (const isl of [home, ...neutrals]) this.#addIsland(isl, now);
+    this.#addContinents(sector, now);
     const game = this.#makeGame(id, newState({ now, home: home.id, name: username }));
     game.dirty = true;
     this.games.set(id, game);
@@ -123,6 +121,36 @@ export class WorldServer {
     this.announce(`⚓ ${username} funda la ciudad de ${city}`);
     await this.persist(true);
     return id;
+  }
+
+  #addIsland(isl, now) {
+    this.islands.set(isl.id, isl);
+    this.newIslands.push(isl);
+    if (isl.type !== 'jugador') {
+      this.islandStates.set(isl.id, freshIslandState(isl, now));
+      this.dirtyIslands.add(isl.id);
+    }
+  }
+
+  /** Tierras cerca de un punto, con el radio que ocupan en el mar. */
+  #landsNear(x, z, radius) {
+    const out = [];
+    for (const isl of this.islands.values()) {
+      if (isl.land) continue; // los asentamientos van dentro de su continente
+      if (Math.hypot(isl.x - x, isl.z - z) <= radius) out.push({ x: isl.x, z: isl.z, r: footprint(isl), type: isl.type });
+    }
+    return out;
+  }
+
+  /** Continentes en los vértices de un sector (cada vértice se decide una sola vez). */
+  #addContinents(sector, now) {
+    this.meta.vertices ??= {};
+    for (const v of sectorVertices(sector)) {
+      if (this.meta.vertices[v.key]) continue;
+      this.meta.vertices[v.key] = 1;
+      const made = generateContinent(v, this.meta.seed, this.#landsNear(v.x, v.z, 160));
+      if (made) for (const isl of made) this.#addIsland(isl, now);
+    }
   }
 
   login(username, password) {
@@ -891,7 +919,9 @@ export class WorldServer {
             tag: a?.tag ?? null,
           });
         } else {
-          islands.push([Math.round(isl.x), Math.round(isl.z), isl.type, this.islandStates.get(isl.id)?.colonizedBy ?? 0]);
+          const entry = [Math.round(isl.x), Math.round(isl.z), isl.type, this.islandStates.get(isl.id)?.colonizedBy ?? 0];
+          if (isl.type === 'continente') entry.push(Math.round(isl.size * 2.4));
+          islands.push(entry);
         }
       }
       this.mapCache = { at: Date.now(), size: this.islands.size, cities, islands };

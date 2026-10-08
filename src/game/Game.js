@@ -536,9 +536,9 @@ export class Game extends EventTarget {
     const known = this.state.known[id];
     const view = {
       ...isl,
-      typeName: ISLAND_TYPES[isl.type].name,
+      typeName: isl.land && isl.type === 'libre' ? 'Tierra libre' : ISLAND_TYPES[isl.type].name,
       dist: this.distanceTo(id),
-      explored: isl.type === 'brumas' || isl.owner === this.userId || !!known?.explored,
+      explored: isl.type === 'brumas' || isl.type === 'continente' || isl.owner === this.userId || !!known?.explored,
       intel: known?.intel ?? null,
       inbound: this.state.missions.filter((m) => m.target === id),
       mine: isl.owner != null && isl.owner === this.userId,
@@ -727,6 +727,7 @@ export class Game extends EventTarget {
     let cost = null;
 
     if (target === s.home) reason ||= 'Es tu propia isla.';
+    if (isl.type === 'continente') reason ||= 'Es un continente: elige una de sus ciudades o tierras.';
     if (opts.join) {
       if (type !== 'atacar') reason ||= 'Solo te puedes unir a un ataque.';
       else if (!joint || joint.target !== target) reason ||= 'Ese ataque ya no está en camino.';
@@ -956,6 +957,7 @@ export class Game extends EventTarget {
       units: Object.fromEntries(Object.entries(this.state.units).filter(([, n]) => n > 0)),
       resources: Object.fromEntries(RESOURCE_KEYS.map((r) => [r, Math.floor(this.state.resources[r])])),
       wall: this.level('muralla'),
+      watch: this.level('torre'),
       town: this.level('ayuntamiento'),
     };
   }
@@ -1311,7 +1313,7 @@ export class Game extends EventTarget {
       return;
     }
     // Los vigías de la muralla pueden descubrir el bote (8 % por nivel, como mucho 60 %)
-    if (Math.random() < Math.min(0.6, 0.08 * info.wall)) {
+    if (Math.random() < Math.min(0.7, 0.08 * info.wall + 0.04 * (info.watch ?? 0))) {
       const lost = { ...m.units };
       m.units = {};
       this.#report({ t, kind: 'exploracion', island: isl.id, islandName: isl.name, outcome: 'derrota', title: `Espía descubierto en ${isl.name}`, text: 'Los vigías de la muralla han visto el bote y lo han hundido.', lostUnits: lost });
@@ -1604,7 +1606,7 @@ export class Game extends EventTarget {
       Object.assign(report, { title: '¡Una serpiente marina!', text: 'Un monstruo surge de las profundidades y se lleva parte de la flota.', lostUnits: lost, outcome: 'derrota' });
     } else if (roll < 0.97) {
       const hidden = (this.world.islandsNear?.(this.state.home, 600) ?? [])
-        .filter((i) => i.type !== 'jugador' && i.type !== 'brumas' && !s.known[i.id]?.explored)
+        .filter((i) => i.type !== 'jugador' && i.type !== 'brumas' && i.type !== 'continente' && !s.known[i.id]?.explored)
         .slice(0, 3);
       for (const other of hidden) this.#intel(other, this.world.islandState(other.id), t);
       Object.assign(report, {
@@ -1647,7 +1649,7 @@ export class Game extends EventTarget {
    */
   #defend(attacker, t, enemyName = 'Piratas') {
     const s = this.state;
-    const wall = wallBonus(this.level('muralla'));
+    const wall = wallBonus(this.level('muralla'), this.level('torre'));
     const mine = playerCombat(s);
     const aegis = (s.buffs.egida ?? 0) > t ? 0.5 : 0;
     const pools = [{ units: { ...s.units }, apply: (left) => PLAYER_UNITS.forEach((id) => (s.units[id] = left[id] ?? 0)) }];

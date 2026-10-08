@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { bakeStatic } from './util.js';
 
 // Modelos low-poly procedurales. Cada edificio crece en detalle con su nivel.
 // Convención: los helpers reciben la posición de la BASE del objeto (y = suelo).
@@ -690,11 +691,232 @@ function emptyPlot(id) {
   return g;
 }
 
-const FACTORIES = { ayuntamiento, aserradero, cantera, granja, mina, fundicion, mercado, almacen, academia, templo, cuartel, puerto, muralla, coloso };
+
+// ── Edificios de la segunda ampliación ───────────────────────────────────────
+
+function smokeColumn(x, y, z, phase = 0) {
+  const smoke = new THREE.Group();
+  smoke.position.set(x, y, z);
+  for (let k = 0; k < 3; k++) {
+    const puff = mesh(new THREE.IcosahedronGeometry(0.16 + k * 0.05, 0), '#a8a8a8', { transparent: true, opacity: 0.65 });
+    puff.castShadow = false;
+    puff.position.set(k * 0.1, k * 0.3, 0);
+    smoke.add(puff);
+  }
+  smoke.userData.smoke = { phase };
+  return smoke;
+}
+
+function lantern(x, y, z) {
+  const g = new THREE.Group();
+  g.add(box(0.14, 0.18, 0.14, C.dark, x, y, z));
+  g.add(box(0.1, 0.12, 0.1, '#ffd27a', x, y + 0.03, z, WINDOW_GLOW));
+  return g;
+}
+
+function taberna(level) {
+  const g = new THREE.Group();
+  g.add(box(3.2, 0.2, 2.6, C.stone, 0, 0, -0.3));
+  // Planta baja de piedra y piso de entramado de madera
+  g.add(box(2.4, 1.1, 1.7, C.wall, 0, 0.2, -0.6));
+  g.add(box(2.6, 0.95, 1.9, C.wallDark, 0, 1.3, -0.6));
+  for (const x of [-1.25, -0.4, 0.4, 1.25]) g.add(box(0.08, 0.95, 0.06, C.woodDark, x, 1.3, 0.36));
+  g.add(box(2.62, 0.08, 0.06, C.woodDark, 0, 1.75, 0.36));
+  const roof = gableRoof(2.0, 0.85, 3.0, C.roofRed, 0, 2.25, -0.6);
+  roof.rotation.y = Math.PI / 2;
+  g.add(roof);
+  // Puerta, ventanas y balcón
+  g.add(box(0.55, 0.8, 0.05, C.woodDark, 0, 0.2, 0.26));
+  for (const x of [-0.8, 0.8]) g.add(box(0.36, 0.36, 0.05, C.dark, x, 0.55, 0.26, WINDOW_GLOW), box(0.36, 0.36, 0.05, C.dark, x, 1.5, 0.36, WINDOW_GLOW));
+  g.add(box(1.4, 0.06, 0.5, C.wood, 0, 1.3, 0.6), box(1.4, 0.3, 0.04, C.woodLight, 0, 1.36, 0.84));
+  // Chimenea humeante
+  g.add(box(0.35, 1.2, 0.35, C.stone, 0.9, 2.2, -1.2));
+  g.add(smokeColumn(0.9, 3.5, -1.2, 0.8));
+  // Letrero colgante con una jarra
+  g.add(box(0.06, 0.06, 0.6, C.woodDark, -1.2, 1.15, 0.55));
+  const sign = box(0.5, 0.36, 0.04, C.woodLight, 0, 0, 0);
+  sign.position.set(-1.2, 0.72, 0.8);
+  sign.userData.wave = true;
+  g.add(sign);
+  g.add(box(0.16, 0.2, 0.05, C.gold, -1.2, 0.8, 0.83));
+  // Terraza: mesas, bancos y barriles (más cuanto más nivel)
+  const tables = Math.min(3, 1 + Math.floor(level / 3));
+  for (let i = 0; i < tables; i++) {
+    const x = -1.0 + i * 1.0;
+    g.add(cyl(0.28, 0.28, 0.05, 8, C.woodLight, x, 0.42, 1.3), cyl(0.05, 0.05, 0.42, 5, C.woodDark, x, 0, 1.3));
+    g.add(box(0.6, 0.06, 0.16, C.wood, x, 0.25, 1.75), box(0.6, 0.06, 0.16, C.wood, x, 0.25, 0.85));
+    g.add(cyl(0.05, 0.05, 0.14, 6, '#e8d9a8', x + 0.08, 0.47, 1.3));
+  }
+  const barrels = Math.min(6, 2 + level);
+  for (let i = 0; i < barrels; i++) {
+    const b = cyl(0.2, 0.2, 0.5, 8, C.wood, 1.55, (i >= 3 ? 0.5 : 0), -1.2 + (i % 3) * 0.45);
+    g.add(b);
+  }
+  g.add(lantern(-0.5, 2.05, 0.4), lantern(0.5, 2.05, 0.4));
+  return g;
+}
+
+function forja(level) {
+  const g = new THREE.Group();
+  g.add(box(3.0, 0.15, 2.4, C.stoneDark, 0, 0, -0.2));
+  // Cobertizo abierto
+  for (const [x, z] of [[-1.3, -1.2], [1.3, -1.2], [-1.3, 0.6], [1.3, 0.6]]) g.add(box(0.14, 1.6, 0.14, C.woodDark, x, 0.15, z));
+  const roof = gableRoof(3.0, 0.7, 2.2, C.roofGrey, 0, 1.75, -0.3);
+  roof.rotation.y = Math.PI / 2;
+  g.add(roof);
+  // Horno con boca encendida y chimenea
+  g.add(box(1.2, 1.2, 0.9, C.stone, -0.6, 0.15, -0.95));
+  g.add(box(0.5, 0.4, 0.05, '#ff8a2a', -0.6, 0.35, -0.48, { emissive: '#ff5a00', emissiveIntensity: 1.5 }));
+  g.add(box(0.4, 1.8, 0.4, C.stone, -0.6, 1.35, -1.2));
+  g.add(smokeColumn(-0.6, 3.3, -1.2, 1.9));
+  // Yunque, martillo y piedra de afilar que gira
+  g.add(box(0.3, 0.35, 0.25, C.dark, 0.6, 0.15, -0.2));
+  g.add(box(0.55, 0.12, 0.25, '#4a4f57', 0.6, 0.5, -0.2, { metalness: 0.5, roughness: 0.4 }));
+  const wheel = new THREE.Group();
+  wheel.position.set(0.8, 0.6, 0.55);
+  const stone = mesh(new THREE.CylinderGeometry(0.32, 0.32, 0.1, 12), '#b9b2a6');
+  stone.rotation.z = Math.PI / 2;
+  wheel.add(stone);
+  wheel.userData.spin = { axis: 'x', speed: 2.5 };
+  g.add(wheel);
+  g.add(box(0.1, 0.45, 0.4, C.wood, 0.8, 0.15, 0.55));
+  // Armero con lanzas y escudos
+  const weapons = Math.min(7, 3 + level);
+  for (let i = 0; i < weapons; i++) g.add(cyl(0.02, 0.02, 1.2, 4, C.woodDark, -1.1 + i * 0.12, 0.15, 0.85));
+  g.add(box(1.0, 0.06, 0.1, C.wood, -0.75, 0.9, 0.85));
+  for (let i = 0; i < Math.min(3, 1 + Math.floor(level / 2)); i++) {
+    const shield = mesh(new THREE.CylinderGeometry(0.22, 0.22, 0.05, 10), C.cloth[i % 4]);
+    shield.rotation.x = Math.PI / 2;
+    shield.position.set(1.15, 0.6 + i * 0.05, -0.4 + i * 0.4);
+    shield.rotation.z = Math.PI / 2;
+    g.add(shield);
+  }
+  return g;
+}
+
+function torre(level) {
+  const g = new THREE.Group();
+  const h = 3.6 + Math.min(level, 10) * 0.22;
+  g.add(cyl(1.15, 1.3, 0.3, 10, C.stoneDark));
+  g.add(cyl(0.85, 1.0, h, 10, C.stone, 0, 0.3, 0));
+  // Saeteras y puerta
+  g.add(box(0.4, 0.7, 0.05, C.woodDark, 0, 0.3, 0.97));
+  for (let i = 1; i < 4; i++) g.add(box(0.1, 0.35, 0.05, C.dark, 0, 0.3 + (h * i) / 4, 0.92, WINDOW_GLOW));
+  // Almenas y tejado
+  const top = 0.3 + h;
+  g.add(cyl(1.1, 1.0, 0.25, 10, C.stone, 0, top, 0));
+  for (let a = 0; a < 360; a += 45) {
+    const m = box(0.3, 0.32, 0.3, C.stone, 0, 0, 0);
+    m.position.set(Math.sin((a * Math.PI) / 180) * 0.95, top + 0.25, Math.cos((a * Math.PI) / 180) * 0.95);
+    g.add(m);
+  }
+  // Brasero de vigía
+  g.add(cyl(0.25, 0.15, 0.25, 8, C.dark, 0, top + 0.25, 0));
+  const fire = mesh(new THREE.ConeGeometry(0.2, 0.45, 6), '#ffb347', { emissive: '#ff7a00', emissiveIntensity: 1.6 });
+  fire.position.set(0, top + 0.72, 0);
+  fire.userData.flicker = true;
+  g.add(fire);
+  // Arqueros de guardia (más con el nivel)
+  const guards = Math.min(3, 1 + Math.floor(level / 3));
+  for (let i = 0; i < guards; i++) {
+    const s = createSoldier('arquero');
+    s.scale.setScalar(1.1);
+    s.position.set(Math.sin(i * 2.1) * 0.6, top + 0.25, Math.cos(i * 2.1) * 0.6);
+    s.rotation.y = i * 2.1;
+    g.add(s);
+  }
+  g.add(cyl(0.03, 0.03, 1.2, 5, C.dark, 0.7, top + 0.25, -0.5));
+  const flag = box(0.5, 0.32, 0.02, C.cloth[1], 0, 0, 0);
+  flag.geometry.translate(0.25, 0, 0);
+  flag.position.set(0.7, top + 1.25, -0.5);
+  flag.userData.wave = true;
+  g.add(flag);
+  return g;
+}
+
+function faro(level) {
+  const g = new THREE.Group();
+  // Peñas y casita del farero
+  for (const [x, z, s] of [[-0.9, 0.6, 0.7], [0.8, 0.8, 0.55], [0.2, -1.0, 0.6]]) {
+    const r = mesh(new THREE.DodecahedronGeometry(s), C.stoneDark);
+    r.position.set(x, s * 0.4, z);
+    r.scale.y = 0.6;
+    g.add(r);
+  }
+  g.add(box(1.2, 0.8, 1.0, C.wall, 1.3, 0, -0.2), gableRoof(1.4, 0.5, 1.2, C.roofBlue, 1.3, 0.8, -0.2));
+  g.add(box(0.25, 0.25, 0.05, C.dark, 1.3, 0.35, 0.31, WINDOW_GLOW));
+  // Torre a franjas
+  const h = 4.4 + Math.min(level, 10) * 0.2;
+  const bands = 5;
+  for (let i = 0; i < bands; i++) {
+    const r0 = 0.75 - (i / bands) * 0.25;
+    const r1 = 0.75 - ((i + 1) / bands) * 0.25;
+    g.add(cyl(r1, r0, h / bands, 10, i % 2 ? C.roofRed : C.white, 0, (h * i) / bands, 0));
+  }
+  // Linterna con su luz y el haz que gira
+  g.add(cyl(0.62, 0.62, 0.12, 10, C.dark, 0, h, 0));
+  g.add(cyl(0.38, 0.38, 0.6, 10, '#fff2a8', 0, h + 0.12, 0, { emissive: '#ffd34a', emissiveIntensity: 1.8 }));
+  const cap = mesh(new THREE.ConeGeometry(0.5, 0.55, 10), C.roofRed);
+  cap.position.y = h + 1.0;
+  g.add(cap);
+  const beam = new THREE.Group();
+  beam.position.y = h + 0.42;
+  const ray = new THREE.Mesh(new THREE.ConeGeometry(0.9, 9, 12, 1, true), mat('#fff3b0', { transparent: true, opacity: 0.16, emissive: '#fff3b0', emissiveIntensity: 1, depthWrite: false, side: THREE.DoubleSide }));
+  ray.rotation.z = Math.PI / 2;
+  ray.position.x = 4.6;
+  beam.add(ray);
+  beam.userData.spin = { axis: 'y', speed: 0.7 };
+  g.add(beam);
+  return g;
+}
+
+function astillero(level) {
+  // -Z mira al mar: la grada baja hacia la playa
+  const g = new THREE.Group();
+  g.add(box(3.4, 0.15, 2.0, C.woodDark, 0, 0, 0.6));
+  // Grada inclinada con un casco a medio hacer
+  const slip = box(1.4, 0.12, 4.2, C.woodLight, 0, 0, 0);
+  slip.position.set(-0.6, 0.1, -1.6);
+  slip.rotation.x = -0.12;
+  g.add(slip);
+  const ribs = Math.min(8, 4 + level);
+  for (let i = 0; i < ribs; i++) {
+    const z = -0.2 - i * 0.42;
+    const y = 0.35 + (z + 0.2) * 0.12;
+    const rib = new THREE.Mesh(new THREE.TorusGeometry(0.55, 0.05, 4, 10, Math.PI), mat(C.wood));
+    rib.position.set(-0.6, y + 0.55, z);
+    rib.rotation.z = Math.PI;
+    rib.castShadow = true;
+    g.add(rib);
+  }
+  g.add(box(0.12, 0.12, ribs * 0.42 + 0.4, C.woodDark, -0.6, 0.12, -0.2 - (ribs * 0.42) / 2));
+  // Andamio y grúa
+  for (const z of [-0.6, -2.2]) g.add(box(0.1, 2.0, 0.1, C.woodLight, 0.4, 0.1, z), box(0.1, 2.0, 0.1, C.woodLight, -1.6, 0.1, z));
+  g.add(box(2.1, 0.08, 0.08, C.woodLight, -0.6, 2.0, -0.6), box(2.1, 0.08, 0.08, C.woodLight, -0.6, 2.0, -2.2));
+  const crane = new THREE.Group();
+  crane.position.set(1.3, 0.15, -0.6);
+  crane.add(box(0.14, 2.4, 0.14, C.wood, 0, 0, 0));
+  const jib = new THREE.Group();
+  jib.position.y = 2.35;
+  jib.add(box(1.8, 0.1, 0.1, C.wood, -0.7, 0, 0), box(0.03, 0.8, 0.03, C.dark, -1.5, -0.8, 0));
+  jib.userData.swing = { speed: 0.35, amp: 0.7 };
+  crane.add(jib);
+  g.add(crane);
+  // Taller y pilas de troncos
+  g.add(box(1.4, 1.0, 1.1, C.wood, 1.0, 0.15, 1.0), gableRoof(1.6, 0.6, 1.3, C.roofRed, 1.0, 1.15, 1.0));
+  const piles = Math.min(3, 1 + Math.floor(level / 3));
+  for (let p = 0; p < piles; p++) {
+    for (let i = 0; i < 3; i++) g.add(log(1.4, 0.13, -1.2 + p * 0.0, 0.15 + i * 0.24, 0.9 + p * 0.45 - 0.1 * i, 0));
+  }
+  return g;
+}
+
+const FACTORIES = { ayuntamiento, aserradero, cantera, granja, mina, fundicion, mercado, almacen, academia, templo, cuartel, puerto, muralla, coloso, taberna, forja, torre, faro, astillero };
 
 export function createBuilding(id, level) {
-  if (level <= 0) return emptyPlot(id);
-  const g = FACTORIES[id](level);
+  if (level <= 0) return bakeStatic(emptyPlot(id));
+  // Lo que no se mueve se funde en una sola malla: muchas menos llamadas de dibujo
+  const g = bakeStatic(FACTORIES[id](level), windowMaterial());
   if (id !== 'puerto' && id !== 'muralla' && id !== 'coloso') g.scale.setScalar(1 + Math.min(level, 15) * 0.025);
   return g;
 }
@@ -702,6 +924,8 @@ export function createBuilding(id, level) {
 // ── Tropas y barcos ──────────────────────────────────────────────────────────
 
 const UNIT_COLORS = {
+  hondero: '#9a7b4f',
+  hoplita: '#b08d3c',
   lancero: '#b8442f',
   arquero: '#3f8a3a',
   espadachin: '#6a7380',
@@ -744,6 +968,21 @@ export function createSoldier(id) {
   if (id === 'lancero' || id === 'caballero') g.add(cyl(0.015, 0.015, 0.8, 4, C.woodDark, 0.13, base, 0.02));
   if (id === 'espadachin' || id === 'pirata' || id === 'barbaro') g.add(box(0.03, 0.3, 0.05, '#c9ced6', 0.14, base + 0.12, 0.05));
   if (id === 'espadachin' || id === 'lancero') g.add(box(0.03, 0.2, 0.16, color, -0.12, base + 0.08, 0));
+  if (id === 'hondero') {
+    // Honda girando sobre la cabeza y zurrón de piedras
+    g.add(cyl(0.008, 0.008, 0.3, 4, C.woodDark, 0.12, base + 0.32, 0));
+    g.add(box(0.06, 0.06, 0.06, C.stone, 0.12, base + 0.62, 0));
+    g.add(box(0.1, 0.1, 0.06, '#7a5230', -0.1, base + 0.06, 0.06));
+  }
+  if (id === 'hoplita') {
+    // Gran escudo redondo de bronce, penacho y lanza
+    const shield = mesh(new THREE.CylinderGeometry(0.17, 0.17, 0.03, 12), '#c9a24a', { metalness: 0.5, roughness: 0.45 });
+    shield.rotation.x = Math.PI / 2;
+    shield.position.set(0, base + 0.2, 0.13);
+    g.add(shield);
+    g.add(box(0.03, 0.1, 0.16, '#b8442f', 0, base + 0.48, 0));
+    g.add(cyl(0.015, 0.015, 0.9, 4, C.woodDark, 0.13, base, 0.02));
+  }
   if (id === 'arquero') {
     const bow = mesh(new THREE.TorusGeometry(0.14, 0.012, 4, 10, Math.PI), C.woodDark);
     bow.position.set(0.12, base + 0.22, 0);
@@ -778,6 +1017,8 @@ const SHIP_COLORS = {
   trirreme: { hull: C.woodDark, sail: '#b8442f' },
   galeon: { hull: '#6b4423', sail: '#f4efe6' },
   corsario: { hull: '#3a2a20', sail: '#26221f' },
+  brulote: { hull: '#3b2a1e', sail: '#8a2f22' },
+  dromon: { hull: '#5a3a22', sail: '#e9dcc0' },
 };
 
 /** Barco (unos 2 de eslora) con la proa hacia +Z y la línea de flotación en y = 0. */
@@ -806,6 +1047,49 @@ export function createShip(type) {
     }
     g.add(cyl(0.04, 0.04, 1.6, 6, C.woodDark, 0, 0.2, 0.1));
     g.add(sail(1.0, 0.8, col.sail, 0, 0.85, 0.1));
+    return g;
+  }
+  if (type === 'brulote') {
+    // Barco pequeño cargado de barriles de brea encendidos
+    g.add(hull(0.7, 0.35, 1.8, 0.5, col.hull));
+    g.add(cyl(0.04, 0.04, 1.4, 6, C.woodDark, 0, 0.15, 0.1));
+    g.add(sail(0.8, 0.6, col.sail, 0, 0.65, 0.1));
+    for (const [x, z] of [[-0.15, -0.45], [0.15, -0.45], [0, 0.55]]) {
+      g.add(cyl(0.12, 0.12, 0.25, 8, '#2b2017', x, 0.12, z));
+      const flame = mesh(new THREE.ConeGeometry(0.1, 0.32, 6), '#ff8a2a', { emissive: '#ff5a00', emissiveIntensity: 1.8 });
+      flame.position.set(x, 0.52, z);
+      flame.userData.flicker = true;
+      g.add(flame);
+    }
+    return g;
+  }
+  if (type === 'dromon') {
+    // Gran barco de guerra: dos velas latinas, dos filas de remos y sifón de fuego en la proa
+    g.add(hull(1.2, 0.6, 4.0, 1.0, col.hull));
+    g.add(box(1.1, 0.35, 0.9, '#6b4423', 0, 0.25, -1.45));
+    g.add(box(0.9, 0.06, 0.5, C.gold, 0, 0.6, -1.45));
+    g.add(cyl(0.06, 0.09, 0.6, 6, '#8a6a3a', 0, 0.4, 1.75, { metalness: 0.5 }));
+    for (const [z, hgt, w] of [[0.8, 2.6, 1.4], [-0.6, 2.2, 1.1]]) {
+      g.add(cyl(0.05, 0.06, hgt, 6, C.woodDark, 0, 0.25, z));
+      const s = sail(w, 1.0, col.sail, 0, 0.9, z);
+      s.rotation.z = 0.25;
+      g.add(s);
+    }
+    for (let row = 0; row < 2; row++) {
+      for (let i = 0; i < 9; i++) {
+        for (const side of [-1, 1]) {
+          const oar = box(0.8, 0.025, 0.04, C.woodLight, side * (0.65 + row * 0.1), -0.02 + row * 0.12, -1.3 + i * 0.32);
+          oar.rotation.z = side * -0.35;
+          g.add(oar);
+        }
+      }
+    }
+    for (let i = 0; i < 5; i++) for (const side of [-1, 1]) g.add(cyl(0.12, 0.12, 0.04, 8, C.cloth[i % 4], side * 0.6, 0.22, -1.0 + i * 0.45));
+    const flag = box(0.5, 0.3, 0.02, C.cloth[1], 0, 0, 0);
+    flag.geometry.translate(0.25, 0, 0);
+    flag.position.set(0, 2.9, 0.8);
+    flag.userData.wave = true;
+    g.add(flag);
     return g;
   }
   if (type === 'galeon') {

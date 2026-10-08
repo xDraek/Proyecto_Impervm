@@ -43,8 +43,10 @@ El servidor guarda el mundo en memoria y lo vuelca a la base de datos cada 10 se
 
 - Al crear la cuenta eliges tu nombre y el de tu ciudad. Cada jugador nuevo abre un **sector** del archipiélago: su isla en el centro y una docena de islas neutrales alrededor. Los sectores se colocan en espiral, así que tus vecinos son los que se registraron cerca de ti.
 - Tu isla produce **madera, piedra, comida, hierro, cristal y oro** en tiempo real, también con la pestaña cerrada.
-- **14 edificios**, entre ellos el templo y el **Coloso**, una maravilla de 10 niveles que es el gran objetivo final.
-- **Academia** con 13 investigaciones, **cuartel y puerto** con 5 tropas y 4 barcos. Las tropas comen: sin comida hay hambruna.
+- **19 edificios**, entre ellos el templo, la taberna (las tropas comen menos), la forja (más ataque), la torre de vigía, el faro (flotas más rápidas), el astillero y el **Coloso**, una maravilla de 10 niveles que es el gran objetivo final.
+- **Academia** con 13 investigaciones, **cuartel y puerto** con 7 tropas (honderos, hoplitas…) y 6 barcos (brulotes, dromones…). Las tropas comen: sin comida hay hambruna.
+- **Continentes** 🗺️: entre cada tres sectores puede haber un pequeño continente con ciudades bárbaras amuralladas (mucho botín) y valles fértiles que colonizar.
+- Tu ciudad crece a la vista: barrios que se llenan de casas con el ayuntamiento, campos, ovejas, farolas que se encienden de noche y una playa con barcas y cabañas.
 - **Mapa compartido** (🗺️ o tecla `M`): campamentos bárbaros y fortalezas piratas que se rearman, ruinas con un tesoro para el primero que llegue, islas libres para **colonizar** (la primera flota que llega se la queda), el Kraken y el Mar de las Brumas para las **expediciones**.
 - **Otros jugadores**: espía sus ciudades con botes exploradores y atácalas para llevarte sus recursos (salvo lo que esconde su almacén). Si alguien viene a por ti, lo verás llegar. Con menos de 100 puntos tienes **protección de novato**: nadie te ataca y tú no atacas a otros jugadores.
 - **Alianzas** 🤝: fúndalas o únete a una (hasta 20 miembros). Los aliados no pueden atacarse, tienen su propio chat, circulares para todos los miembros y una clasificación de alianzas.

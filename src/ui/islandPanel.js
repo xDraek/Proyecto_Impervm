@@ -64,8 +64,35 @@ function colonySection(game, view) {
     ${upgrade}`;
 }
 
+/** Un continente: lo que hay en él, para ir a cada sitio. */
+function continentSection(game, view) {
+  const sites = game.world
+    .islands()
+    .filter((i) => i.land === view.id)
+    .map((i) => game.island(i.id));
+  const rows = sites
+    .map((s) => {
+      const t = ISLAND_TYPES[s.type];
+      const what = !s.explored ? '❔ Sin explorar' : s.colonized ? '🚩 Tu colonia' : s.colonizedBy != null ? `🚩 Colonia de ${escapeHtml(s.colonistName)}` : `${t.icon} ${s.typeName}${s.tier ? ` · Nv ${s.tier}` : ''}`;
+      return `<li data-select="${escapeHtml(s.id)}"><span><b>${escapeHtml(s.name)}</b><div class="muted small">${what}</div></span><span class="muted small">›</span></li>`;
+    })
+    .join('');
+  return `<p class="desc">Un pequeño continente entre los sectores del archipiélago. Tierra adentro hay ciudades bárbaras bien defendidas y valles fértiles donde fundar colonias.</p>
+    <ul class="mini-list site-list">${rows}</ul>`;
+}
+
 function infoSection(game, view) {
   const t = ISLAND_TYPES[view.type];
+  if (view.type === 'continente') return continentSection(game, view);
+  if (view.land) {
+    const land = game.world.island(view.land);
+    const inner = infoSectionFor(game, view, t);
+    return `<p class="hint">🗺️ En el continente <b>${escapeHtml(land?.name ?? '')}</b></p>${inner}`;
+  }
+  return infoSectionFor(game, view, t);
+}
+
+function infoSectionFor(game, view, t) {
   if (view.type === 'jugador') return playerSection(game, view);
   if (view.colonizedBy != null && !view.colonized) {
     const r = RESOURCES[view.specialty];
@@ -96,6 +123,7 @@ function infoSection(game, view) {
   if (view.wall) lines.push(`<div class="info-row"><span>🏰 Fortificación</span><b>+${Math.round(view.wall * 100)} % de vida</b></div>`);
   const flavor = {
     barbaros: 'Una tribu de bárbaros ha levantado aquí su campamento. Acumulan lo que roban y se rearman con el tiempo.',
+    ciudadela: 'Una ciudad bárbara amurallada tierra adentro: muchos guerreros y mucho botín. Lleva catapultas para abrir brecha en su empalizada.',
     piratas: 'Guarida de piratas bien fortificada. Las catapultas ayudan a abrir brecha en sus muros.',
     kraken: 'Aquí duerme el Kraken, rodeado de barcos hundidos y del oro de mil naufragios.',
   }[view.type];
@@ -116,6 +144,7 @@ function inboundSection(game, view) {
 }
 
 function fleetForm(game, view) {
+  if (view.type === 'continente') return '';
   if (game.level('puerto') < 1) return '<div class="section"><h4>Enviar flota</h4><p class="desc">Construye un puerto en tu isla para poder zarpar.</p></div>';
   const home = PLAYER_UNITS.filter((id) => game.units[id] > 0);
   if (!home.length) return '<div class="section"><h4>Enviar flota</h4><p class="desc">No tienes tropas ni barcos en casa. Entrénalos en el cuartel y el puerto.</p></div>';
@@ -135,7 +164,7 @@ function fleetForm(game, view) {
   const types = [];
   if (view.type === 'brumas') types.push('expedicion');
   else types.push('explorar');
-  const hostile = ['barbaros', 'piratas', 'kraken', 'jugador'].includes(view.type);
+  const hostile = ['barbaros', 'ciudadela', 'piratas', 'kraken', 'jugador'].includes(view.type);
   if (view.type !== 'brumas' && view.colonizedBy == null && (!view.explored || hostile)) types.push('atacar');
   if (view.type === 'jugador') types.push('transporte');
   if (view.type === 'jugador' && view.alliance && view.alliance.id === game.alliance?.id) types.push('apoyo');
@@ -254,7 +283,7 @@ export function islandPanel(hud, id) {
   const view = game.island(id);
   const t = ISLAND_TYPES[view.type];
   let icon = view.colonized || view.colonizedBy != null ? '🚩' : view.explored ? t.icon : '❔';
-  let sub = view.colonized ? `Tu colonia · nivel ${view.colony?.level ?? 1}` : view.explored ? `${t.name}${view.tier ? ` · Nv ${view.tier}` : ''}` : 'Isla desconocida';
+  let sub = view.colonized ? `Tu colonia · nivel ${view.colony?.level ?? 1}` : view.explored ? `${view.typeName}${view.tier ? ` · Nv ${view.tier}` : ''}` : 'Isla desconocida';
   if (view.type === 'jugador') {
     icon = '🏰';
     sub = `Ciudad de ${escapeHtml(view.ownerName)}`;

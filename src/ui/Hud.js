@@ -566,6 +566,8 @@ export class Hud {
   }
 
   async #onPanelClick(e) {
+    const site = e.target.closest('[data-select]');
+    if (site && this.panel.contains(site) && !e.target.closest('[data-action]')) return this.onSelect(site.dataset.select);
     const btn = e.target.closest('[data-action]');
     if (!btn || btn.disabled) return;
     const game = this.game;

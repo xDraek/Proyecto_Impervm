@@ -44,10 +44,23 @@ function effectFor(game, id, level, next) {
     case 'puerto':
       return effectRow('⚓ Flotas a la vez', level, next) + effectRow('🚢 Velocidad de los astilleros', `+${Math.max(0, level - 1) * 10} %`, `+${(next - 1) * 10} %`);
     case 'muralla': {
-      const a = wallBonus(level);
-      const b = wallBonus(next);
+      const a = wallBonus(level, game.level('torre'));
+      const b = wallBonus(next, game.level('torre'));
       return effectRow('❤️ Vida de los defensores', `+${Math.round(a.hp * 100)} %`, `+${Math.round(b.hp * 100)} %`) + effectRow('🏹 Daño de las torres', a.towers, b.towers);
     }
+    case 'taberna':
+      return effectRow('🍺 Comida que ahorran las tropas', `${Math.min(40, level * 4)} %`, `${Math.min(40, next * 4)} %`);
+    case 'forja':
+      return effectRow('⚔️ Ataque de tus tropas', `+${level * 3} %`, `+${next * 3} %`);
+    case 'torre':
+      return (
+        effectRow('🔭 Caza de espías', `+${level * 4} %`, `+${next * 4} %`) +
+        effectRow('🏹 Daño extra de las torres', level * 8, next * 8)
+      );
+    case 'faro':
+      return effectRow('⛵ Velocidad de las flotas', `+${level * 4} %`, `+${next * 4} %`);
+    case 'astillero':
+      return effectRow('🛠️ Velocidad de construcción de barcos', `+${level * 8} %`, `+${next * 8} %`);
     default:
       return '';
   }

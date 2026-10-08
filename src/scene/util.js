@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 
 /** Punto en el plano del mar a `r` del origen. Ángulo 0 = hacia +Z. */
 export function polar(r, deg, y = 0) {
@@ -85,4 +86,114 @@ export function mountainGeometry(radius, height, seed, colors) {
   geo.translate(0, half - 0.05, 0);
   paintByNormal(geo, (ny, cy) => (cy > height * 0.72 ? colors.snow : ny > 0.75 ? colors.grass : colors.rock));
   return geo;
+}
+
+/**
+ * Junta muchas piezas estáticas (árboles, casas, rocas…) en una o dos mallas:
+ * cada pieza guarda su color en los vértices, así que se dibujan de una vez.
+ * Las ventanas que se encienden de noche van en una malla aparte con su material.
+ */
+export class Batch {
+  constructor(glowMaterial = null) {
+    this.colored = [];
+    this.glow = [];
+    this.glowMaterial = glowMaterial;
+  }
+
+  /** Añade un objeto (malla o grupo) tal como está colocado. */
+  add(obj) {
+    obj.updateMatrixWorld(true);
+    obj.traverse((o) => {
+      if (!o.isMesh) return;
+      let g = o.geometry.index ? o.geometry.toNonIndexed() : o.geometry.clone();
+      for (const k of Object.keys(g.attributes)) if (k !== 'position' && k !== 'normal') g.deleteAttribute(k);
+      g.applyMatrix4(o.matrixWorld);
+      if (this.glowMaterial && o.material === this.glowMaterial) {
+        this.glow.push(g);
+        return;
+      }
+      const c = o.material.color ?? new THREE.Color('#ffffff');
+      const n = g.attributes.position.count;
+      const colors = new Float32Array(n * 3);
+      for (let i = 0; i < n; i++) c.toArray(colors, i * 3);
+      g.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+      this.colored.push(g);
+    });
+    obj.traverse((o) => o.geometry?.dispose());
+    return this;
+  }
+
+  /** La malla (o mallas) resultante. */
+  build({ shadows = true } = {}) {
+    const group = new THREE.Group();
+    if (this.colored.length) {
+      const m = new THREE.Mesh(mergeGeometries(this.colored), batchMaterial());
+      m.castShadow = m.receiveShadow = shadows;
+      group.add(m);
+    }
+    if (this.glow.length) {
+      const m = new THREE.Mesh(mergeGeometries(this.glow), this.glowMaterial);
+      m.castShadow = shadows;
+      group.add(m);
+    }
+    for (const g of [...this.colored, ...this.glow]) g.dispose();
+    this.colored = [];
+    this.glow = [];
+    return group;
+  }
+}
+
+let sharedBatchMaterial = null;
+function batchMaterial() {
+  return (sharedBatchMaterial ??= new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 0.9 }));
+}
+
+const ANIMATED = ['spin', 'swing', 'wave', 'smoke', 'flicker', 'bob', 'wiggle'];
+
+/**
+ * Funde en una sola malla las piezas de `root` que no se mueven ni brillan
+ * (las ventanas que se encienden de noche van en otra). Lo animado, lo
+ * transparente y lo que emite luz se queda como estaba. Devuelve `root`.
+ */
+export function bakeStatic(root, glowMaterial = null) {
+  root.updateMatrixWorld(true);
+  const inverse = new THREE.Matrix4().copy(root.matrixWorld).invert();
+  const batch = new Batch(glowMaterial);
+  const baked = [];
+  const visit = (obj) => {
+    if (obj !== root && ANIMATED.some((k) => obj.userData[k])) return;
+    if (obj.isMesh) {
+      const m = obj.material;
+      const keep = Array.isArray(m) || m.transparent || (m.vertexColors && !obj.geometry.attributes.color) || (m !== glowMaterial && m.emissive && m.emissiveIntensity > 0 && m.emissive.getHex() !== 0);
+      if (!keep) baked.push(obj);
+    }
+    for (const child of obj.children) visit(child);
+  };
+  visit(root);
+  if (baked.length < 2) return root;
+  for (const mesh of baked) {
+    const g = mesh.geometry.index ? mesh.geometry.toNonIndexed() : mesh.geometry.clone();
+    for (const k of Object.keys(g.attributes)) if (k !== 'position' && k !== 'normal') g.deleteAttribute(k);
+    g.applyMatrix4(new THREE.Matrix4().multiplyMatrices(inverse, mesh.matrixWorld));
+    if (glowMaterial && mesh.material === glowMaterial) batch.glow.push(g);
+    else if (mesh.material.vertexColors) {
+      // Ya trae sus colores por vértice (relieve, montes, piezas ya fundidas)
+      const src = mesh.geometry.index ? mesh.geometry.toNonIndexed() : mesh.geometry;
+      g.setAttribute('color', src.attributes.color.clone());
+      batch.colored.push(g);
+    } else {
+      const c = mesh.material.color;
+      const n = g.attributes.position.count;
+      const colors = new Float32Array(n * 3);
+      for (let i = 0; i < n; i++) c.toArray(colors, i * 3);
+      g.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+      batch.colored.push(g);
+    }
+    mesh.geometry.dispose();
+    mesh.parent.remove(mesh);
+  }
+  const merged = batch.build();
+  // El grupo fundido va en el origen de `root`, que ya tiene su posición y escala
+  root.add(...merged.children);
+  return root;
 }

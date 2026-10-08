@@ -20,6 +20,7 @@ const ISLAND_COLOR = {
   libre: '#6dbb63',
   kraken: '#a46ad1',
   brumas: '#b9cbd6',
+  ciudadela: '#d0663e',
 };
 
 const head = (icon, title, sub) => `
@@ -73,7 +74,7 @@ export class WorldMap {
           <button class="ghost small" data-wm="out" title="Alejar">－</button>
         </div>
         <div class="wm-wrap"><canvas></canvas><div class="wm-tip" hidden></div></div>
-        <div class="wm-legend">${legend}<span><i class="ring"></i>Lo que ves desde tu ciudad</span><span>🏖️ De vacaciones</span><span>💤 Inactivo</span></div>
+        <div class="wm-legend">${legend}<span><i style="background:#5f9a4a"></i>Continente</span><span><i style="background:#d0663e"></i>Ciudad bárbara</span><span><i class="ring"></i>Lo que ves desde tu ciudad</span><span>🏖️ De vacaciones</span><span>💤 Inactivo</span></div>
         <div class="wm-info"><p class="muted small">Arrastra para moverte, usa la rueda para acercarte y pulsa una ciudad para ver quién vive en ella.</p></div>
       </div>`,
     );
@@ -243,6 +244,7 @@ export class WorldMap {
     if (best) return best;
     bestD = 8;
     for (const isl of this.data.islands) {
+      if (isl[2] === 'continente') continue;
       const [x, y] = this.#toScreen(isl[0], isl[1]);
       const d = Math.hypot(x - px, y - py);
       if (d < bestD) {
@@ -350,9 +352,26 @@ export class WorldMap {
 
     const inView = (x, y, m = 40) => x > -m && y > -m && x < w + m && y < h + m;
 
+    // Continentes (debajo de todo)
+    for (const [x, z, type, , size] of this.data.islands) {
+      if (type !== 'continente') continue;
+      const [sx, sy] = this.#toScreen(x, z);
+      const cr = Math.max(4, size * scale);
+      if (!inView(sx, sy, cr + 20)) continue;
+      ctx.fillStyle = 'rgba(232, 212, 154, 0.85)';
+      ctx.beginPath();
+      ctx.arc(sx, sy, cr * 1.1, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#5f9a4a';
+      ctx.beginPath();
+      ctx.arc(sx, sy, cr, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
     // Islas de los sectores
-    const r = Math.max(1.6, 20 * scale);
+    const r = Math.max(1.6, 24 * scale);
     for (const [x, z, type, colonist] of this.data.islands) {
+      if (type === 'continente') continue;
       const [sx, sy] = this.#toScreen(x, z);
       if (!inView(sx, sy)) continue;
       ctx.fillStyle = ISLAND_COLOR[type] ?? '#888';

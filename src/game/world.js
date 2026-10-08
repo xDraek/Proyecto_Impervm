@@ -2,6 +2,8 @@
 // jugador nuevo recibe un sector con su isla en el centro y una docena de islas
 // neutrales alrededor (bárbaros, ruinas, tierras libres, piratas, niebla…).
 // Los sectores se colocan en espiral hexagonal, así los vecinos quedan cerca.
+// Entre cada tres sectores puede surgir un pequeño continente con ciudades
+// bárbaras y tierras que colonizar.
 
 export const SECTOR_SPACING = 430;
 
@@ -86,8 +88,17 @@ export function sectorCenter(index) {
   return { x: SECTOR_SPACING * (q + r / 2), z: SECTOR_SPACING * ((r * Math.sqrt(3)) / 2) };
 }
 
-/** Islas neutrales de un sector (descriptores estáticos con posición absoluta). */
-export function generateSector(index, worldSeed = 1) {
+/** Radio que ocupa una isla en el mar (con su playa), para no pisar a otras. */
+export function footprint(isl) {
+  if (isl.type === 'continente') return isl.size * 2.4 * 1.15;
+  return isl.size * 2.4 * 1.32;
+}
+
+/**
+ * Islas neutrales de un sector (descriptores estáticos con posición absoluta).
+ * `obstacles`: tierras que ya existen cerca ({x, z, r}), como los continentes.
+ */
+export function generateSector(index, worldSeed = 1, obstacles = []) {
   const rand = rng(worldSeed * 7919 + index * 104729);
   const center = sectorCenter(index);
   const entries = TEMPLATE.map((t) => ({ ...t }));
@@ -95,8 +106,8 @@ export function generateSector(index, worldSeed = 1) {
   if (index % 4 === 0) entries.push({ ...KRAKEN });
 
   // Cada isla en un ángulo al azar, sin pisar a las demás ni a la isla del jugador
-  const radius = (size) => size * 1.8 * 1.32 + 6;
-  const placed = [{ x: center.x, z: center.z, r: radius(10) }];
+  const radius = (size) => size * 2.4 * 1.32 + 4;
+  const placed = [{ x: center.x, z: center.z, r: radius(10) }, ...obstacles.map((o) => ({ ...o, r: o.r + 4 }))];
   const spots = entries.map((t) => {
     let best = null;
     for (let tries = 0; tries < 200; tries++) {
@@ -141,6 +152,79 @@ export function generateSector(index, worldSeed = 1) {
     }
     return isl;
   });
+}
+
+// ── Continentes ──────────────────────────────────────────────────────────────
+
+const CONTINENT_CHANCE = 0.55;
+const LAND_HEADS = ['Tierras', 'Costa', 'Reino', 'Llanuras', 'Marca', 'Montes'];
+const LAND_TAILS = ['del Norte', 'de Hierro', 'Salvajes', 'de Ámbar', 'del Jabalí', 'Doradas', 'de Bronce', 'Olvidadas', 'del Trueno', 'de Ceniza'];
+const CITY_HEADS = ['Bastión', 'Fortaleza', 'Burgo', 'Empalizada', 'Ciudadela', 'Torreón'];
+const CITY_TAILS = ['del Jabalí', 'de Hueso', 'Roja', 'del Lobo', 'Negra', 'de los Cuervos', 'del Oso', 'de las Lanzas'];
+const SITE_HEADS = ['Vega', 'Valle', 'Ribera', 'Llano', 'Prado', 'Cañada'];
+
+const CITADELS = [
+  { type: 'ciudadela', tier: 4, garrison: { barbaro: 60, arquero: 25 }, wall: 0.25, regenHours: 8, loot: { max: 11000, rate: 600, mix: { madera: 0.25, piedra: 0.2, hierro: 0.3, oro: 0.25 } } },
+  { type: 'ciudadela', tier: 5, garrison: { barbaro: 110, arquero: 45 }, wall: 0.35, regenHours: 10, loot: { max: 18000, rate: 900, mix: { piedra: 0.2, hierro: 0.3, cristal: 0.2, oro: 0.3 } } },
+];
+
+/** Los seis vértices (entre tres sectores) alrededor del sector `index`. */
+export function sectorVertices(index) {
+  const c = sectorCenter(index);
+  const d = SECTOR_SPACING / Math.sqrt(3);
+  return Array.from({ length: 6 }, (_, k) => {
+    const a = ((30 + 60 * k) * Math.PI) / 180;
+    const x = Math.round(c.x + Math.cos(a) * d);
+    const z = Math.round(c.z + Math.sin(a) * d);
+    return { x, z, key: `${x}_${z}` };
+  });
+}
+
+/**
+ * Un pequeño continente en el vértice `v` (o null si no toca o no cabe), con
+ * sus asentamientos: ciudades bárbaras y tierras libres. `obstacles`: tierras de alrededor.
+ */
+export function generateContinent(v, worldSeed = 1, obstacles = []) {
+  let h = 2166136261;
+  for (const ch of v.key) h = Math.imul(h ^ ch.charCodeAt(0), 16777619);
+  const rand = rng(worldSeed * 31 + (h >>> 0));
+  if (rand() > CONTINENT_CHANCE) return null;
+  const clearance = (R) => Math.min(Infinity, ...obstacles.map((o) => Math.hypot(o.x - v.x, o.z - v.z) - o.r - R * 1.15));
+  let R = 44;
+  while (R >= 28 && clearance(R) < 4) R -= 2;
+  if (R < 28) return null;
+
+  const id = `c${v.key}`;
+  const pick = (list) => list[Math.floor(rand() * list.length)];
+  const shape = Array.from({ length: 18 }, () => Math.round((0.8 + rand() * 0.3) * 100) / 100);
+  const n = R >= 38 ? 4 : 3;
+  const turn = rand() * 360;
+  const kinds = ['ciudadela', 'libre', 'ciudadela', rand() < 0.5 ? 'ciudadela' : 'libre'].slice(0, n);
+  const sites = kinds.map((type, i) => {
+    const a = ((turn + (i * 360) / n + (rand() - 0.5) * 30) * Math.PI) / 180;
+    const d = R * (0.46 + rand() * 0.08);
+    const x = Math.round(v.x + Math.sin(a) * d);
+    const z = Math.round(v.z + Math.cos(a) * d);
+    const base = { id: `${id}-${i}`, land: id, x, z, size: 4.2 };
+    if (type === 'libre') {
+      const specialty = pick(['madera', 'piedra', 'hierro', 'cristal', 'oro', 'comida']);
+      return { ...base, type, name: `${pick(SITE_HEADS)} ${pick(LAND_TAILS)}`, specialty, yield: Math.round(SPECIALTY_YIELD[specialty] * 1.3) };
+    }
+    const t = CITADELS[i === 0 || rand() < 0.6 ? 0 : 1];
+    return { ...base, ...t, garrison: { ...t.garrison }, loot: { ...t.loot, mix: { ...t.loot.mix } }, name: `${pick(CITY_HEADS)} ${pick(CITY_TAILS)}` };
+  });
+  const land = {
+    id,
+    type: 'continente',
+    name: `${pick(LAND_HEADS)} ${pick(LAND_TAILS)}`,
+    x: v.x,
+    z: v.z,
+    size: Math.round((R / 2.4) * 10) / 10,
+    shape,
+    // Dónde están los asentamientos (relativo al centro), para trazar caminos y no plantar árboles encima
+    sites: sites.map((s) => [s.x - v.x, s.z - v.z]),
+  };
+  return [land, ...sites];
 }
 
 /** Isla de un jugador, en el centro de su sector. */

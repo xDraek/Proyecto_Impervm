@@ -12,27 +12,30 @@ import {
   createSoldier,
   createVillager,
   cyl,
+  WINDOW_GLOW,
   disposeTree,
+  gableRoof,
   mat,
+  mesh,
   wallHeight,
   windowMaterial,
 } from './models.js';
 import { createIslandBase, createIslandFeature, islandLook, islandRadius, shoreRadius } from './islands.js';
 import { escapeHtml } from '../ui/format.js';
-import { mountainGeometry, paintByNormal, plateauGeometry, polar, rng } from './util.js';
+import { Batch, bakeStatic, mountainGeometry, paintByNormal, plateauGeometry, polar, rng } from './util.js';
 import { createWater, setShores } from './water.js';
 import { clock } from '../config.js';
 
 const HORIZON = '#cfe8f7';
 const WATER_Y = -0.7;
-const ISLAND_R = 19;
+const ISLAND_R = 25;
 const BEACH_Y = -0.5;
-const ROAD_R = 10.4;
-const WALL_R = 11.7;
+const ROAD_R = 11.2;
+const WALL_R = 12.6;
 const GATE_ANGLE = 15;
-const HARBOR_R = 30; // radio por el que las flotas rodean la isla al salir
-const RAID_FROM = 260;
-const HOME_SHORE = 21.7; // donde la playa de tu isla corta el agua
+const HARBOR_R = 38; // radio por el que las flotas rodean la isla al salir
+const RAID_FROM = 280;
+const HOME_SHORE = 27.7; // donde la playa de tu isla corta el agua
 
 // Ciclo de día y noche (un día dura 20 minutos reales)
 const DAY_MS = 20 * 60 * 1000;
@@ -45,29 +48,36 @@ const SKIES = {
 // Disposición de la isla. Ángulo 0 = hacia +Z (la cámara mira desde unos 36°).
 const LAYOUT = {
   ayuntamiento: { r: 0, angle: 0 },
-  academia: { r: 7.8, angle: 60 },
-  almacen: { r: 7.8, angle: 145 },
-  templo: { r: 7.8, angle: 195 },
-  cuartel: { r: 7.8, angle: 245 },
-  mercado: { r: 7.8, angle: 330 },
-  granja: { r: 15, angle: 72 },
-  aserradero: { r: 15, angle: 125 },
-  cantera: { r: 15, angle: 178 },
-  mina: { r: 15, angle: 236 },
-  fundicion: { r: 15, angle: 292 },
-  coloso: { r: 15, angle: 345, ring: 1.15 },
+  academia: { r: 8, angle: 45 },
+  almacen: { r: 8, angle: 100 },
+  templo: { r: 8, angle: 155 },
+  cuartel: { r: 8, angle: 210 },
+  mercado: { r: 8, angle: 265 },
+  taberna: { r: 8, angle: 320 },
+  granja: { r: 18, angle: 60 },
+  aserradero: { r: 18, angle: 100 },
+  forja: { r: 18, angle: 140 },
+  cantera: { r: 18, angle: 178 },
+  mina: { r: 18, angle: 216 },
+  fundicion: { r: 18, angle: 254 },
+  torre: { r: 18, angle: 292 },
+  coloso: { r: 18, angle: 330, ring: 1.15 },
+  astillero: { r: 22.4, angle: 40, hit: 3.0 },
+  faro: { r: 23, angle: 352 },
   muralla: { r: WALL_R, angle: GATE_ANGLE, hit: 1.8, ring: 0.7 },
-  puerto: { r: 20.4, angle: GATE_ANGLE, y: BEACH_Y, hit: 3.2, hitZ: -2.6 },
+  puerto: { r: ISLAND_R + 1.4, angle: GATE_ANGLE, y: BEACH_Y, hit: 3.2, hitZ: -2.6 },
 };
-const INNER = ['academia', 'almacen', 'templo', 'cuartel', 'mercado'];
-const OUTER = ['granja', 'aserradero', 'cantera', 'mina', 'fundicion', 'coloso'];
+const INNER = ['academia', 'almacen', 'templo', 'cuartel', 'mercado', 'taberna'];
+const OUTER = ['granja', 'aserradero', 'forja', 'cantera', 'mina', 'fundicion', 'torre', 'coloso'];
+const COAST = ['astillero', 'faro'];
 const MOUNTAINS = [
-  { angle: 207, r: 18.6, radius: 3.4, height: 6.2 },
-  { angle: 190, r: 20.2, radius: 2.2, height: 3.8 },
-  { angle: 224, r: 20.4, radius: 2.0, height: 3.2 },
+  { angle: 197, r: 22.6, radius: 4.2, height: 7.6 },
+  { angle: 176, r: 24.2, radius: 2.5, height: 4.4 },
+  { angle: 220, r: 24.2, radius: 2.4, height: 3.8 },
+  { angle: 236, r: 23.6, radius: 1.8, height: 2.8 },
 ];
 const VIEWS = {
-  isla: { offset: new THREE.Vector3(26, 27, 36), min: 14, max: 90 },
+  isla: { offset: new THREE.Vector3(33, 34, 46), min: 16, max: 115 },
   mapa: { offset: new THREE.Vector3(0, 420, 250), min: 60, max: 900 },
 };
 const SHIP_PRIORITY = ['galeon', 'trirreme', 'mercante', 'bote'];
@@ -252,7 +262,7 @@ export class World {
     sun.position.set(26, 44, 20);
     sun.castShadow = true;
     sun.shadow.mapSize.set(2048, 2048);
-    Object.assign(sun.shadow.camera, { left: -28, right: 28, top: 28, bottom: -28, near: 1, far: 120 });
+    Object.assign(sun.shadow.camera, { left: -36, right: 36, top: 36, bottom: -36, near: 1, far: 140 });
     sun.shadow.bias = -0.0005;
     sun.shadow.normalBias = 0.03;
     scene.add(sun, sun.target);
@@ -311,14 +321,14 @@ export class World {
     const scene = this.scene;
 
     // Meseta de hierba con acantilados
-    const geo = plateauGeometry(ISLAND_R, ISLAND_R - 1.6, 2.2, 48, 0, 0);
+    const geo = plateauGeometry(ISLAND_R, ISLAND_R - 1.6, 2.2, 64, 0, 0);
     paintByNormal(geo, (ny, cy) => (ny > 0.7 ? '#6fae4a' : cy > -0.8 ? '#8a6a46' : '#7c7466'));
     const island = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 1 }));
     island.receiveShadow = true;
     island.castShadow = true;
     scene.add(island);
 
-    const sand = new THREE.Mesh(new THREE.CylinderGeometry(ISLAND_R + 2.5, ISLAND_R + 4.2, 1.6, 48), mat('#e8d49a'));
+    const sand = new THREE.Mesh(new THREE.CylinderGeometry(ISLAND_R + 2.5, ISLAND_R + 4.2, 1.6, 64), mat('#e8d49a'));
     sand.position.y = BEACH_Y - 0.8;
     sand.receiveShadow = true;
     scene.add(sand);
@@ -337,7 +347,7 @@ export class World {
       this.roads.push({ deg, from, to, width });
     };
     for (const id of INNER) road(LAYOUT[id].angle, 3.2, LAYOUT[id].r - 2.2);
-    for (const id of OUTER) road(LAYOUT[id].angle, ROAD_R, LAYOUT[id].r - 2.2);
+    for (const id of [...OUTER, ...COAST]) road(LAYOUT[id].angle, ROAD_R, LAYOUT[id].r - 2.2);
     road(GATE_ANGLE, 3.2, ISLAND_R - 0.9, 1.3);
     const ringGeo = new THREE.RingGeometry(ROAD_R - 0.45, ROAD_R + 0.45, 72);
     ringGeo.rotateX(-Math.PI / 2);
@@ -364,16 +374,16 @@ export class World {
       scene.add(mountain);
     }
 
-    // Bosque (más denso junto al aserradero) y rocas, sin pisar nada
+    // Lo que no se puede pisar: edificios, montañas, calles y la muralla
     const rand = rng(7);
     const blockers = [
       { p: new THREE.Vector3(), r: 4.2 },
       ...Object.entries(LAYOUT)
-        .filter(([id]) => id !== 'ayuntamiento')
-        .map(([, l]) => ({ p: polar(l.r, l.angle), r: 3.5 })),
+        .filter(([id]) => id !== 'ayuntamiento' && id !== 'puerto' && id !== 'muralla')
+        .map(([, l]) => ({ p: polar(l.r, l.angle), r: 3.6 })),
       ...MOUNTAINS.map((m) => ({ p: polar(m.r, m.angle), r: m.radius + 0.6 })),
     ];
-    const free = (p) => {
+    const free = (p, pad = 0.7) => {
       const r = Math.hypot(p.x, p.z);
       if (r > ISLAND_R - 1.3) return false;
       if (r > ROAD_R - 1.0 && r < WALL_R + 0.9) return false;
@@ -381,46 +391,143 @@ export class World {
         const a = THREE.MathUtils.degToRad(rd.deg);
         const along = p.x * Math.sin(a) + p.z * Math.cos(a);
         const across = Math.abs(p.x * Math.cos(a) - p.z * Math.sin(a));
-        if (along > rd.from - 0.5 && along < rd.to + 0.5 && across < rd.width / 2 + 0.7) return false;
+        if (along > rd.from - 0.5 && along < rd.to + 0.5 && across < rd.width / 2 + pad) return false;
       }
       return blockers.every((b) => b.p.distanceTo(p) > b.r);
     };
-    const trunkGeo = new THREE.CylinderGeometry(0.1, 0.15, 0.6, 6);
-    const leafGeo = new THREE.ConeGeometry(0.75, 1.5, 7);
-    const leafColors = ['#3f8a3a', '#4f9a3a', '#2f7a43'];
-    const forest = polar(16.5, LAYOUT.aserradero.angle);
+    // Todo lo que no se mueve va junto en una sola malla: se pueden poner muchos más detalles
+    const decor = new Batch(windowMaterial());
+    const place = (obj, p, rotY = 0, scale = 1) => {
+      obj.position.copy(p);
+      obj.rotation.y = rotY;
+      obj.scale.setScalar(scale);
+      decor.add(obj);
+    };
+
+    // Campos de cultivo y un prado con ovejas junto a la granja
+    const farm = LAYOUT.granja;
+    const crops = ['#e3c25a', '#cfb24a', '#8fbf4a', '#d9b44a'];
+    for (let ring = 0; ring < 3; ring++) {
+      for (let k = -2; k <= 2; k++) {
+        const p = polar(farm.r + 3.2 + ring * 1.8, farm.angle + k * 9);
+        if (!free(p, 0.4)) continue;
+        blockers.push({ p, r: 1.0 });
+        const field = new THREE.Group();
+        field.add(box(1.6, 0.1, 1.25, '#8a6a46'));
+        for (let row = 0; row < 4; row++) field.add(box(1.5, 0.12, 0.18, crops[(ring + k + 9) % 4], 0, 0.1, -0.45 + row * 0.3));
+        place(field, p, THREE.MathUtils.degToRad(farm.angle + k * 9));
+      }
+    }
+    for (let i = 0; i < 7; i++) {
+      const p = polar(farm.r + 2.2 + rand() * 4, farm.angle + 28 + rand() * 14);
+      if (!free(p, 0.3)) continue;
+      place(sheep(), p, rand() * Math.PI * 2, 0.9 + rand() * 0.3);
+    }
+
+    // Barrios: las casas van apareciendo al subir el ayuntamiento (primero dentro de la muralla)
+    this.houseSpots = [];
+    for (let tries = 0; tries < 2500 && this.houseSpots.length < 70; tries++) {
+      const inside = tries % 3 !== 2;
+      const p = inside
+        ? polar(4.7 + rand() * (ROAD_R - 6.0), rand() * 360)
+        : polar(WALL_R + 1.4 + rand() * (ISLAND_R - WALL_R - 3.2), rand() * 360);
+      if (!free(p, 0.75)) continue;
+      blockers.push({ p, r: 1.3 });
+      this.houseSpots.push({
+        p,
+        inside,
+        rot: Math.atan2(-p.x, -p.z) + (rand() - 0.5) * 0.5,
+        w: 0.9 + rand() * 0.5,
+        d: 0.8 + rand() * 0.35,
+        h: 0.7 + rand() * 0.3,
+        roof: Math.floor(rand() * 5),
+        tall: rand() < 0.4,
+        chimney: rand() < 0.4,
+      });
+    }
+    this.houseSpots.sort((a, b) => Number(b.inside) - Number(a.inside) || a.p.length() - b.p.length());
+    this.houseGroup = new THREE.Group();
+    scene.add(this.houseGroup);
+
+    // Farolas a los lados de la avenida del puerto (se encienden de noche)
+    const gate = THREE.MathUtils.degToRad(GATE_ANGLE);
+    for (let d = 4.6; d < ISLAND_R - 1.5; d += 3.1) {
+      if (Math.abs(d - WALL_R) < 1.4) continue;
+      for (const side of [-1, 1]) {
+        const p = new THREE.Vector3(Math.sin(gate) * d + Math.cos(gate) * side * 1.05, 0, Math.cos(gate) * d - Math.sin(gate) * side * 1.05);
+        const lamp = new THREE.Group();
+        lamp.add(cyl(0.05, 0.07, 1.5, 6, C.dark));
+        lamp.add(box(0.2, 0.22, 0.2, C.dark, 0, 1.5, 0), box(0.14, 0.16, 0.14, C.dark, 0, 1.53, 0, WINDOW_GLOW));
+        place(lamp, p);
+      }
+    }
+
+    // Bosque (más denso junto al aserradero)
+    const leafColors = ['#3f8a3a', '#4f9a3a', '#2f7a43', '#5a9e3c'];
+    const forest = polar(ISLAND_R - 3.5, LAYOUT.aserradero.angle + 8);
     let trees = 0;
-    for (let tries = 0; tries < 1200 && trees < 95; tries++) {
-      const p = tries % 3 === 0 ? forest.clone().add(polar(rand() * 6, rand() * 360)) : polar(3.5 + rand() * 15, rand() * 360);
+    for (let tries = 0; tries < 2600 && trees < 190; tries++) {
+      const p = tries % 3 === 0 ? forest.clone().add(polar(rand() * 7, rand() * 360)) : polar(3.5 + rand() * (ISLAND_R - 4), rand() * 360);
       if (!free(p)) continue;
-      blockers.push({ p, r: 0.9 });
-      const t = new THREE.Group();
-      const trunk = new THREE.Mesh(trunkGeo, mat(C.woodDark));
-      trunk.position.y = 0.3;
-      const leaves = new THREE.Mesh(leafGeo, mat(leafColors[trees % 3]));
-      leaves.position.y = 1.25;
-      const leaves2 = new THREE.Mesh(leafGeo, mat(leafColors[(trees + 1) % 3]));
-      leaves2.position.y = 1.85;
-      leaves2.scale.setScalar(0.7);
-      for (const m of [trunk, leaves, leaves2]) m.castShadow = m.receiveShadow = true;
-      t.add(trunk, leaves, leaves2);
-      t.position.copy(p);
-      t.scale.setScalar(0.75 + rand() * 0.55);
-      t.rotation.y = rand() * Math.PI;
-      scene.add(t);
+      blockers.push({ p, r: 0.85 });
+      place(pine(leafColors[trees % 4], rand() < 0.2), p, rand() * Math.PI, 0.7 + rand() * 0.6);
       trees++;
     }
+    // Arbustos y flores
+    const flowers = ['#e86a8a', '#f2c94c', '#ffffff', '#b07ad9', '#ff8a5a'];
+    for (let i = 0, placed = 0; i < 900 && placed < 90; i++) {
+      const p = polar(3 + rand() * (ISLAND_R - 3.5), rand() * 360);
+      if (!free(p, 0.3)) continue;
+      placed++;
+      const bush = new THREE.Group();
+      bush.add(mesh(new THREE.DodecahedronGeometry(0.32), placed % 3 ? '#4f9a3a' : '#3f8a3a'));
+      bush.children[0].position.y = 0.2;
+      if (placed % 2) for (let k = 0; k < 3; k++) bush.add(box(0.1, 0.1, 0.1, flowers[(placed + k) % 5], Math.sin(k * 2.1) * 0.25, 0.3, Math.cos(k * 2.1) * 0.25));
+      place(bush, p, 0, 0.7 + rand() * 0.6);
+    }
+    // Rocas
     const rockGeo = new THREE.DodecahedronGeometry(0.4);
-    for (let i = 0, placed = 0; i < 400 && placed < 20; i++) {
-      const p = polar(4 + rand() * 14, rand() * 360);
+    for (let i = 0, placed = 0; i < 600 && placed < 34; i++) {
+      const p = polar(4 + rand() * (ISLAND_R - 5), rand() * 360);
       if (!free(p)) continue;
-      const rock = new THREE.Mesh(rockGeo, mat(C.stone));
+      const rock = new THREE.Mesh(rockGeo, mat(placed % 3 ? C.stone : C.stoneDark));
       rock.position.set(p.x, 0.1, p.z);
       rock.scale.set(0.6 + rand(), 0.5 + rand() * 0.5, 0.6 + rand());
-      rock.castShadow = rock.receiveShadow = true;
-      scene.add(rock);
+      decor.add(rock);
       placed++;
     }
+
+    // La playa: palmeras, barcas varadas, redes y cabañas de pescadores
+    const busy = [GATE_ANGLE, LAYOUT.astillero.angle, LAYOUT.faro.angle];
+    const nearBusy = (a, w) => busy.some((b) => Math.abs(((a - b + 540) % 360) - 180) < w);
+    for (let i = 0; i < 34; i++) {
+      const a = rand() * 360;
+      if (nearBusy(a, 12)) continue;
+      place(palm(), polar(ISLAND_R + 1.3 + rand() * 1.6, a, BEACH_Y), rand() * Math.PI, 0.9 + rand() * 0.5);
+    }
+    for (let i = 0; i < 5; i++) {
+      const a = 40 + i * 62 + rand() * 20;
+      if (nearBusy(a, 16)) continue;
+      const boat = createShip('bote');
+      boat.rotation.set(0.05, THREE.MathUtils.degToRad(a) + Math.PI / 2, 0.25);
+      boat.position.copy(polar(ISLAND_R + 2.4, a, BEACH_Y + 0.08));
+      boat.scale.setScalar(1.7);
+      decor.add(boat);
+      // Red tendida a secar
+      const net = new THREE.Group();
+      net.add(box(0.06, 0.8, 0.06, C.woodDark, -0.6, 0, 0), box(0.06, 0.8, 0.06, C.woodDark, 0.6, 0, 0), box(1.2, 0.5, 0.03, '#c9b48a', 0, 0.25, 0));
+      place(net, polar(ISLAND_R + 1.4, a + 6, BEACH_Y), THREE.MathUtils.degToRad(a));
+    }
+    for (const a of [GATE_ANGLE + 52, GATE_ANGLE + 200, GATE_ANGLE + 255]) {
+      if (nearBusy(a, 14)) continue;
+      const hut = new THREE.Group();
+      hut.add(box(1.4, 0.9, 1.1, C.woodLight));
+      hut.add(gableRoof(1.6, 0.6, 1.3, '#9c7a4a', 0, 0.9, 0));
+      hut.add(box(0.35, 0.55, 0.05, C.woodDark, 0, 0, 0.56));
+      for (const x of [-0.5, 0.5]) hut.add(cyl(0.06, 0.06, 1.0, 5, C.woodDark, x, -0.6, -0.6));
+      place(hut, polar(ISLAND_R + 1.9, a, BEACH_Y), THREE.MathUtils.degToRad(a) + Math.PI);
+    }
+    scene.add(decor.build());
 
     this.wallGroup = new THREE.Group();
     scene.add(this.wallGroup);
@@ -449,6 +556,7 @@ export class World {
       const hit = new THREE.Mesh(new THREE.CylinderGeometry(hitR, hitR, 5, 12), hitMat);
       hit.position.set(0, 2.5, l.hitZ ?? 0);
       hit.userData.slot = id;
+      hit.visible = false;
       root.add(hit);
       this.hitTargets.push(hit);
       root.updateMatrixWorld(true);
@@ -495,9 +603,12 @@ export class World {
       group.add(createIslandBase(isl));
       this.scene.add(group);
 
-      const hit = new THREE.Mesh(new THREE.CylinderGeometry(radius + 2, radius + 2, 10, 16), hitMat);
-      hit.position.y = 3;
+      // El continente se pulsa por su suelo; sus asentamientos, más altos, tienen prioridad
+      const flat = isl.type === 'continente';
+      const hit = new THREE.Mesh(new THREE.CylinderGeometry(radius + 2, radius + 2, flat ? 0.6 : 10, 16), hitMat);
+      hit.position.y = flat ? 0.2 : 3;
       hit.userData.slot = isl.id;
+      hit.visible = false; // solo para el ratón: no se dibuja
       group.add(hit);
       this.hitTargets.push(hit);
 
@@ -506,7 +617,7 @@ export class World {
       el.innerHTML = `<span class="label-name">${escapeHtml(isl.name)}</span><span class="label-lvl"></span>`;
       const label = new CSS2DObject(el);
       // Debajo de la isla en pantalla, para no taparla
-      label.position.set(pos.x, 0, pos.z + radius * 1.35 + 3);
+      label.position.set(pos.x, 0, pos.z + (isl.land ? radius * 0.75 : radius * 1.35 + 3));
       label.visible = this.view === 'mapa';
       this.scene.add(label);
 
@@ -515,6 +626,7 @@ export class World {
     // Espuma en las orillas más cercanas (el mar admite un número limitado)
     const shores = Object.values(this.islands)
       .map((e) => ({ x: e.pos.x, z: e.pos.z, r: shoreRadius(e.isl), d: e.pos.length() }))
+      .filter((e) => e.r > 0)
       .sort((a, b) => a.d - b.d);
     setShores(this.water, [{ x: 0, z: 0, r: HOME_SHORE }, ...shores]);
   }
@@ -558,7 +670,7 @@ export class World {
     const rand = rng(99);
     for (let i = 0; i < 7; i++) {
       const gull = createGull();
-      gull.userData.fly = { r: 9 + rand() * 18, h: 9 + rand() * 6, speed: (0.15 + rand() * 0.15) * (i % 2 ? 1 : -1), phase: rand() * Math.PI * 2 };
+      gull.userData.fly = { r: 12 + rand() * 24, h: 10 + rand() * 7, speed: (0.15 + rand() * 0.15) * (i % 2 ? 1 : -1), phase: rand() * Math.PI * 2 };
       this.scene.add(gull);
       this.gulls.push(gull);
     }
@@ -566,7 +678,7 @@ export class World {
 
   /** Aldeanos paseando por la ronda y la avenida del puerto (más cuanto más grande es la ciudad). */
   #syncVillagers() {
-    const n = Math.min(26, 4 + 2 * this.game.level('ayuntamiento'));
+    const n = Math.min(34, 6 + 2 * this.game.level('ayuntamiento'));
     if (n === this.villagers.length) return;
     for (const v of this.villagers) this.lifeGroup.remove(v);
     this.villagers = [];
@@ -575,11 +687,43 @@ export class World {
       const v = createVillager(i);
       const avenue = i % 3 === 0;
       v.userData.walk = avenue
-        ? { avenue, s: 4 + rand() * 13, dir: rand() < 0.5 ? 1 : -1, speed: 0.5 + rand() * 0.4, lane: (rand() - 0.5) * 0.8 }
+        ? { avenue, s: 4 + rand() * (ISLAND_R - 6), dir: rand() < 0.5 ? 1 : -1, speed: 0.5 + rand() * 0.4, lane: (rand() - 0.5) * 0.8 }
         : { avenue, a: rand() * Math.PI * 2, dir: rand() < 0.5 ? 1 : -1, speed: 0.45 + rand() * 0.45, lane: rand() < 0.5 ? -0.22 : 0.22 };
       this.lifeGroup.add(v);
       this.villagers.push(v);
     }
+  }
+
+  /** Casas de los barrios: más cuanto más grande es el ayuntamiento. */
+  #syncHouses() {
+    const level = this.game.level('ayuntamiento');
+    const n = Math.min(this.houseSpots.length, 8 + level * 5);
+    const key = `${n}|${level >= 4}`;
+    if (this.housesKey === key) return;
+    this.housesKey = key;
+    for (const c of [...this.houseGroup.children]) {
+      this.houseGroup.remove(c);
+      disposeTree(c);
+    }
+    const roofs = [C.roofRed, C.roofBlue, C.roofRed, '#a0522d', C.roofGrey];
+    const batch = new Batch(windowMaterial());
+    this.houseSpots.slice(0, n).forEach((s, i) => {
+      const h = new THREE.Group();
+      const floors = s.tall && level >= 4 ? 2 : 1;
+      const wallH = s.h * floors;
+      h.add(box(s.w, wallH, s.d, i % 4 === 0 ? C.wallDark : C.wall));
+      if (floors > 1) h.add(box(s.w + 0.04, 0.06, s.d + 0.04, C.woodDark, 0, s.h, 0));
+      h.add(gableRoof(s.w + 0.2, 0.5, s.d + 0.22, roofs[s.roof], 0, wallH, 0));
+      h.add(box(0.26, 0.42, 0.04, C.woodDark, 0, 0, s.d / 2 + 0.01));
+      for (let f = 0; f < floors; f++) {
+        for (const x of [-s.w * 0.3, s.w * 0.3]) h.add(box(0.18, 0.18, 0.04, C.dark, x, 0.3 + f * s.h + (f ? 0 : 0.05), s.d / 2 + 0.01, WINDOW_GLOW));
+      }
+      if (s.chimney) h.add(box(0.16, 0.5, 0.16, C.stone, s.w * 0.25, wallH + 0.1, -s.d * 0.2));
+      h.position.copy(s.p);
+      h.rotation.y = s.rot;
+      batch.add(h);
+    });
+    this.houseGroup.add(batch.build());
   }
 
   #updateLife(dt, t) {
@@ -589,7 +733,7 @@ export class World {
       const bob = Math.abs(Math.sin(t * 9 + i)) * 0.04;
       if (w.avenue) {
         w.s += w.dir * w.speed * dt;
-        if (w.s > 17.4 || w.s < 3.8) w.dir *= -1;
+        if (w.s > ISLAND_R - 1.8 || w.s < 3.8) w.dir *= -1;
         v.position.set(Math.sin(gate) * w.s + Math.cos(gate) * w.lane, bob, Math.cos(gate) * w.s - Math.sin(gate) * w.lane);
         v.rotation.y = gate + (w.dir > 0 ? 0 : Math.PI);
       } else {
@@ -655,6 +799,7 @@ export class World {
 
   sync() {
     this.#syncVillagers();
+    this.#syncHouses();
     this.#syncBuildings();
     this.#syncWall();
     this.#syncExtras();
@@ -717,7 +862,7 @@ export class World {
     }
     if (level <= 0) return;
     const h = wallHeight(level);
-    const gaps = [{ a: GATE_ANGLE, w: 9 }, ...OUTER.map((id) => ({ a: LAYOUT[id].angle, w: 4.5 }))];
+    const gaps = [{ a: GATE_ANGLE, w: 8 }, ...[...OUTER, ...COAST].map((id) => ({ a: LAYOUT[id].angle, w: 4 }))];
     const blocked = (a) => gaps.some((g) => Math.abs(((a - g.a + 540) % 360) - 180) < g.w);
     const step = 4;
     const len = 2 * WALL_R * Math.sin(THREE.MathUtils.degToRad(step / 2)) + 0.06;
@@ -745,6 +890,7 @@ export class World {
         this.wallGroup.add(tower, roof);
       }
     }
+    bakeStatic(this.wallGroup);
   }
 
   /** Tropas en el patio del cuartel y barcos amarrados en el puerto. */
@@ -773,6 +919,7 @@ export class World {
         for (let j = 0; j < k; j++) list.push(id);
       });
       list.slice(0, spots.length).forEach((id, i) => make(slot.extras, id, spots[i], i));
+      bakeStatic(slot.extras);
     };
 
     fill(this.slots.cuartel, LAND_UNITS, 'yard', (g, id, spot, i) => {
@@ -806,7 +953,7 @@ export class World {
         entry.group.add(entry.feature);
       }
       const t = ISLAND_TYPES[entry.isl.type];
-      let status = !view.explored ? '❔ Inexplorada' : `${t.icon} ${t.name}`;
+      let status = !view.explored ? '❔ Inexplorada' : `${t.icon} ${view.typeName}`;
       const ally = view.alliance && view.alliance.id === this.game.alliance?.id;
       if (view.type === 'jugador') {
         const tag = view.alliance ? `[${view.alliance.tag}] ` : '';
@@ -814,6 +961,7 @@ export class World {
       } else if (view.colonized) status = `🚩 Tu colonia · Nv ${view.colony?.level ?? 1}${view.colony?.upgradeEnd ? ' 🔨' : ''}`;
       else if (view.colonizedBy != null) status = `🚩 Colonia de ${view.colonistName}`;
       else if (view.explored && view.tier) status += ` · Nv ${view.tier}`;
+      if (view.type === 'continente') status = `🗺️ Continente · ${entry.isl.sites?.length ?? 0} asentamientos`;
       if (view.inbound.length) status += ' · ⛵';
       entry.el.querySelector('.label-lvl').textContent = status;
       entry.el.classList.toggle('colony', !!view.colonized);
@@ -833,7 +981,7 @@ export class World {
     const a0 = GATE_ANGLE;
     const a1 = THREE.MathUtils.radToDeg(Math.atan2(pos.x, pos.z));
     const delta = ((a1 - a0 + 540) % 360) - 180;
-    const points = [polar(26, a0), polar(HARBOR_R, a0)];
+    const points = [polar(ISLAND_R + 7, a0), polar(HARBOR_R, a0)];
     const steps = Math.ceil(Math.abs(delta) / 15);
     for (let i = 1; i <= steps; i++) points.push(polar(HARBOR_R, a0 + (delta * i) / steps));
     points.push(polar(Math.max(HARBOR_R + 5, dist - (entry?.radius ?? 10) * 1.35 - 2), a1));
@@ -1081,3 +1229,45 @@ export class World {
   }
 }
 
+// ── Piezas de decoración de la isla ─────────────────────────────────────────
+
+function pine(color, round) {
+  const t = new THREE.Group();
+  t.add(cyl(0.1, 0.15, 0.6, 6, C.woodDark));
+  if (round) {
+    const crown = mesh(new THREE.DodecahedronGeometry(0.75), color);
+    crown.position.y = 1.2;
+    t.add(crown);
+    return t;
+  }
+  const leaves = mesh(new THREE.ConeGeometry(0.75, 1.5, 7), color);
+  leaves.position.y = 1.25;
+  const top = mesh(new THREE.ConeGeometry(0.75, 1.5, 7), color);
+  top.position.y = 1.85;
+  top.scale.setScalar(0.7);
+  t.add(leaves, top);
+  return t;
+}
+
+function palm() {
+  const t = new THREE.Group();
+  const trunk = cyl(0.08, 0.12, 1.5, 5, C.woodLight);
+  trunk.rotation.z = 0.15;
+  t.add(trunk);
+  for (let k = 0; k < 6; k++) {
+    const leaf = box(0.95, 0.04, 0.24, k % 2 ? '#4f9a3a' : '#3f8a3a', 0, 0, 0);
+    leaf.geometry.translate(0.47, 0, 0);
+    leaf.position.set(0.22, 1.45, 0);
+    leaf.rotation.set(0, (k * Math.PI * 2) / 6, -0.35);
+    t.add(leaf);
+  }
+  return t;
+}
+
+function sheep() {
+  const g = new THREE.Group();
+  g.add(box(0.42, 0.26, 0.28, '#f4f1e8', 0, 0.14, 0));
+  g.add(box(0.14, 0.14, 0.14, '#3a332c', 0.26, 0.26, 0));
+  for (const [x, z] of [[-0.14, -0.09], [0.14, -0.09], [-0.14, 0.09], [0.14, 0.09]]) g.add(box(0.05, 0.14, 0.05, '#3a332c', x, 0, z));
+  return g;
+}
