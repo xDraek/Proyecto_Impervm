@@ -1,5 +1,6 @@
 import { createReadStream } from 'node:fs';
-import { stat } from 'node:fs/promises';
+import { readFile, stat } from 'node:fs/promises';
+import { brotliCompressSync, constants as zlib, gzipSync } from 'node:zlib';
 import { createServer } from 'node:http';
 import { WebSocketServer } from 'ws';
 import { extname, join, normalize } from 'node:path';
@@ -91,6 +92,7 @@ const ACTIONS = {
   recall: (g, [id]) => g.recall(int(id)),
   claimQuest: (g, [id]) => (typeof id === 'string' ? g.claimQuest(id) : bad()),
   claimDaily: (g) => g.claimDaily(),
+  claimTask: (g, [id]) => (typeof id === 'string' ? g.claimTask(id) : bad()),
   castPower: (g, [id]) => (own(POWERS, id) ? g.castPower(id) : bad()),
   acceptVisitor: (g) => g.acceptVisitor(),
   dismissVisitor: (g) => g.dismissVisitor(),
@@ -124,9 +126,31 @@ setInterval(() => {
 
 // ── HTTP ──────────────────────────────────────────────────────────────────────
 
+/** Qué compresión acepta el navegador ('br', 'gzip' o null). */
+function encodingFor(req) {
+  const accept = String(req?.headers['accept-encoding'] ?? '')
+    .split(',')
+    .map((s) => s.trim().split(';')[0]);
+  return accept.includes('br') ? 'br' : accept.includes('gzip') ? 'gzip' : null;
+}
+
+function compress(data, encoding, level = 'fast') {
+  if (encoding === 'br') {
+    return brotliCompressSync(data, { params: { [zlib.BROTLI_PARAM_QUALITY]: level === 'fast' ? 4 : 11, [zlib.BROTLI_PARAM_SIZE_HINT]: data.length } });
+  }
+  return gzipSync(data, { level: level === 'fast' ? 5 : 9 });
+}
+
 function send(res, status, body) {
-  const data = JSON.stringify(body);
-  res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
+  const data = Buffer.from(JSON.stringify(body));
+  const headers = { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store', vary: 'accept-encoding' };
+  // El estado de la partida pesa decenas de KB: comprimido, unas pocas
+  const encoding = data.length > 1024 ? encodingFor(res.req) : null;
+  if (encoding) {
+    res.writeHead(status, { ...headers, 'content-encoding': encoding });
+    return res.end(compress(data, encoding));
+  }
+  res.writeHead(status, headers);
   res.end(data);
 }
 
@@ -334,12 +358,21 @@ async function serveStatic(req, res, url) {
     return res.end('Falta compilar el juego: npm run build');
   }
   const immutable = file.includes(`${join('dist', 'assets')}`);
-  res.writeHead(200, {
-    'content-type': TYPES[extname(file)] ?? 'application/octet-stream',
-    'cache-control': immutable ? 'public, max-age=31536000, immutable' : 'no-cache',
-  });
+  const type = TYPES[extname(file)] ?? 'application/octet-stream';
+  const headers = { 'content-type': type, 'cache-control': immutable ? 'public, max-age=31536000, immutable' : 'no-cache', vary: 'accept-encoding' };
+  // Código, estilos y la página se mandan comprimidos (se comprimen una vez y se guardan)
+  const encoding = /javascript|css|html|json|svg/.test(type) ? encodingFor(req) : null;
+  if (encoding) {
+    const key = `${encoding}:${file}`;
+    if (!compressed.has(key)) compressed.set(key, compress(await readFile(file), encoding, 'max'));
+    res.writeHead(200, { ...headers, 'content-encoding': encoding });
+    return res.end(compressed.get(key));
+  }
+  res.writeHead(200, headers);
   createReadStream(file).pipe(res);
 }
+
+const compressed = new Map();
 
 let vite = null;
 if (DEV) {
@@ -355,7 +388,8 @@ const server = createServer((req, res) => {
 });
 
 // Conexión en vivo: el servidor empuja estados y mensajes del chat al momento
-const wss = new WebSocketServer({ noServer: true, maxPayload: 4096 });
+// Los mensajes grandes (el estado de la partida) van comprimidos si el navegador lo admite
+const wss = new WebSocketServer({ noServer: true, maxPayload: 4096, perMessageDeflate: { threshold: 2048 } });
 server.on('upgrade', (req, socket, head) => {
   const url = new URL(req.url, 'http://localhost');
   if (url.pathname !== '/ws') return; // otras conexiones (p. ej. la recarga de Vite) no son nuestras

@@ -696,6 +696,25 @@ export const DAILY_REWARDS = [
 // ── Logros ───────────────────────────────────────────────────────────────────
 // Se ganan solos al cumplirse y se enseñan en el perfil del jugador.
 
+// ── Encargos diarios ─────────────────────────────────────────────────────────
+// Cada día tocan tres, elegidos entre los que puedes hacer. Las cifras crecen
+// con el ayuntamiento; cuenta lo que hagas desde que empieza el día.
+
+export const DAILY_TASKS = {
+  obras: { icon: '🔨', text: (n) => `Invierte ${n.toLocaleString('es-ES')} recursos en obras o investigaciones`, stat: 'spent', need: (t) => 400 * t },
+  mejoras: { icon: '🏗️', text: (n) => `Termina ${n} ${n === 1 ? 'mejora' : 'mejoras'} de edificios`, stat: 'upgrades', need: (t) => (t < 4 ? 2 : 3) },
+  sabios: { icon: '📚', text: () => 'Termina una investigación', stat: 'researched', need: () => 1, requires: { academia: 1 } },
+  tropas: { icon: '🛡️', text: (n) => `Entrena ${n} unidades`, stat: 'trained', need: (t) => 5 + 3 * t, requires: { cuartel: 1 } },
+  saqueo: { icon: '💰', text: (n) => `Saquea ${n.toLocaleString('es-ES')} recursos`, stat: 'loot', need: (t) => 250 * t, requires: { puerto: 1 } },
+  combate: { icon: '⚔️', text: (n) => `Abate a ${n} enemigos`, stat: 'kills', need: (t) => 8 + 4 * t, requires: { puerto: 1, cuartel: 1 } },
+  explorar: { icon: '🔭', text: (n) => `Explora o espía ${n} ${n === 1 ? 'isla' : 'islas'}`, stat: 'explorations', need: (t) => 1 + Math.floor(t / 3), requires: { puerto: 1 } },
+  mercado: { icon: '⚖️', text: (n) => `Haz ${n} cambios en el mercado`, stat: 'exchanges', need: () => 2, requires: { mercado: 1 } },
+  favor: { icon: '🙏', text: () => 'Invoca un poder divino', stat: 'powers', need: () => 1, requires: { templo: 1 } },
+  transporte: { icon: '📦', text: () => 'Manda un transporte a otro jugador', stat: 'transports', need: () => 1, requires: { puerto: 1 } },
+};
+export const DAILY_TASK_REWARD = { madera: 250, piedra: 250, comida: 200, oro: 60 };
+export const DAILY_TASK_BONUS = { cristal: 300, oro: 200, favor: 20 };
+
 // ── Competición semanal ──────────────────────────────────────────────────────
 // Cada semana se premia a los tres mejores de cada categoría por lo que han
 // hecho esa semana (no por lo acumulado).

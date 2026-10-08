@@ -173,6 +173,10 @@ export class ClientGame extends Game {
     return this.#act('claimQuest', id);
   }
 
+  claimTask(id) {
+    return this.#act('claimTask', id);
+  }
+
   claimDaily() {
     return this.#act('claimDaily');
   }

@@ -5,6 +5,9 @@ import {
   BUILDING_KEYS,
   COLONY,
   DAILY_REWARDS,
+  DAILY_TASKS,
+  DAILY_TASK_BONUS,
+  DAILY_TASK_REWARD,
   DIPLOMACY,
   HERO,
   HERO_SKILLS,
@@ -108,7 +111,7 @@ export function newState({ now = clock.now(), home, name }) {
     notes: [],
     favor: 0,
     buffs: {},
-    stats: { spent: 0, victories: 0, raidsRepelled: 0, expeditions: 0, powers: 0, treasures: 0, kraken: 0, pvpWins: 0, trades: 0, transports: 0, kills: 0, loot: 0, conquests: 0, donated: 0, contestWins: 0 },
+    stats: { spent: 0, victories: 0, raidsRepelled: 0, expeditions: 0, powers: 0, treasures: 0, kraken: 0, pvpWins: 0, trades: 0, transports: 0, kills: 0, loot: 0, conquests: 0, donated: 0, contestWins: 0, trained: 0, explorations: 0, exchanges: 0, upgrades: 0, researched: 0 },
     daily: { last: null, streak: 0, best: 0 },
     hero: null,
     quests: { claimed: [] },
@@ -302,7 +305,70 @@ export class Game extends EventTarget {
   }
 
   claimableQuests() {
-    return this.activeQuests().filter((q) => q.done).length;
+    return this.activeQuests().filter((q) => q.done).length + this.dailyTasks().filter((t) => t.done && !t.claimed).length;
+  }
+
+  // ── Encargos diarios ───────────────────────────────────────────────────────
+
+  /** Al empezar el día se eligen tres encargos entre los posibles (lo decide el servidor). */
+  #ensureTasks(now) {
+    const day = Math.floor(now / 86_400_000);
+    if (this.state.tasks?.day === day) return;
+    const eligible = Object.entries(DAILY_TASKS)
+      .filter(([, t]) => Object.entries(t.requires ?? {}).every(([b, n]) => this.level(b) >= n))
+      .map(([id]) => id);
+    // Barajado con una semilla del día y del jugador: siempre los mismos ese día
+    let seed = (day * 2654435761 + Number(this.userId ?? 0) * 40503) >>> 0;
+    const rand = () => ((seed = (Math.imul(seed ^ (seed >>> 15), 2246822519) + 0x9e3779b9) >>> 0) / 4294967296);
+    for (let i = eligible.length - 1; i > 0; i--) {
+      const j = Math.floor(rand() * (i + 1));
+      [eligible[i], eligible[j]] = [eligible[j], eligible[i]];
+    }
+    const town = Math.max(1, this.level('ayuntamiento'));
+    const picks = eligible.slice(0, 3).map((id) => ({ id, need: DAILY_TASKS[id].need(town) }));
+    const base = {};
+    for (const p of picks) base[DAILY_TASKS[p.id].stat] = this.state.stats[DAILY_TASKS[p.id].stat] ?? 0;
+    this.state.tasks = { day, town, picks, base, claimed: [] };
+    this.#dirty = true;
+  }
+
+  /** Los encargos de hoy con lo que llevas de cada uno. */
+  dailyTasks() {
+    const t = this.state.tasks;
+    if (!t) return [];
+    return t.picks.map((p) => {
+      const def = DAILY_TASKS[p.id];
+      const progress = Math.floor((this.state.stats[def.stat] ?? 0) - (t.base[def.stat] ?? 0));
+      return { ...p, icon: def.icon, text: def.text(p.need), progress: Math.min(progress, p.need), done: progress >= p.need, claimed: t.claimed.includes(p.id) };
+    });
+  }
+
+  /** Recompensa de un encargo (y la de los tres, si es el último). */
+  taskReward() {
+    const k = 1 + 0.3 * (Math.max(1, this.state.tasks?.town ?? 1) - 1);
+    const out = {};
+    for (const [r, n] of Object.entries(DAILY_TASK_REWARD)) out[r] = Math.round(n * k);
+    return out;
+  }
+
+  claimTask(id, now = this.now()) {
+    this.#advance(now);
+    const task = this.dailyTasks().find((x) => x.id === id);
+    if (!task) return this.#fail('Ese encargo no es de hoy.');
+    if (task.claimed) return this.#fail('Ya has cobrado ese encargo.');
+    if (!task.done) return this.#fail('Todavía no lo has terminado.');
+    const reward = this.taskReward();
+    this.#gain(reward);
+    this.state.tasks.claimed.push(id);
+    let text = `📜 Encargo cumplido: ${fmtBag(reward)}`;
+    if (this.state.tasks.claimed.length === this.state.tasks.picks.length) {
+      const { favor, ...rest } = DAILY_TASK_BONUS;
+      this.#gain(rest);
+      this.state.favor += favor;
+      text += ` · ¡y los tres de hoy! ${fmtBag(rest)} · 🙏 ${favor}`;
+    }
+    this.#note(text, 'success');
+    return this.#done();
   }
 
   // ── Recompensa diaria y logros ─────────────────────────────────────────────
@@ -711,6 +777,7 @@ export class Game extends EventTarget {
     const pay = Math.ceil(get / this.tradeRate(from, to));
     this.state.resources[from] -= Math.min(n, pay);
     this.state.resources[to] += get;
+    this.state.stats.exchanges = (this.state.stats.exchanges ?? 0) + 1;
     this.#flush(true);
     return { ok: true, paid: Math.min(n, pay), got: get };
   }
@@ -1165,6 +1232,7 @@ export class Game extends EventTarget {
     if (this.busy) return;
     this.busy = true;
     try {
+      this.#ensureTasks(now);
       for (let guard = 0; guard < 20000; guard++) {
         const ev = this.#nextEvent();
         if (!ev || ev.t > now) break;
@@ -1237,6 +1305,7 @@ export class Game extends EventTarget {
     const q = this.state.queue;
     this.state.buildings[q.id] = q.level;
     this.state.queue = null;
+    this.state.stats.upgrades = (this.state.stats.upgrades ?? 0) + 1;
     const b = BUILDINGS[q.id];
     this.#note(`${b.icon} ${b.name} ha alcanzado el nivel ${q.level}`, 'success');
     this.#ensureRaid(t);
@@ -1258,6 +1327,7 @@ export class Game extends EventTarget {
     const q = this.state.researchQueue;
     this.state.research[q.id] = q.level;
     this.state.researchQueue = null;
+    this.state.stats.researched = (this.state.stats.researched ?? 0) + 1;
     const r = RESEARCH[q.id];
     this.#note(`${r.icon} Investigación completada: ${r.name} nivel ${q.level}`, 'success');
   }
@@ -1267,6 +1337,7 @@ export class Game extends EventTarget {
     const head = q[0];
     head.done++;
     this.state.units[head.unit]++;
+    this.state.stats.trained = (this.state.stats.trained ?? 0) + 1;
     if (head.done >= head.count) {
       q.shift();
       if (q[0]) q[0].start = t;
@@ -1338,6 +1409,7 @@ export class Game extends EventTarget {
   }
 
   #arriveExplore(m, isl, t) {
+    this.state.stats.explorations = (this.state.stats.explorations ?? 0) + 1;
     const rt = this.world.islandState(isl.id);
     const first = !this.state.known[isl.id]?.explored;
     const intel = this.#intel(isl, rt, t);
@@ -1376,6 +1448,7 @@ export class Game extends EventTarget {
       this.world.hostNews?.(isl.owner, `🔭 Tus vigías han hundido un bote espía de ${this.state.name}`);
       return;
     }
+    this.state.stats.explorations = (this.state.stats.explorations ?? 0) + 1;
     const intel = { t, garrison: info.units, stock: info.resources, wall: info.wall, town: info.town };
     this.#know(isl.id, { intel });
     this.#report({

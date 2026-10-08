@@ -85,6 +85,8 @@ export class Hud {
     this.eventEl.addEventListener('click', () => this.openEvents());
     this.modal.addEventListener('click', async (e) => {
       if (e.target === this.modal || e.target.closest('[data-action="close-modal"]')) return this.closeModal();
+      const task = e.target.closest('[data-action="claim-task"]');
+      if (task && !task.disabled) return this.#run(task, () => game.claimTask(task.dataset.id), null, 'coins');
       const claim = e.target.closest('[data-action="claim"]');
       if (claim && !claim.disabled) return this.#run(claim, () => game.claimQuest(claim.dataset.id), null, 'coins');
       const replay = e.target.closest('[data-action="replay"]');

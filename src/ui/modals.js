@@ -1,4 +1,4 @@
-import { CONTEST_CATEGORIES, QUESTS } from '../game/data.js';
+import { CONTEST_CATEGORIES, DAILY_TASK_BONUS, QUESTS } from '../game/data.js';
 import { bag, escapeHtml, fmtNum } from './format.js';
 
 // Ventanas de misiones y de clasificación.
@@ -31,8 +31,34 @@ export function questsHtml(game) {
     : '<p class="muted">¡Has completado todas las misiones! Tu nombre se cantará en los puertos de todo el archipiélago.</p>';
   return `<div class="modal-card">
     ${head('📋', 'Misiones', `${doneCount} de ${QUESTS.length} completadas`)}
+    ${tasksHtml(game)}
+    <h4>Misiones</h4>
     <div class="quests">${items}</div>
   </div>`;
+}
+
+/** Los encargos de hoy: tres tareas que cambian cada día. */
+function tasksHtml(game) {
+  const tasks = game.dailyTasks();
+  if (!tasks.length) return '';
+  const reward = rewardHtml(game.taskReward());
+  const all = tasks.every((t) => t.claimed);
+  const now = new Date();
+  const left = 24 - now.getUTCHours();
+  const rows = tasks
+    .map((t) => {
+      const pct = Math.round((t.progress / t.need) * 100);
+      return `<div class="quest task ${t.claimed ? 'claimed' : t.done ? 'done' : ''}">
+        <div class="quest-head"><b>${t.icon} ${escapeHtml(t.text)}</b><span class="muted small">${fmtNum(t.progress)} / ${fmtNum(t.need)}</span></div>
+        <div class="progress"><i style="width:${pct}%"></i></div>
+        <div class="quest-foot"><span class="small">${reward}</span>
+          <button class="primary small" data-action="claim-task" data-id="${t.id}" ${t.done && !t.claimed ? '' : 'disabled'}>${t.claimed ? '✔ Cobrado' : t.done ? 'Cobrar' : 'En curso'}</button></div>
+      </div>`;
+    })
+    .join('');
+  return `<h4>📜 Encargos de hoy <span class="muted small">· cambian en ${left} h</span></h4>
+    <div class="quests">${rows}</div>
+    <p class="muted small">${all ? '¡Has cumplido los tres de hoy! Mañana habrá más.' : `Cumple los tres y te llevas además ${rewardHtml(DAILY_TASK_BONUS)}.`}</p>`;
 }
 
 const medal = (n) => (n === 1 ? '🥇' : n === 2 ? '🥈' : n === 3 ? '🥉' : n);
