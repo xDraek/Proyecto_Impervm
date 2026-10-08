@@ -301,7 +301,7 @@ function tree(color, palm) {
 /** Estado visual de la isla según lo que sabe el jugador. */
 export function islandLook(view) {
   if (view.type === 'brumas') return 'brumas';
-  if (view.type === 'continente') return `maravilla-${view.wonder?.level ?? 0}`;
+  if (view.type === 'continente') return `maravilla-${view.wonder?.level ?? 0}${view.horde ? '-h' : ''}`;
   if (view.type === 'jugador') return `ciudad-${view.townLevel >= 6 ? 3 : view.townLevel >= 3 ? 2 : 1}`;
   if (view.type === 'ciudadela' && view.colonizedBy != null) return view.colonized ? 'ciudadela-propia' : 'ciudadela-otro';
   if (view.colonized) return 'colonia';
@@ -336,7 +336,10 @@ export function createIslandFeature(isl, fullLook) {
     kraken: () => lair(g, R, rand),
     brumas: () => fogBank(g, R, rand),
   };
-  if (look.startsWith('maravilla-')) wonderModel(g, wonderOf(isl), Number(look.slice(10)));
+  if (look.startsWith('maravilla-')) {
+    wonderModel(g, wonderOf(isl), Number(look.slice(10).split('-')[0]));
+    if (look.endsWith('-h')) hordeCamp(g, R, rand);
+  }
   else builders[look]?.();
   return bakeStatic(g);
 }
@@ -800,6 +803,51 @@ function wonderModel(g, type, level) {
     const flag = box(0.5, 0.7, 0.02, C.cloth[i % 4], 0, 0, 0);
     flag.position.set(Math.sin(a) * 3.8 + 0.25, 1.5, Math.cos(a) * 3.8);
     g.add(flag);
+  }
+}
+
+/** El campamento de una horda bárbara en la costa: tiendas, hogueras, estandartes rojos y sus barcos. */
+function hordeCamp(g, R, rand) {
+  const a = 200 + rand() * 40;
+  const at = (r, da, y = 0) => polar(R * r, a + da, y);
+  const hides = ['#7a2f22', '#a0784e', '#5a3a2a'];
+  for (let i = 0; i < 9; i++) {
+    const tent = mesh(new THREE.ConeGeometry(0.9 + rand() * 0.3, 1.5, 6), hides[i % 3]);
+    tent.position.copy(at(0.82 + (i % 3) * 0.05, (i - 4) * 4, 0.75));
+    g.add(tent);
+  }
+  for (let i = 0; i < 3; i++) {
+    const p = at(0.86, (i - 1) * 9);
+    g.add(cyl(0.35, 0.4, 0.12, 8, C.stoneDark, p.x, 0, p.z));
+    const fire = mesh(new THREE.ConeGeometry(0.3, 0.75, 6), '#ff8a2a', { emissive: '#ff5a00', emissiveIntensity: 1.8 });
+    fire.position.set(p.x, 0.45, p.z);
+    fire.userData.flicker = true;
+    g.add(fire);
+  }
+  for (let i = 0; i < 4; i++) {
+    const p = at(0.78, (i - 1.5) * 8);
+    g.add(cyl(0.05, 0.05, 3.2, 5, C.dark, p.x, 0, p.z));
+    const flag = box(0.9, 0.6, 0.03, '#a8231a', 0, 0, 0);
+    flag.geometry.translate(0.45, 0, 0);
+    flag.position.set(p.x, 2.9, p.z);
+    flag.userData.wave = true;
+    g.add(flag);
+  }
+  for (let i = 0; i < 6; i++) {
+    const b = createSoldier(i % 2 ? 'barbaro' : 'arquero');
+    b.scale.setScalar(1.8);
+    b.position.copy(at(0.74, (i - 2.5) * 5));
+    b.rotation.y = rand() * Math.PI * 2;
+    g.add(b);
+  }
+  // Sus barcos varados en la orilla
+  for (let i = 0; i < 2; i++) {
+    const ship = createShip('corsario');
+    ship.scale.setScalar(2.4);
+    ship.position.copy(at(1.08, (i - 0.5) * 14, SEA));
+    ship.rotation.y = THREE.MathUtils.degToRad(a + 90);
+    ship.userData.bob = { amp: 0.08, speed: 1.1, base: SEA };
+    g.add(ship);
   }
 }
 

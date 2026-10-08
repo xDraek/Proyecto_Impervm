@@ -792,6 +792,20 @@ export class Game extends EventTarget {
       return view;
     }
     if (isl.type === 'continente') {
+      const h = rt?.horde;
+      view.horde = h
+        ? {
+            deadline: h.deadline,
+            garrison: h.garrison,
+            start: h.start,
+            left: count(h.garrison),
+            total: count(h.start),
+            top: Object.entries(h.damage)
+              .sort((a, b) => b[1] - a[1])
+              .slice(0, 5)
+              .map(([uid, n]) => ({ name: h.names?.[uid] ?? '¿?', kills: n, me: Number(uid) === this.userId })),
+          }
+        : null;
       const progress = rt?.wonder?.progress ?? 0;
       const level = wonderLevel(progress);
       view.wonder = { id: wonderOf(isl), level, progress, next: WONDER_LEVELS[level] ?? null, donors: rt?.wonder?.donors ?? {}, member: this.hasColonyOn(id) };
@@ -966,7 +980,8 @@ export class Game extends EventTarget {
     let cost = null;
 
     if (target === s.home) reason ||= 'Es tu propia isla.';
-    if (isl.type === 'continente') reason ||= 'Es un continente: elige una de sus ciudades o tierras.';
+    // Un continente solo se ataca cuando hay una horda bárbara en él
+    if (isl.type === 'continente' && !(type === 'atacar' && rt?.horde)) reason ||= rt?.horde ? 'Contra la horda solo se puede atacar.' : 'Es un continente: elige una de sus ciudades o tierras.';
     if (opts.join) {
       if (type !== 'atacar') reason ||= 'Solo te puedes unir a un ataque.';
       else if (!joint || joint.target !== target) reason ||= 'Ese ataque ya no está en camino.';
@@ -1408,6 +1423,8 @@ export class Game extends EventTarget {
     if (s.visitor) consider(s.visitor.expires, (t) => this.#visitorLeaves(t));
     else if (s.nextVisitAt && !s.vacation) consider(s.nextVisitAt, (t) => this.#spawnVisitor(t));
     for (const col of s.colonies) if (col.upgradeEnd) consider(col.upgradeEnd, () => this.#finishColony(col));
+    // Colonias que vuelven a producir tras un saqueo de la horda
+    for (const col of s.colonies) if (col.raidedUntil > s.lastUpdate) consider(col.raidedUntil, () => delete col.raidedUntil);
     // Cambia la temporada del archipiélago: cambia la producción
     consider(worldEventAt(s.lastUpdate).end, () => {});
     // El final de un efecto divino también es un suceso: cambia la producción
@@ -1509,7 +1526,7 @@ export class Game extends EventTarget {
       } else if (m.type === 'transporte') this.#arriveTransport(m, isl, t);
       else this.#arrivePlayerAttack(m, isl, t);
     } else if (m.type === 'explorar') this.#arriveExplore(m, isl, t);
-    else if (m.type === 'atacar') this.#arriveAttack(m, isl, t);
+    else if (m.type === 'atacar') isl.type === 'continente' ? this.#arriveHorde(m, isl, t) : this.#arriveAttack(m, isl, t);
     else if (m.type === 'colonizar') this.#arriveColonize(m, isl, t);
     else if (m.type === 'conquistar') this.#arriveConquer(m, isl, t);
     else if (m.type === 'expedicion') this.#arriveExpedition(m, isl, t);
@@ -1629,6 +1646,48 @@ export class Game extends EventTarget {
     this.#note(`🔥 ¡Sabotaje! ${mine}`, 'error');
     this.#dirty = true;
     return { caught: false, text: theirs };
+  }
+
+  /** Asalto a la horda bárbara de un continente: cada bárbaro abatido cuenta para el reparto del botín. */
+  #arriveHorde(m, isl, t) {
+    const rt = this.world.islandState(isl.id);
+    const h = rt?.horde;
+    if (!h || !count(h.garrison)) {
+      this.#report({ t, kind: 'ataque', island: isl.id, islandName: isl.name, title: `La horda ya no está en ${isl.name}`, text: 'Cuando llegó tu flota ya no quedaba nadie. Vuelve a casa.' });
+      return;
+    }
+    const { atkMul, hpMul } = playerCombat(this.state);
+    const heroAtk = m.hero ? this.heroBonus('ataque') : 0;
+    const result = battle({ units: m.units, atkMul: atkMul + heroAtk, hpMul }, { units: h.garrison });
+    if (m.hero) this.#heroXp(result.def.lost, t);
+    const killed = count(result.def.lost);
+    h.garrison = Object.fromEntries(Object.entries(result.def.left).filter(([, n]) => n > 0));
+    h.damage[this.userId] = (h.damage[this.userId] ?? 0) + killed;
+    h.names = { ...(h.names ?? {}), [this.userId]: this.state.name };
+    this.state.stats.kills += killed;
+    m.units = result.att.left;
+    this.world.touch?.(isl.id);
+    const left = count(h.garrison);
+    const outcome = result.winner === 'att' ? 'victoria' : result.winner === 'def' ? 'derrota' : 'empate';
+    this.#report({
+      t,
+      kind: 'ataque',
+      island: isl.id,
+      islandName: isl.name,
+      outcome,
+      title: left ? `Contra la horda de ${isl.name}` : `¡Has acabado con la horda de ${isl.name}!`,
+      text: `Tus tropas abaten ${killed} bárbaros. ${left ? `Quedan ${left}.` : 'No queda ninguno: el botín se reparte entre todos los que lucharon.'}`,
+      battle: pick(result),
+      enemy: 'Horda bárbara',
+    });
+    this.#note(`🔥 Horda de ${isl.name}: abates ${killed} bárbaros${left ? `, quedan ${left}` : ''}`, killed ? 'success' : 'error');
+    if (!left) this.world.hordeDefeated?.(isl.id, t);
+  }
+
+  /** Una reliquia como premio (por ejemplo, por ser quien más bárbaros abatió). */
+  awardRelic(where, weights, t = this.now()) {
+    this.#findRelic(t, where, weights);
+    this.#flush(true);
   }
 
   #arriveSpy(m, isl, t) {

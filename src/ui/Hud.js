@@ -75,7 +75,7 @@ export class Hud {
       const li = e.target.closest('[data-id], [data-select]');
       if (li) this.onSelect(li.dataset.id ?? li.dataset.select);
     });
-    this.alert.addEventListener('click', () => this.onSelect('muralla'));
+    this.alert.addEventListener('click', () => this.onSelect(this.alertTarget ?? 'muralla'));
     this.viewBtn.addEventListener('click', () => this.onView(this.view === 'isla' ? 'mapa' : 'isla'));
     this.reportsBtn.addEventListener('click', () => this.openReports());
     this.questsBtn.addEventListener('click', () => this.openModal('quests'));
@@ -830,18 +830,26 @@ export class Hud {
   #renderAlert() {
     const raid = this.game.raid;
     const incoming = this.game.incoming ?? [];
-    this.alert.hidden = !raid && !incoming.length;
+    // Hordas en los continentes donde tienes colonias
+    const lands = new Set(this.game.colonies().map((c) => this.game.world.island(c.id)?.land).filter(Boolean));
+    const hordes = [...lands].map((id) => ({ id, isl: this.game.world.island(id), h: this.game.world.islandState(id)?.horde })).filter((x) => x.h && x.isl);
+    this.alert.hidden = !raid && !incoming.length && !hordes.length;
     if (this.alert.hidden) {
       this.cache.alert = '';
       return;
     }
+    this.alertTarget = !raid && !incoming.length ? hordes[0].id : 'muralla';
     const lines = [];
+    for (const x of hordes) {
+      const left = Object.values(x.h.garrison).reduce((a, b) => a + b, 0);
+      lines.push(`<div><b>🔥 ¡Horda en ${escapeHtml(x.isl.name)}!</b> ${fmtNum(left)} bárbaros · arrasará tus colonias en <span data-until="${x.h.deadline}"></span></div>`);
+    }
     if (raid) lines.push(`<div><b>¡Piratas a la vista!</b> Llegan en <span data-until="${raid.arrival}"></span> · ${unitList(raid.army)}</div>`);
     for (const m of incoming.slice(0, 3)) {
       lines.push(`<div><b>¡Ataque de ${escapeHtml(m.from)}!</b> ${fmtNum(m.size)} unidades desde ${escapeHtml(m.fromIsland ?? '')} · llegan en <span data-until="${m.arrive}"></span></div>`);
     }
-    const html = `<span class="alert-icon">${incoming.length ? '⚔️' : '🏴‍☠️'}</span>
-      <div>${lines.join('')}<div class="small">Defiende con tropas en casa, la muralla y la Égida del templo</div></div>`;
+    const html = `<span class="alert-icon">${incoming.length ? '⚔️' : raid ? '🏴‍☠️' : '🔥'}</span>
+      <div>${lines.join('')}<div class="small">${raid || incoming.length ? 'Defiende con tropas en casa, la muralla y la Égida del templo' : 'Pulsa para ver la horda y mandar tus tropas contra ella'}</div></div>`;
     this.#setHtml(this.alert, 'alert', html);
   }
 

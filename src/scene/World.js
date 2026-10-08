@@ -1215,7 +1215,8 @@ export class World {
       } else if (view.colonized) status = `🚩 Tu colonia · Nv ${view.colony?.level ?? 1}${view.colony?.upgradeEnd ? ' 🔨' : ''}`;
       else if (view.colonizedBy != null) status = `🚩 Colonia de ${view.colonistName}`;
       else if (view.explored && view.tier) status += ` · Nv ${view.tier}`;
-      if (view.type === 'continente') status = `🗺️ Continente · maravilla nivel ${view.wonder?.level ?? 0}`;
+      if (view.type === 'continente') status = view.horde ? `🔥 ¡Horda! ${view.horde.left} bárbaros` : `🗺️ Continente · maravilla nivel ${view.wonder?.level ?? 0}`;
+      entry.el.classList.toggle('war', view.type === 'continente' && !!view.horde);
       if (view.inbound.length) status += ' · ⛵';
       entry.el.querySelector('.label-lvl').textContent = status;
       entry.el.classList.toggle('colony', !!view.colonized);

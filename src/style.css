@@ -3038,3 +3038,22 @@ input[type='text'] {
 .medals li .link {
   margin-top: 2px;
 }
+
+/* ── Invasiones bárbaras ─────────────────────────────────────────────────── */
+
+.horde-box {
+  padding: 10px 12px;
+  margin-bottom: 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 122, 107, 0.6);
+  background: rgba(120, 30, 20, 0.18);
+}
+
+.horde-box h4 {
+  margin-top: 0;
+  color: var(--bad);
+}
+
+.progress.horde-bar i {
+  background: linear-gradient(90deg, #ff7a6b, #c9533a);
+}

@@ -696,6 +696,20 @@ export const DAILY_REWARDS = [
 // ── Logros ───────────────────────────────────────────────────────────────────
 // Se ganan solos al cumplirse y se enseñan en el perfil del jugador.
 
+// ── Invasiones bárbaras ──────────────────────────────────────────────────────
+// De vez en cuando una horda desembarca en un continente con colonias. Si nadie
+// la derrota antes de `warnHours`, saquea las colonias de ese continente.
+
+export const HORDE = {
+  warnHours: 12,
+  firstHours: [12, 36],
+  gapHours: [48, 96],
+  ravageHours: 24,
+  garrison: { barbaro: 140, arquero: 60 },
+  perColonist: 0.6,
+  reward: { oro: 2500, cristal: 1500, hierro: 1500 },
+};
+
 // ── Mercenarios (taberna) ────────────────────────────────────────────────────
 // Tropas de alquiler durante un día. Cuantos más niveles de taberna, más vienen.
 // Cada compañía se puede contratar una vez al día.

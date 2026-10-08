@@ -1,5 +1,5 @@
 import { NEWBIE_POINTS } from '../game/Game.js';
-import { CONTEST_DAYS, JOINT_MAX, RELIC_SLOTS, VACATION, WONDER_LEVELS } from '../game/data.js';
+import { CONTEST_DAYS, HORDE, JOINT_MAX, RELIC_SLOTS, VACATION, WONDER_LEVELS } from '../game/data.js';
 import { escapeHtml } from './format.js';
 
 // Guía del juego: todo lo que hay que saber, por temas y con buscador.
@@ -49,7 +49,8 @@ const TOPICS = [
     icon: '🏯',
     title: 'Continentes, conquista y maravillas',
     body: `<p>Entre los sectores hay pequeños continentes con <b>ciudades bárbaras</b> amuralladas y valles fértiles. Si tu ejército acaba con toda la guarnición de una ciudad bárbara en una misión de <b>conquista</b>, pasa a ser tuya.</p>
-      <p>Cada continente tiene una <b>maravilla</b> de ${WONDER_LEVELS.length} niveles que levantan entre todos los que tienen colonia allí. Todos ellos reciben su efecto.</p>`,
+      <p>Cada continente tiene una <b>maravilla</b> de ${WONDER_LEVELS.length} niveles que levantan entre todos los que tienen colonia allí. Todos ellos reciben su efecto.</p>
+      <p><b>Invasiones</b> 🔥: cada pocos días desembarca una horda bárbara en los continentes con colonias. Cualquiera puede atacarla durante ${HORDE.warnHours} h y el botín se reparte según los bárbaros que abatió cada uno. Si nadie la detiene, las colonias del continente no producen en ${HORDE.ravageHours} h.</p>`,
   },
   {
     icon: '🚩',

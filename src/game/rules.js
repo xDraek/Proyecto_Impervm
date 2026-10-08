@@ -270,7 +270,7 @@ export function economy(state, t = state.lastUpdate) {
   for (const [id, b] of Object.entries(BUILDINGS)) {
     if (b.produces) buildings[b.produces] += producerOutput(id, state.buildings[id] ?? 0);
   }
-  for (const col of state.colonies ?? []) colonies[col.specialty] += colonyYield(col);
+  for (const col of state.colonies ?? []) if (!(col.raidedUntil > t)) colonies[col.specialty] += colonyYield(col);
   const event = worldEventAt(t).event;
   const eventBonus = {};
   for (const res of RESOURCE_KEYS) {

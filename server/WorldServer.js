@@ -2,7 +2,7 @@ import { clock, universe } from '../src/config.js';
 import { RESOURCES } from '../src/game/data.js';
 import { count } from '../src/game/combat.js';
 import { Game, newState } from '../src/game/Game.js';
-import { ACHIEVEMENTS, CONTEST_CATEGORIES, CONTEST_DAYS, CONTEST_PRIZES, WONDERS } from '../src/game/data.js';
+import { ACHIEVEMENTS, CONTEST_CATEGORIES, CONTEST_DAYS, CONTEST_PRIZES, HORDE, WONDERS } from '../src/game/data.js';
 import { playerCombat, wonderLevel, wonderOf, worldEventAt } from '../src/game/rules.js';
 import { footprint, freshIslandState, generateContinent, generateSector, homeIsland, sectorCenter, sectorVertices } from '../src/game/world.js';
 import { hashPassword, newRecoveryCode, newSecret, normalizeCode, verifyPassword } from './auth.js';
@@ -356,6 +356,110 @@ export class WorldServer {
     return true;
   }
 
+  // ── Invasiones bárbaras ────────────────────────────────────────────────────
+
+  /** Quién tiene colonia en cada continente (id del continente → ids de jugadores). */
+  #colonistsByLand() {
+    const out = new Map();
+    for (const [uid, g] of this.games) {
+      for (const c of g.state.colonies) {
+        const land = this.islands.get(c.id)?.land;
+        if (!land) continue;
+        if (!out.has(land)) out.set(land, new Set());
+        out.get(land).add(uid);
+      }
+    }
+    return out;
+  }
+
+  #hoursMs(h) {
+    return (h * 3_600_000) / universe.speed;
+  }
+
+  #between([a, b]) {
+    return this.#hoursMs(a + Math.random() * (b - a));
+  }
+
+  /** Aparecen hordas en los continentes con colonias, y las que no se derrotan a tiempo saquean. */
+  #updateHordes(now) {
+    // Una vez cada diez segundos basta
+    if (now - (this.hordeCheck ?? 0) < 10_000 / Math.max(1, universe.speed)) return;
+    this.hordeCheck = now;
+    const colonists = this.#colonistsByLand();
+    for (const [land, uids] of colonists) {
+      const cont = this.islands.get(land);
+      const rt = this.islandStates.get(land);
+      if (!cont || !rt) continue;
+      if (!rt.horde) {
+        if (!rt.nextHorde) {
+          rt.nextHorde = now + this.#between(HORDE.firstHours);
+          this.touch(land);
+        } else if (now >= rt.nextHorde) this.#spawnHorde(cont, rt, uids, now);
+        continue;
+      }
+      if (now >= rt.horde.deadline) this.#ravage(cont, rt, uids, now);
+    }
+  }
+
+  #spawnHorde(cont, rt, uids, now) {
+    const k = 1 + HORDE.perColonist * (uids.size - 1);
+    const garrison = Object.fromEntries(Object.entries(HORDE.garrison).map(([u, n]) => [u, Math.round(n * k)]));
+    rt.horde = { spawn: now, deadline: now + this.#hoursMs(HORDE.warnHours), garrison, start: { ...garrison }, damage: {}, names: {}, colonists: uids.size };
+    this.touch(cont.id);
+    const total = Object.values(garrison).reduce((a, b) => a + b, 0);
+    this.announce(`🔥 Una horda de ${total} bárbaros desembarca en ${cont.name}: arrasará sus colonias en ${HORDE.warnHours} h si nadie la detiene`);
+    for (const uid of uids) {
+      this.hostNews(uid, `🔥 ¡Una horda bárbara amenaza tus colonias de ${cont.name}! Atácala antes de ${HORDE.warnHours} h`);
+      this.pendingPush.add(uid);
+    }
+    this.mapCache = null;
+  }
+
+  /** La horda no ha caído a tiempo: las colonias del continente se quedan un día sin producir. */
+  #ravage(cont, rt, uids, now) {
+    const until = now + this.#hoursMs(HORDE.ravageHours);
+    for (const uid of uids) {
+      const game = this.games.get(uid);
+      game.update(now);
+      for (const c of game.state.colonies) if (this.islands.get(c.id)?.land === cont.id) c.raidedUntil = until;
+      game.dirty = true;
+      this.hostNews(uid, `🔥 La horda ha saqueado tus colonias de ${cont.name}: no producirán en ${HORDE.ravageHours} h`);
+      this.pendingPush.add(uid);
+    }
+    this.announce(`🔥 Nadie detuvo a la horda: ha arrasado las colonias de ${cont.name}`);
+    rt.horde = null;
+    rt.nextHorde = now + this.#between(HORDE.gapHours);
+    this.touch(cont.id);
+  }
+
+  /** La horda ha caído: botín para todos según los bárbaros que abatió cada uno, y una reliquia posible para el mejor. */
+  hordeDefeated(id, t) {
+    const rt = this.islandStates.get(id);
+    const cont = this.islands.get(id);
+    const h = rt?.horde;
+    if (!h) return;
+    const total = Object.values(h.damage).reduce((a, b) => a + b, 0) || 1;
+    const k = 1 + HORDE.perColonist * ((h.colonists ?? 1) - 1);
+    const ranking = Object.entries(h.damage).sort((a, b) => b[1] - a[1]);
+    for (const [uid, n] of ranking) {
+      const game = this.games.get(Number(uid));
+      if (!game || !n) continue;
+      const share = n / total;
+      const bag = Object.fromEntries(Object.entries(HORDE.reward).map(([r, v]) => [r, Math.floor(v * k * share)]));
+      game.giveResources(bag, `🏆 Tu parte del botín de la horda de ${cont.name} (${Math.round(share * 100)} % de los bárbaros abatidos)`);
+      game.dirty = true;
+      this.pendingPush.add(Number(uid));
+    }
+    const best = ranking[0];
+    if (best && Math.random() < 0.5) this.games.get(Number(best[0]))?.awardRelic(`entre los estandartes de la horda de ${cont.name}`, { rara: 55, epica: 35, legendaria: 10 }, t);
+    const names = ranking.slice(0, 3).map(([uid, n]) => `${h.names?.[uid] ?? '¿?'} (${n})`).join(', ');
+    this.announce(`🏆 ¡La horda de ${cont.name} ha sido derrotada! Más bárbaros abatidos: ${names}`);
+    rt.horde = null;
+    rt.nextHorde = t + this.#between(HORDE.gapHours);
+    this.touch(id);
+    this.mapCache = null;
+  }
+
   // ── Competición semanal ────────────────────────────────────────────────────
 
   #contestStats(game) {
@@ -600,6 +704,7 @@ export class WorldServer {
       }
     }
     if (this.meta.contest && Date.now() >= this.meta.contest.end) this.#finishContest();
+    this.#updateHordes(now);
     // Cuando empieza una temporada del archipiélago, se anuncia una sola vez
     const ev = worldEventAt(now);
     if (this.meta.eventAnnounced !== ev.start) {
@@ -641,7 +746,12 @@ export class WorldServer {
     const ids = new Set(near.map((i) => i.id));
     // También las islas lejanas a las que van tus flotas o que son tus colonias
     for (const m of game.state.missions) ids.add(m.target);
-    for (const c of game.state.colonies) ids.add(c.id);
+    for (const c of game.state.colonies) {
+      ids.add(c.id);
+      // También su continente, para ver su maravilla y si hay horda
+      const land = this.islands.get(c.id)?.land;
+      if (land) ids.add(land);
+    }
     const islands = [...ids].map((id) => this.islands.get(id)).filter(Boolean);
     const states = {};
     const players = {};

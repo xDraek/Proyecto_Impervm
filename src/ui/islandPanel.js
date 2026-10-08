@@ -58,7 +58,8 @@ function colonySection(game, view) {
       <button class="primary" data-action="colony-upgrade" data-need='${JSON.stringify(cost)}' data-blocked="${busy ? 1 : 0}">🔨 Ampliar · ${fmtTime(seconds)}</button>
       ${busy ? '<p class="muted small">Ya estás ampliando otra colonia: solo hay colonos para una obra a la vez.</p>' : ''}`;
   }
-  return `<p class="desc">${col.conquered ? 'La ciudad que conquistaste a los bárbaros: tus colonos la gobiernan y mandan su producción a la capital.' : 'Tus colonos trabajan la isla y mandan sus cosechas a la capital.'}</p>
+  const raided = col.raidedUntil > game.now() ? `<p class="hint">🔥 Saqueada por la horda: vuelve a producir en <span data-until="${col.raidedUntil}"></span>.</p>` : '';
+  return `${raided}<p class="desc">${col.conquered ? 'La ciudad que conquistaste a los bárbaros: tus colonos la gobiernan y mandan su producción a la capital.' : 'Tus colonos trabajan la isla y mandan sus cosechas a la capital.'}</p>
     <div class="info-row"><span>🚩 Nivel</span><b>${level} / ${COLONY.maxLevel}</b></div>
     <div class="effect"><span>${r.icon} Producción de la colonia</span><b class="up">+${fmtNum(yieldAt(level))}/h</b></div>
     ${upgrade}`;
@@ -77,9 +78,26 @@ function continentSection(game, view) {
       return `<li data-select="${escapeHtml(s.id)}"><span><b>${escapeHtml(s.name)}</b><div class="muted small">${what}</div></span><span class="muted small">›</span></li>`;
     })
     .join('');
-  return `<p class="desc">Un pequeño continente entre los sectores del archipiélago. Tierra adentro hay ciudades bárbaras bien defendidas y valles fértiles donde fundar colonias.</p>
+  return `${hordeSection(view)}<p class="desc">Un pequeño continente entre los sectores del archipiélago. Tierra adentro hay ciudades bárbaras bien defendidas y valles fértiles donde fundar colonias.</p>
     <ul class="mini-list site-list">${rows}</ul>
     ${wonderSection(game, view)}`;
+}
+
+/** Una horda bárbara en el continente: cuánto le queda, cuándo ataca y quién la está mermando. */
+function hordeSection(view) {
+  const h = view.horde;
+  if (!h) return '';
+  const pct = Math.round((h.left / Math.max(1, h.total)) * 100);
+  const top = h.top.map((x) => `<li class="${x.me ? 'me' : ''}"><span>${escapeHtml(x.name)}</span><b>${fmtNum(x.kills)}</b></li>`).join('');
+  return `<div class="horde-box">
+    <h4>🔥 ¡Horda bárbara!</h4>
+    <p class="desc small">Si no cae antes de que acabe la cuenta atrás, arrasará las colonias de este continente: no producirán durante un día. Todos los que luchen se reparten el botín según los bárbaros que abatan.</p>
+    <div class="info-row"><span>Ataca en</span><b class="q-time" data-until="${h.deadline}"></b></div>
+    <div class="info-row"><span>Fuerzas</span><span>${unitList(h.garrison)}</span></div>
+    <div class="progress horde-bar"><i style="width:${pct}%"></i></div>
+    <p class="muted small">Quedan ${fmtNum(h.left)} de ${fmtNum(h.total)} bárbaros</p>
+    ${top ? `<h5>Más bárbaros abatidos</h5><ol class="mini-rank contest-list">${top}</ol>` : ''}
+  </div>`;
 }
 
 /** La maravilla del continente: su nivel, lo que falta y quién ha aportado. */
@@ -177,7 +195,7 @@ function inboundSection(game, view) {
 }
 
 function fleetForm(game, view) {
-  if (view.type === 'continente') return '';
+  if (view.type === 'continente' && !view.horde) return '';
   if (game.level('puerto') < 1) return '<div class="section"><h4>Enviar flota</h4><p class="desc">Construye un puerto en tu isla para poder zarpar.</p></div>';
   const home = PLAYER_UNITS.filter((id) => game.units[id] > 0);
   if (!home.length) return '<div class="section"><h4>Enviar flota</h4><p class="desc">No tienes tropas ni barcos en casa. Entrénalos en el cuartel y el puerto.</p></div>';
@@ -196,8 +214,8 @@ function fleetForm(game, view) {
 
   const types = [];
   if (view.type === 'brumas') types.push('expedicion');
-  else types.push('explorar');
-  const hostile = ['barbaros', 'ciudadela', 'piratas', 'kraken', 'jugador'].includes(view.type);
+  else if (view.type !== 'continente') types.push('explorar');
+  const hostile = ['barbaros', 'ciudadela', 'piratas', 'kraken', 'jugador'].includes(view.type) || (view.type === 'continente' && !!view.horde);
   if (view.type !== 'brumas' && view.colonizedBy == null && (!view.explored || hostile)) types.push('atacar');
   if (view.type === 'jugador' && !(view.alliance && view.alliance.id === game.alliance?.id)) types.push('sabotaje');
   if (view.type === 'jugador') types.push('transporte');
