@@ -1,5 +1,5 @@
-import { BUILDINGS, HERO, HERO_SKILLS, RELIC_RARITY, RELIC_SLOTS, POWERS, POWER_KEYS, RESEARCH, RESEARCH_KEYS, RESOURCES, RESOURCE_KEYS, UNITS, UNIT_KEYS } from '../game/data.js';
-import { favorMax, favorRate, producerOutput, protectedAmount, requirementName, storageCapacity, townSpeedup, wallBonus } from '../game/rules.js';
+import { BUILDINGS, HERO, HERO_SKILLS, RELIC_RARITY, RELIC_SLOTS, POWERS, POWER_KEYS, RESEARCH, RESEARCH_KEYS, RESOURCES, RESOURCE_KEYS, UNITS, UNIT_KEYS, WORK } from '../game/data.js';
+import { favorMax, favorRate, hasWorkers, producerOutput, protectedAmount, requirementName, storageCapacity, townSpeedup, wallBonus, workShare, workTaxes } from '../game/rules.js';
 import { portrait, unitIcon } from '../scene/portraits.js';
 import { costList, escapeHtml, fmtDec, fmtNum, fmtTime, unitList } from './format.js';
 
@@ -395,6 +395,38 @@ function townSection(game) {
     <div class="info-row"><span>🏴‍☠️ Amenaza pirata</span><b>${game.level('ayuntamiento') >= 3 ? `Nv ${game.raidTier()}` : 'Ninguna aún'}</b></div>`;
 }
 
+/** Trabajadores: cuántos producen aquí y cuántos comercian y pagan impuestos en oro. */
+function workSection(game, id) {
+  const level = game.level(id);
+  if (!hasWorkers(id) || !level) return '';
+  const pct = Math.round(workShare(game.state, id) * 100);
+  const res = RESOURCES[BUILDINGS[id].produces];
+  const full = producerOutput(id, level);
+  return `<h4>👷 Trabajadores</h4>
+    <p class="desc small">Decide cuántos trabajan aquí. Los demás comercian y pagan impuestos: dan oro por la mitad de lo que valdría lo que dejan de producir. Útil cuando el almacén se llena o necesitas oro.</p>
+    <div class="work-row">
+      <span class="muted small">🪙</span>
+      <input type="range" name="work-${id}" min="0" max="100" step="${WORK.step}" value="${pct}" data-work="${id}" aria-label="Trabajadores que producen ${res.name.toLowerCase()}" />
+      <span class="muted small">${res.icon}</span>
+      <b class="work-pct" data-work-pct>${pct} %</b>
+    </div>
+    <div class="info-row"><span>${res.icon} ${res.name}</span><b data-work-prod>${fmtNum((full * pct) / 100)}/h de ${fmtNum(full)}/h</b></div>
+    <div class="info-row"><span>🪙 Impuestos de los que no trabajan aquí</span><b data-work-tax>+${fmtNum(workTaxes(id, level, pct / 100))}/h</b></div>
+    <p class="muted small">Sin contar las bonificaciones de investigaciones, eventos o reliquias.</p>`;
+}
+
+/** Actualiza las cifras de los trabajadores mientras se mueve el control (antes de soltarlo). */
+function refreshWork(game, id, root) {
+  const input = root.querySelector('[data-work]');
+  if (!input) return;
+  const share = Number(input.value) / 100;
+  const level = game.level(id);
+  const full = producerOutput(id, level);
+  root.querySelector('[data-work-pct]').textContent = `${input.value} %`;
+  root.querySelector('[data-work-prod]').textContent = `${fmtNum(full * share)}/h de ${fmtNum(full)}/h`;
+  root.querySelector('[data-work-tax]').textContent = `+${fmtNum(workTaxes(id, level, share))}/h`;
+}
+
 /** Ilustración del edificio a su nivel (o como quedará, si aún no está construido). */
 function buildingArt(id, level) {
   // La muralla rodea toda la isla: no cabe en un retrato
@@ -430,6 +462,7 @@ export function buildingPanel(hud, id) {
     ${buildingArt(id, level)}
     <p class="desc">${b.description}</p>
     ${upgradeSection(game, id)}
+    ${hasWorkers(id) && level ? `<div class="section">${workSection(game, id)}</div>` : ''}
     ${extra ? `<div class="section">${extra}</div>` : ''}`;
 
   return {
@@ -440,6 +473,7 @@ export function buildingPanel(hud, id) {
         if (game.level('mercado') > 0) hud.social.refreshOffers();
       }
       if (id === 'templo') refreshTemple(game, root);
+      if (hasWorkers(id)) refreshWork(game, id, root);
     },
   };
 }

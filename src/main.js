@@ -163,6 +163,15 @@ function startGame(game) {
       .map((id) => ['building', id, { level: Math.max(1, game.level(id)), width: 340, height: 170 }]),
   ]);
 
+  // Botones de la cámara (girar, acercar, alejar y centrar), sobre todo para el móvil
+  const camControls = document.getElementById('cam-controls');
+  camControls.hidden = false;
+  camControls.addEventListener('click', (e) => {
+    const kind = e.target.closest('[data-cam]')?.dataset.cam;
+    if (kind === 'home') world.recenter();
+    else if (kind) world.nudgeCamera({ rotate: kind === 'rotl' ? 0.6 : kind === 'rotr' ? -0.6 : 0, zoom: kind === 'in' ? 0.7 : kind === 'out' ? 1.4 : 1 });
+  });
+
   // Atajos de la barra superior (1-7, en su orden) y rótulos que salen al momento con el ratón
   const SHORTCUTS = ['quests-btn', 'chat-btn', 'mail-btn', 'alliance-btn', 'rank-btn', 'map-btn', 'reports-btn'];
   for (const el of document.querySelectorAll('#topbar .top-actions .icon-btn[title], #view-btn')) {

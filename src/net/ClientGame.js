@@ -151,6 +151,10 @@ export class ClientGame extends Game {
     return this.#act('heroSkill', skill);
   }
 
+  setWork(id, pct) {
+    return this.#act('setWork', id, pct);
+  }
+
   hireMercenaries(id) {
     return this.#act('hireMercenaries', id);
   }

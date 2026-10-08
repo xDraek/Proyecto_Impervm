@@ -183,6 +183,7 @@ export class World {
       this.controls.autoRotateSpeed = 0.35;
       this.controls.enableZoom = false;
       this.controls.enableRotate = false;
+      this.controls.enablePan = false;
       for (const slot of Object.values(this.slots)) slot.label.visible = false;
     }
   }
@@ -251,14 +252,30 @@ export class World {
     this.camera = new THREE.PerspectiveCamera(42, 1, 0.5, 3000);
     this.camera.position.copy(VIEWS.isla.offset);
 
+    // Como en los juegos de ciudades: arrastrar mueve la vista, el botón derecho (o Mayús + arrastrar)
+    // la gira y la rueda acerca hacia donde apunta el ratón. En el móvil, un dedo mueve y dos acercan y giran.
     const controls = new OrbitControls(this.camera, r.domElement);
     controls.enableDamping = true;
-    controls.enablePan = false;
+    controls.dampingFactor = 0.09;
+    controls.enablePan = true;
+    controls.screenSpacePanning = false;
+    controls.mouseButtons = { LEFT: THREE.MOUSE.PAN, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.ROTATE };
+    controls.touches = { ONE: THREE.TOUCH.PAN, TWO: THREE.TOUCH.DOLLY_ROTATE };
+    controls.zoomToCursor = true;
+    controls.zoomSpeed = 1.15;
+    controls.rotateSpeed = 0.6;
     controls.minDistance = VIEWS.isla.min;
     controls.maxDistance = VIEWS.isla.max;
+    controls.minPolarAngle = 0.2;
     controls.maxPolarAngle = 1.32;
     controls.target.set(0, 0, 0);
+    // Si el jugador mueve la cámara, deja de seguir lo seleccionado
+    controls.addEventListener('start', () => {
+      this.focusTarget = null;
+      this.nudge = null;
+    });
     this.controls = controls;
+    this.keys = new Set();
 
     const resize = () => {
       const { clientWidth: w, clientHeight: h } = this.container;
@@ -664,6 +681,7 @@ export class World {
 
       this.islands[isl.id] = { isl, pos, radius, group, hit, feature: null, look: null, label, el };
     }
+    this.mapRadius = Math.max(120, ...Object.values(this.islands).map((e) => e.pos.length() + e.radius));
     // Espuma en las orillas más cercanas (el mar admite un número limitado)
     const shores = Object.values(this.islands)
       .map((e) => ({ x: e.pos.x, z: e.pos.z, r: shoreRadius(e.isl), d: e.pos.length() }))
@@ -1058,6 +1076,96 @@ export class World {
     el.addEventListener('pointerleave', () => {
       this.hovered = null;
     });
+
+    // Doble clic en el suelo o en el mar: la cámara va hasta ese punto
+    const ground = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+    el.addEventListener('dblclick', (e) => {
+      if (pick(e)) return;
+      const p = new THREE.Vector3();
+      if (raycaster.ray.intersectPlane(ground, p)) this.focusTarget = p.setY(0);
+    });
+
+    // Teclado: WASD o flechas para moverse, Q/E para girar, +/- para acercar y C para centrar
+    const KEYS = { w: 'up', arrowup: 'up', s: 'down', arrowdown: 'down', a: 'left', arrowleft: 'left', d: 'right', arrowright: 'right', q: 'rotl', e: 'rotr', '+': 'in', '=': 'in', '-': 'out', _: 'out' };
+    const typing = (e) => e.target.matches?.('input, textarea, select, [contenteditable]');
+    window.addEventListener('keydown', (e) => {
+      if (typing(e) || e.ctrlKey || e.metaKey || e.altKey) return;
+      const key = e.key.toLowerCase();
+      if (key === 'c') return this.recenter();
+      const action = KEYS[key];
+      if (!action) return;
+      if (key.startsWith('arrow')) e.preventDefault();
+      this.keys.add(action);
+      this.focusTarget = null;
+    });
+    window.addEventListener('keyup', (e) => this.keys.delete(KEYS[e.key.toLowerCase()]));
+    window.addEventListener('blur', () => this.keys.clear());
+  }
+
+  /** Vuelve a la vista de siempre de la isla o del archipiélago. */
+  recenter() {
+    const v = VIEWS[this.view];
+    const offset = v.offset.clone();
+    if (this.camera.aspect < 1) offset.multiplyScalar(1 / this.camera.aspect ** 0.6);
+    this.focusTarget = null;
+    this.camTween = { t: 0, fromPos: this.camera.position.clone(), fromTarget: this.controls.target.clone(), toPos: offset, toTarget: new THREE.Vector3() };
+  }
+
+  /** Un empujón a la cámara desde los botones de la pantalla: girar o acercar un poco, con suavidad. */
+  nudgeCamera({ rotate = 0, zoom = 1 }) {
+    this.focusTarget = null;
+    this.nudge = { rotate, zoom: Math.log(zoom), left: 0.35, total: 0.35 };
+  }
+
+  /** Movimiento con el teclado y los botones, y que la vista no se salga del mundo. */
+  #moveCamera(dt) {
+    const cam = this.camera;
+    const target = this.controls.target;
+    const offset = cam.position.clone().sub(target);
+    const dist = offset.length();
+    const k = this.keys;
+    if (k.size) {
+      const fwd = offset.clone().setY(0).normalize().negate();
+      const right = new THREE.Vector3(-fwd.z, 0, fwd.x);
+      const speed = dist * 0.85 * dt;
+      const move = new THREE.Vector3()
+        .addScaledVector(fwd, (k.has('up') ? 1 : 0) - (k.has('down') ? 1 : 0))
+        .addScaledVector(right, (k.has('right') ? 1 : 0) - (k.has('left') ? 1 : 0));
+      if (move.lengthSq()) {
+        move.normalize().multiplyScalar(speed);
+        target.add(move);
+        cam.position.add(move);
+      }
+      const rot = ((k.has('rotl') ? 1 : 0) - (k.has('rotr') ? 1 : 0)) * 1.6 * dt;
+      const zoom = (k.has('in') ? -1 : 0) + (k.has('out') ? 1 : 0);
+      if (rot || zoom) this.#orbit(rot, Math.exp(zoom * 1.3 * dt));
+    }
+    if (this.nudge) {
+      const step = Math.min(dt, this.nudge.left);
+      const f = step / this.nudge.total;
+      this.nudge.left -= step;
+      this.#orbit(this.nudge.rotate * f, Math.exp(this.nudge.zoom * f));
+      if (this.nudge.left <= 0) this.nudge = null;
+    }
+    // Límite: la isla y su costa, o el archipiélago conocido
+    if (!this.camTween) {
+      const maxR = this.view === 'isla' ? ISLAND_R + 14 : (this.mapRadius ?? 300) + 40;
+      const r = Math.hypot(target.x, target.z);
+      if (r > maxR) {
+        const back = new THREE.Vector3(target.x, 0, target.z).multiplyScalar(maxR / r - 1);
+        target.add(back);
+        cam.position.add(back);
+      }
+    }
+  }
+
+  /** Gira la cámara alrededor de lo que mira y la acerca o aleja (dentro de los límites). */
+  #orbit(angle, scale) {
+    const target = this.controls.target;
+    const offset = this.camera.position.clone().sub(target);
+    if (angle) offset.applyAxisAngle(new THREE.Vector3(0, 1, 0), angle);
+    if (scale !== 1) offset.setLength(THREE.MathUtils.clamp(offset.length() * scale, this.controls.minDistance, this.controls.maxDistance));
+    this.camera.position.copy(target).add(offset);
   }
 
   #ringFor(id) {
@@ -1419,6 +1527,7 @@ export class World {
       this.camera.position.add(step);
       if (target.distanceTo(this.focusTarget) < 0.01) this.focusTarget = null;
     }
+    this.#moveCamera(dt);
     this.controls.update(dt);
 
     // Niebla según lo lejos que esté la cámara

@@ -66,7 +66,15 @@ export class Hud {
 
     this.panel.addEventListener('click', (e) => this.#onPanelClick(e));
     this.panel.addEventListener('input', () => this.#refreshPanel());
-    this.panel.addEventListener('change', () => this.#refreshPanel());
+    this.panel.addEventListener('change', (e) => {
+      this.#refreshPanel();
+      // Al soltar el control de trabajadores, se aplica
+      const id = e.target.dataset?.work;
+      if (id) {
+        const pct = Number(e.target.value);
+        this.#run(null, () => this.game.setWork(id, pct), `👷 ${BUILDINGS[id].name}: ${pct} % de los trabajadores produciendo`, 'click');
+      }
+    });
     this.panel.addEventListener('keydown', (e) => {
       if (e.key === 'Enter' && e.target.matches('input')) e.target.closest('.card, .trade, .section')?.querySelector('[data-action="train"], [data-action="trade"]')?.click();
     });
@@ -418,6 +426,7 @@ export class Hud {
       ];
       if (eco.research[key]) lines.push(`Investigación: +${fmtNum(eco.research[key])}/h`);
       if (eco.colonies[key]) lines.push(`Colonias: +${fmtNum(eco.colonies[key])}/h`);
+      if (key === 'oro' && eco.taxes) lines.push(`Impuestos de los trabajadores libres: +${fmtNum(eco.taxes)}/h`);
       if (eco.eventBonus?.[key]) lines.push(`Evento del archipiélago: +${Math.round(eco.eventBonus[key] * 100)} %`);
       if (key === 'comida' && eco.upkeep) lines.push(`Tropas: −${fmtNum(eco.upkeep)}/h`);
       if (starving) lines.push('Hambruna: la producción cae a la mitad');

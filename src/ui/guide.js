@@ -18,7 +18,8 @@ const TOPICS = [
     body: `<p>Madera, piedra, comida, hierro, cristal y oro. La isla da un poco de cada uno y los edificios productores, mucho más.</p>
       <p>El <b>almacén</b> sube el máximo de cada recurso y esconde una parte que nadie te puede robar. Si el almacén está lleno, lo que se produce se pierde.</p>
       <p>Las tropas <b>comen</b>: si la comida llega a cero hay hambruna y toda la producción cae a la mitad. La taberna reduce lo que comen.</p>
-      <p>En la <b>taberna</b> también se contratan <b>mercenarios</b> por un día, pagando oro: útiles para una defensa urgente o un ataque puntual.</p>`,
+      <p>En la <b>taberna</b> también se contratan <b>mercenarios</b> por un día, pagando oro: útiles para una defensa urgente o un ataque puntual.</p>
+      <p><b>Trabajadores</b> 👷: en el aserradero, la cantera, la granja, la mina y la fundición eliges qué parte de los trabajadores produce. Los demás comercian y pagan impuestos en oro (la mitad de lo que valdría lo que dejan de producir): útil cuando el almacén se llena o te falta oro.</p>`,
   },
   {
     icon: '🏛️',
@@ -119,9 +120,10 @@ const TOPICS = [
   },
   {
     icon: '⌨️',
-    title: 'Atajos de teclado',
+    title: 'Cámara y atajos de teclado',
     body: `<p><b>M</b>: cambiar entre tu isla y el archipiélago · <b>Esc</b>: cerrar ventanas y paneles · <b>?</b>: esta guía.</p>
-      <p><b>1</b> misiones · <b>2</b> chat · <b>3</b> correo · <b>4</b> alianza · <b>5</b> clasificación · <b>6</b> mapa del mundo · <b>7</b> informes.</p>`,
+      <p><b>1</b> misiones · <b>2</b> chat · <b>3</b> correo · <b>4</b> alianza · <b>5</b> clasificación · <b>6</b> mapa del mundo · <b>7</b> informes.</p>
+      <p><b>Cámara</b>: arrastra para moverte, arrastra con el botón derecho (o Mayús) para girar y usa la rueda para acercarte hacia el ratón. Con el teclado: <b>WASD</b> o flechas para moverte, <b>Q</b>/<b>E</b> para girar, <b>+</b>/<b>−</b> para acercar y <b>C</b> para centrar. Doble clic en el suelo o el mar para ir allí. En el móvil, un dedo mueve y dos acercan y giran.</p>`,
   },
 ];
 

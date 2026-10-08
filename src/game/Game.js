@@ -35,6 +35,7 @@ import {
   WONDERS,
   WONDER_LEVELS,
   WONDER_RESOURCES,
+  WORK,
 } from './data.js';
 import { battle, count, hasCombat } from './combat.js';
 import {
@@ -49,6 +50,7 @@ import {
   favorMax,
   favorRate,
   fleetSlots,
+  hasWorkers,
   maxColonies,
   missingRequirements,
   multiplyCost,
@@ -668,6 +670,22 @@ export class Game extends EventTarget {
   }
 
   // ── Título ─────────────────────────────────────────────────────────────────
+
+  /**
+   * Qué parte (en %) de los trabajadores de un edificio productor trabaja; el resto
+   * comercia y paga impuestos en oro. 100 % es lo normal.
+   */
+  setWork(id, pct, now = this.now()) {
+    this.#advance(now);
+    if (!hasWorkers(id) || !this.level(id)) return this.#fail('Ese edificio no tiene trabajadores que repartir.');
+    const n = Math.round(Number(pct) / WORK.step) * WORK.step;
+    if (!Number.isFinite(n) || n < 0 || n > 100) return this.#fail('Elige un valor entre 0 y 100 %.');
+    const work = { ...(this.state.work ?? {}) };
+    if (n === 100) delete work[id];
+    else work[id] = n;
+    this.state.work = work;
+    return this.#done();
+  }
 
   /** Uno de tus logros como título junto a tu nombre ('' para no llevar ninguno). */
   setTitle(id, now = this.now()) {

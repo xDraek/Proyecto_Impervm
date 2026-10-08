@@ -17,6 +17,7 @@ import {
   WORLD_EVENTS,
   WORLD_EVENT_CHANCE,
   WORLD_EVENT_HOURS,
+  WORK,
 } from './data.js';
 
 // Fórmulas puras. Reciben el estado de la partida (o partes) y no lo modifican.
@@ -148,6 +149,24 @@ export function producerOutput(id, level) {
   return b.baseProduction * level * 1.1 ** level * universe.speed;
 }
 
+/** Qué parte de los trabajadores de un edificio productor está produciendo (de 0 a 1). */
+export function workShare(state, id) {
+  const w = state.work?.[id];
+  return w == null ? 1 : Math.min(100, Math.max(0, w)) / 100;
+}
+
+/** ¿Se pueden repartir los trabajadores de este edificio? (los que producen, salvo el oro del mercado) */
+export function hasWorkers(id) {
+  const res = BUILDINGS[id]?.produces;
+  return !!res && res !== 'oro';
+}
+
+/** Oro por hora que pagan los trabajadores libres de un edificio. */
+export function workTaxes(id, level, share) {
+  const res = BUILDINGS[id].produces;
+  return producerOutput(id, level) * (1 - share) * (RESOURCES[res].value / RESOURCES.oro.value) * WORK.taxShare;
+}
+
 export function researchBonus(state, res) {
   return 0.1 * lvl(state, RESOURCE_RESEARCH[res]);
 }
@@ -267,8 +286,14 @@ export function economy(state, t = state.lastUpdate) {
     buildings[res] = 0;
     colonies[res] = 0;
   }
+  // Los trabajadores que no producen comercian y pagan impuestos en oro
+  let taxes = 0;
   for (const [id, b] of Object.entries(BUILDINGS)) {
-    if (b.produces) buildings[b.produces] += producerOutput(id, state.buildings[id] ?? 0);
+    if (!b.produces) continue;
+    const level = state.buildings[id] ?? 0;
+    const share = hasWorkers(id) ? workShare(state, id) : 1;
+    buildings[b.produces] += producerOutput(id, level) * share;
+    if (share < 1) taxes += workTaxes(id, level, share);
   }
   for (const col of state.colonies ?? []) if (!(col.raidedUntil > t)) colonies[col.specialty] += colonyYield(col);
   const event = worldEventAt(t).event;
@@ -278,13 +303,13 @@ export function economy(state, t = state.lastUpdate) {
     eventBonus[res] = event?.prod?.[res] ?? 0;
     const wonder = res === 'comida' ? wonderBonus(state, 'comida') : 0;
     const relic = relicBonus(state, 'produccion') + (res === 'comida' ? relicBonus(state, 'comida') : 0) + (res === 'oro' ? relicBonus(state, 'oro') : 0);
-    gross[res] = (base[res] + buildings[res] + research[res] + colonies[res]) * bonus * (1 + eventBonus[res] + wonder + relic);
+    gross[res] = (base[res] + buildings[res] + research[res] + colonies[res] + (res === 'oro' ? taxes : 0)) * bonus * (1 + eventBonus[res] + wonder + relic);
   }
   const upkeep = upkeepPerHour(state);
   const net = { ...gross, comida: gross.comida - upkeep };
   const hungry = {};
   for (const res of RESOURCE_KEYS) hungry[res] = res === 'comida' ? net.comida : net[res] * 0.5;
-  return { base, buildings, research, colonies, bonus, eventBonus, gross, upkeep, net, hungry };
+  return { base, buildings, research, colonies, taxes, bonus, eventBonus, gross, upkeep, net, hungry };
 }
 
 /** Lo que el almacén esconde de cada recurso y los piratas no pueden robar. */

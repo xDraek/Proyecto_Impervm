@@ -869,6 +869,12 @@ export const WONDER_RESOURCES = ['madera', 'piedra', 'cristal'];
 // Tu isla descansa: no produce, no come, no llegan piratas ni visitantes y
 // nadie te puede atacar ni espiar. Dura al menos `minHours`.
 
+// ── Trabajadores ─────────────────────────────────────────────────────────────
+// En los edificios que producen (salvo el mercado) se elige qué parte de los
+// trabajadores produce; los demás comercian y pagan impuestos en oro: la mitad
+// de lo que valdría lo que dejan de producir.
+export const WORK = { step: 10, taxShare: 0.5 };
+
 export const VACATION = {
   minHours: 48,
   cooldownHours: 24,

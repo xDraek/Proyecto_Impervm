@@ -3484,3 +3484,70 @@ summary:focus-visible {
 #view-btn {
   position: relative;
 }
+
+/* ── Trabajadores de los edificios productores ───────────────────────────── */
+
+.work-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 6px 0 10px;
+}
+
+.work-row input[type='range'] {
+  flex: 1;
+  accent-color: var(--gold);
+  cursor: pointer;
+}
+
+.work-pct {
+  min-width: 46px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  color: var(--gold);
+}
+
+/* ── Botones de la cámara ────────────────────────────────────────────────── */
+
+#cam-controls {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  display: flex;
+  gap: 4px;
+  padding: 5px;
+  border-radius: 12px;
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+  backdrop-filter: blur(6px);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  transition: right 0.2s ease;
+}
+
+#cam-controls .icon-btn {
+  font-size: 16px;
+  line-height: 1;
+}
+
+/* Con el panel de la derecha abierto, se apartan */
+#panel:not([hidden]) ~ #cam-controls,
+#chat:not([hidden]) ~ #cam-controls {
+  right: 384px;
+}
+
+body.landing-mode #cam-controls {
+  display: none;
+}
+
+@media (max-width: 700px) {
+  #cam-controls {
+    right: 8px;
+    bottom: 72px;
+    flex-direction: column;
+  }
+
+  #panel:not([hidden]) ~ #cam-controls,
+  #dock:not([hidden]) ~ #cam-controls {
+    display: none;
+  }
+}
