@@ -696,8 +696,25 @@ export const DAILY_REWARDS = [
 // ── Logros ───────────────────────────────────────────────────────────────────
 // Se ganan solos al cumplirse y se enseñan en el perfil del jugador.
 
+// ── Competición semanal ──────────────────────────────────────────────────────
+// Cada semana se premia a los tres mejores de cada categoría por lo que han
+// hecho esa semana (no por lo acumulado).
+
+export const CONTEST_DAYS = 7;
+export const CONTEST_CATEGORIES = {
+  saqueo: { name: 'Saqueo', icon: '💰', stat: 'loot', unit: 'recursos saqueados' },
+  militar: { name: 'Militar', icon: '⚔️', stat: 'kills', unit: 'enemigos abatidos' },
+  constructor: { name: 'Constructor', icon: '🏗️', stat: 'spent', unit: 'recursos invertidos' },
+};
+export const CONTEST_PRIZES = [
+  { oro: 4000, cristal: 2500, hierro: 2500 },
+  { oro: 2400, cristal: 1500, hierro: 1500 },
+  { oro: 1400, cristal: 900, hierro: 900 },
+];
+
 export const ACHIEVEMENTS = [
   { id: 'saqueador', icon: '⚔️', name: 'Saqueador', text: 'Gana 10 ataques', check: (g) => g.stats.victories >= 10 },
+  { id: 'campeon', icon: '🏅', name: 'Campeón de la semana', text: 'Gana una categoría de la competición semanal', check: (g) => (g.stats.contestWins ?? 0) >= 1 },
   { id: 'conquistador', icon: '👑', name: 'Conquistador', text: 'Gana 50 ataques', check: (g) => g.stats.victories >= 50 },
   { id: 'azote', icon: '🗡️', name: 'Azote de reyes', text: 'Saquea 5 ciudades de otros jugadores', check: (g) => g.stats.pvpWins >= 5 },
   { id: 'muralla', icon: '🏰', name: 'Inexpugnable', text: 'Rechaza 5 asaltos', check: (g) => g.stats.raidsRepelled >= 5 },

@@ -108,7 +108,7 @@ export function newState({ now = clock.now(), home, name }) {
     notes: [],
     favor: 0,
     buffs: {},
-    stats: { spent: 0, victories: 0, raidsRepelled: 0, expeditions: 0, powers: 0, treasures: 0, kraken: 0, pvpWins: 0, trades: 0, transports: 0, kills: 0, loot: 0, conquests: 0, donated: 0 },
+    stats: { spent: 0, victories: 0, raidsRepelled: 0, expeditions: 0, powers: 0, treasures: 0, kraken: 0, pvpWins: 0, trades: 0, transports: 0, kills: 0, loot: 0, conquests: 0, donated: 0, contestWins: 0 },
     daily: { last: null, streak: 0, best: 0 },
     hero: null,
     quests: { claimed: [] },

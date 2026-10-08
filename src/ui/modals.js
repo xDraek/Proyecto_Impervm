@@ -1,4 +1,4 @@
-import { QUESTS } from '../game/data.js';
+import { CONTEST_CATEGORIES, QUESTS } from '../game/data.js';
 import { bag, escapeHtml, fmtNum } from './format.js';
 
 // Ventanas de misiones y de clasificación.
@@ -38,19 +38,58 @@ export function questsHtml(game) {
 const medal = (n) => (n === 1 ? '🥇' : n === 2 ? '🥈' : n === 3 ? '🥉' : n);
 
 const RANK_TABS = {
+  semana: { name: '🏅 Semana', sub: 'la competición semanal: premios para los tres mejores de cada categoría' },
   players: { name: 'Imperios', sub: 'un punto por cada 100 recursos invertidos' },
   military: { name: '⚔️ Militar', sub: 'enemigos abatidos en combate (atacando y defendiendo)', key: 'kills', col: 'Bajas' },
   raiders: { name: '💰 Saqueo', sub: 'recursos saqueados a piratas, bárbaros y otros jugadores', key: 'loot', col: 'Botín' },
   alliances: { name: '🤝 Alianzas', sub: 'la suma de los puntos de sus miembros' },
 };
 
-export function rankingHtml({ top, military = [], raiders = [], me, total, alliances = [] }, tab = 'players') {
+function contestHtml(contest) {
+  if (!contest) return '<p class="muted">La competición empieza enseguida.</p>';
+  const left = Math.max(0, contest.end - Date.now());
+  const days = Math.floor(left / 86_400_000);
+  const hours = Math.floor((left % 86_400_000) / 3_600_000);
+  const prize = (i) => bag(contest.prizes[i]);
+  const cats = Object.entries(CONTEST_CATEGORIES)
+    .map(([key, cat]) => {
+      const c = contest.categories[key];
+      const rows = c.top
+        .map((r) => `<li class="${r.me ? 'me' : ''}"><span>${medal(r.rank)} ${r.me ? '⚜ ' : ''}<button class="link" data-action="profile" data-name="${escapeHtml(r.name)}">${escapeHtml(r.name)}</button></span><b>${fmtNum(r.score)}</b></li>`)
+        .join('');
+      const mine = c.me && c.me.rank > 10 ? `<li class="me"><span>${c.me.rank}. ⚜ Tú</span><b>${fmtNum(c.me.score)}</b></li>` : '';
+      return `<div class="contest-cat">
+        <h4>${cat.icon} ${cat.name} <span class="muted small">· ${cat.unit}</span></h4>
+        ${rows ? `<ol class="mini-rank contest-list">${rows}${mine}</ol>` : '<p class="muted small">Nadie ha puntuado todavía. ¡Aún estás a tiempo!</p>'}
+      </div>`;
+    })
+    .join('');
+  const hall = contest.hall
+    .map((h) => {
+      const names = Object.entries(CONTEST_CATEGORIES)
+        .map(([key, cat]) => (h.winners[key]?.[0] ? `${cat.icon} ${escapeHtml(h.winners[key][0].name)}` : null))
+        .filter(Boolean)
+        .join(' · ');
+      return `<li><span>Semana ${h.n}</span><span>${names || 'Sin ganadores'}</span></li>`;
+    })
+    .join('');
+  return `<div class="contest-head">
+      <div><b>Semana ${contest.n}</b> · termina en ${days ? `${days} d ` : ''}${hours} h</div>
+      <div class="small">🥇 ${prize(0)}</div><div class="small">🥈 ${prize(1)}</div><div class="small">🥉 ${prize(2)}</div>
+    </div>
+    <div class="contest-grid">${cats}</div>
+    ${hall ? `<h4>🏛️ Salón de la fama</h4><ul class="mini-list hall">${hall}</ul>` : ''}`;
+}
+
+export function rankingHtml({ top, military = [], raiders = [], me, total, alliances = [], contest = null }, tab = 'players') {
   const tabs = `<div class="tabs small-tabs">${Object.entries(RANK_TABS)
     .map(([id, t]) => `<button data-action="rank-tab" data-tab="${id}" class="${tab === id ? 'active' : ''}">${t.name}</button>`)
     .join('')}</div>`;
   const cat = RANK_TABS[tab] ?? RANK_TABS.players;
   let table;
-  if (tab === 'alliances') {
+  if (tab === 'semana') {
+    table = contestHtml(contest);
+  } else if (tab === 'alliances') {
     const rows = alliances
       .map((a) => `<tr><td>${medal(a.rank)}</td><td>${escapeHtml(a.name)} <span class="tag">[${escapeHtml(a.tag)}]</span><div class="muted small">${a.members} miembros</div></td><td>${fmtNum(a.points)}</td></tr>`)
       .join('');

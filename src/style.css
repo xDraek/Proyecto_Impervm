@@ -2766,3 +2766,44 @@ input[type='text'] {
   display: flex;
   justify-content: space-between;
 }
+
+/* ── Competición semanal ─────────────────────────────────────────────────── */
+
+.contest-head {
+  display: grid;
+  gap: 2px;
+  padding: 8px 12px;
+  margin-bottom: 10px;
+  border-radius: 10px;
+  border: 1px solid rgba(242, 201, 76, 0.5);
+  background: rgba(242, 201, 76, 0.08);
+}
+
+.contest-grid {
+  display: grid;
+  gap: 10px;
+}
+
+.contest-cat h4 {
+  margin: 4px 0;
+}
+
+.contest-list li.me,
+.hall li {
+  display: flex;
+  justify-content: space-between;
+}
+
+.contest-list li.me {
+  color: var(--gold);
+}
+
+.hall li {
+  gap: 10px;
+  padding: 4px 0;
+}
+
+.contest-list {
+  list-style: none;
+  padding-left: 0;
+}

@@ -47,6 +47,8 @@ El servidor guarda el mundo en memoria y lo vuelca a la base de datos cada 10 se
 - **Academia** con 13 investigaciones, **cuartel y puerto** con 7 tropas (honderos, hoplitas…) y 6 barcos (brulotes, dromones…). Las tropas comen: sin comida hay hambruna.
 - **Continentes** 🗺️: entre cada tres sectores puede haber un pequeño continente con ciudades bárbaras amuralladas (mucho botín) y valles fértiles que colonizar. Las ciudades bárbaras se pueden **conquistar** 🏴: si tu ejército acaba con toda la guarnición, los colonos se quedan con ella y pasa a ser tuya.
 - **Maravillas** 🏛️: cada continente tiene una (Templo de Poseidón, Forja de Hefesto, Jardines de Deméter o Biblioteca de Atenea). La levantan entre todos los que tienen colonia allí aportando madera, piedra y cristal; con cada uno de sus 5 niveles todos ellos ganan más velocidad de flota, ataque, comida o investigación.
+- **Competición semanal** 🏅: cada semana se premia a los tres mejores en saqueo, militar y construcción (solo cuenta lo hecho esa semana). Los ganadores quedan en el salón de la fama, en la pestaña «Semana» de la clasificación.
+- **Efectos de combate**: humo, fuego y destellos en la isla donde se libra una batalla (también en tu muralla cuando te atacan).
 - **Tutorial**: un consejero guía a los jugadores nuevos por sus primeros pasos (se puede saltar).
 - **Clima**: cada media hora puede estar despejado, nublado, lloviendo o haber tormenta con relámpagos y truenos (igual para todos). Alrededor de tu isla faenan pesqueros, saltan delfines y los carros de bueyes suben por la avenida.
 - Tu ciudad crece a la vista: barrios que se llenan de casas con el ayuntamiento, campos, ovejas, farolas que se encienden de noche y una playa con barcas y cabañas.

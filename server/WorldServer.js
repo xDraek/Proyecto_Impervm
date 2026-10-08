@@ -2,7 +2,7 @@ import { clock, universe } from '../src/config.js';
 import { RESOURCES } from '../src/game/data.js';
 import { count } from '../src/game/combat.js';
 import { Game, newState } from '../src/game/Game.js';
-import { WONDERS } from '../src/game/data.js';
+import { CONTEST_CATEGORIES, CONTEST_DAYS, CONTEST_PRIZES, WONDERS } from '../src/game/data.js';
 import { playerCombat, wonderLevel, wonderOf, worldEventAt } from '../src/game/rules.js';
 import { footprint, freshIslandState, generateContinent, generateSector, homeIsland, sectorCenter, sectorVertices } from '../src/game/world.js';
 import { hashPassword, newSecret, verifyPassword } from './auth.js';
@@ -78,6 +78,7 @@ export class WorldServer {
     // Mundos de antes de los continentes: se añaden donde quepan
     for (let s = 0; s < this.meta.sectors; s++) this.#addContinents(s, clock.now());
     this.#refreshWonders();
+    this.#ensureContest();
     // Ponerse al día con lo que pasó mientras el servidor estuvo apagado
     this.tick();
     await this.persist(true);
@@ -119,6 +120,7 @@ export class WorldServer {
     const game = this.#makeGame(id, newState({ now, home: home.id, name: username }));
     game.dirty = true;
     this.games.set(id, game);
+    if (this.meta.contest) this.meta.contest.base[id] = this.#contestStats(game);
     this.rankingCache = null;
     this.announce(`⚓ ${username} funda la ciudad de ${city}`);
     await this.persist(true);
@@ -308,6 +310,73 @@ export class WorldServer {
     return true;
   }
 
+  // ── Competición semanal ────────────────────────────────────────────────────
+
+  #contestStats(game) {
+    const out = {};
+    for (const c of Object.values(CONTEST_CATEGORIES)) out[c.stat] = game.state.stats[c.stat] ?? 0;
+    return out;
+  }
+
+  /** Empieza una competición nueva: lo que lleva cada uno ahora es su punto de partida. */
+  #ensureContest(start = Date.now()) {
+    if (this.meta.contest) return;
+    const base = {};
+    for (const [uid, game] of this.games) base[uid] = this.#contestStats(game);
+    const n = (this.meta.contestSeq = (this.meta.contestSeq ?? 0) + 1);
+    this.meta.contest = { n, start, end: start + (CONTEST_DAYS * 86_400_000) / universe.speed, base };
+  }
+
+  /** Lo hecho esta semana en cada categoría, de mayor a menor. */
+  contestStandings() {
+    const c = this.meta.contest;
+    const out = {};
+    for (const [key, cat] of Object.entries(CONTEST_CATEGORIES)) {
+      out[key] = [...this.games.entries()]
+        .map(([uid, g]) => ({ uid, name: g.name, score: Math.floor((g.state.stats[cat.stat] ?? 0) - (c.base[uid]?.[cat.stat] ?? 0)) }))
+        .filter((r) => r.score > 0)
+        .sort((a, b) => b.score - a.score);
+    }
+    return out;
+  }
+
+  #finishContest() {
+    const c = this.meta.contest;
+    const standings = this.contestStandings();
+    const winners = {};
+    for (const [key, list] of Object.entries(standings)) {
+      const cat = CONTEST_CATEGORIES[key];
+      winners[key] = list.slice(0, 3).map((r, i) => {
+        const game = this.games.get(r.uid);
+        game.update(clock.now());
+        game.giveResources(CONTEST_PRIZES[i], `🏅 ${['¡Primer', 'Segundo', 'Tercer'][i]} puesto en ${cat.name} de la competición semanal! Premio entregado.`);
+        if (i === 0) game.state.stats.contestWins = (game.state.stats.contestWins ?? 0) + 1;
+        game.dirty = true;
+        return { name: r.name, score: r.score };
+      });
+      if (winners[key][0]) this.announce(`🏅 ${cat.icon} ${winners[key][0].name} gana la semana en ${cat.name} (${winners[key][0].score.toLocaleString('es-ES')} ${cat.unit})`);
+    }
+    this.meta.hall = [{ n: c.n, end: c.end, winners }, ...(this.meta.hall ?? [])].slice(0, 12);
+    this.meta.contest = null;
+    this.#ensureContest(c.end);
+    this.rankingCache = null;
+  }
+
+  /** La competición vista por un jugador: el podio de cada categoría y su puesto. */
+  contestView(userId) {
+    const c = this.meta.contest;
+    const standings = this.contestStandings();
+    const categories = {};
+    for (const [key, list] of Object.entries(standings)) {
+      const i = list.findIndex((r) => r.uid === userId);
+      categories[key] = {
+        top: list.slice(0, 10).map((r, k) => ({ rank: k + 1, name: r.name, score: r.score, me: r.uid === userId })),
+        me: i >= 0 ? { rank: i + 1, score: list[i].score } : null,
+      };
+    }
+    return { n: c.n, end: c.end, categories, prizes: CONTEST_PRIZES, hall: (this.meta.hall ?? []).slice(0, 3) };
+  }
+
   // ── Maravillas de los continentes ──────────────────────────────────────────
 
   /** Bonos de las maravillas de los continentes donde hay colonias de la lista. */
@@ -475,6 +544,7 @@ export class WorldServer {
         game.releaseJoint(m, now);
       }
     }
+    if (this.meta.contest && Date.now() >= this.meta.contest.end) this.#finishContest();
     // Cuando empieza una temporada del archipiélago, se anuncia una sola vez
     const ev = worldEventAt(now);
     if (this.meta.eventAnnounced !== ev.start) {

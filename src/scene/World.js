@@ -155,6 +155,9 @@ export class World {
     this.boats = [];
     this.dolphins = [];
     this.weather = { dark: 0, rain: 0, storm: false, flash: 0, rainSound: -1 };
+    this.fx = [];
+    // Los combates que ya había al entrar no se vuelven a ver
+    this.fxSeen = Math.max(0, ...(game.reports ?? []).map((r) => r.t));
 
     this.#setupRenderer();
     this.#setupScene();
@@ -741,6 +744,9 @@ export class World {
     this.scene.add(this.rain);
     this.flashLight = new THREE.AmbientLight('#dfe8ff', 0);
     this.scene.add(this.flashLight);
+    // Una sola luz para los combates (crear luces nuevas obligaría a recompilar todos los materiales)
+    this.fxLight = new THREE.PointLight('#ffb070', 0, 40);
+    this.scene.add(this.fxLight);
     for (let i = 0; i < 7; i++) {
       const gull = createGull();
       gull.userData.fly = { r: 12 + rand() * 24, h: 10 + rand() * 7, speed: (0.15 + rand() * 0.15) * (i % 2 ? 1 : -1), phase: rand() * Math.PI * 2 };
@@ -765,6 +771,80 @@ export class World {
       this.lifeGroup.add(v);
       this.villagers.push(v);
     }
+  }
+
+  /** Humo, fuego y destellos donde acaba de haber un combate (en tu isla o en otra). */
+  #syncBattles() {
+    if (this.showcase) return;
+    const fresh = (this.game.reports ?? []).filter((r) => r.t > this.fxSeen && (r.battle || r.kind === 'defensa'));
+    if (!fresh.length) return;
+    this.fxSeen = Math.max(...fresh.map((r) => r.t));
+    for (const r of fresh.slice(0, 4)) {
+      const atHome = r.kind === 'defensa' || (r.defending && r.kind !== 'expedicion');
+      const target = atHome ? null : this.islands[r.island];
+      if (!atHome && !target) continue;
+      // En casa, junto a la muralla por el lado que ve la cámara
+      const pos = atHome ? polar(WALL_R + 2, 10 + ((r.t / 997) % 50)) : target.pos.clone();
+      const size = atHome ? 6 : Math.max(5, target.radius * 0.7);
+      this.#battleFx(pos, size, r.outcome);
+    }
+  }
+
+  #battleFx(pos, size, outcome) {
+    const group = new THREE.Group();
+    group.position.copy(pos);
+    const parts = [];
+    const fire = ['#ff8a2a', '#ffb347', '#ff5a1f'];
+    for (let i = 0; i < 20; i++) {
+      const isFire = i % 3 !== 0;
+      const material = new THREE.MeshStandardMaterial({
+        color: isFire ? fire[i % 3] : '#5a5550',
+        emissive: isFire ? fire[i % 3] : '#000000',
+        emissiveIntensity: isFire ? 1.6 : 0,
+        transparent: true,
+        opacity: 0.9,
+        flatShading: true,
+        depthWrite: false,
+      });
+      const puff = new THREE.Mesh(new THREE.IcosahedronGeometry(isFire ? 0.9 : 1.4, 0), material);
+      const a = Math.random() * Math.PI * 2;
+      const d = Math.random() * size;
+      puff.userData.fx = { x: Math.sin(a) * d, z: Math.cos(a) * d, delay: Math.random() * 1.2, rise: 3 + Math.random() * 5, grow: isFire ? 2 : 3.5 };
+      group.add(puff);
+      parts.push(puff);
+    }
+    this.scene.add(group);
+    this.fx.push({ group, parts, pos: pos.clone().setY(3), size, t: 0, life: 4.2, win: outcome === 'victoria' });
+  }
+
+  #updateFx(dt) {
+    const last = this.fx.at(-1);
+    if (last) {
+      // El destello del combate más reciente parpadea y se apaga
+      this.fxLight.position.copy(last.pos);
+      this.fxLight.distance = last.size * 5;
+      this.fxLight.intensity = last.t < 2.4 ? (2 + Math.sin(last.t * 30) * 1.5) * (1 - last.t / 2.4) * 6 : 0;
+    } else this.fxLight.intensity = 0;
+    for (const f of this.fx) {
+      f.t += dt;
+      for (const p of f.parts) {
+        const d = p.userData.fx;
+        const k = Math.max(0, f.t - d.delay) / (f.life - d.delay);
+        p.visible = f.t >= d.delay && k < 1;
+        if (!p.visible) continue;
+        p.position.set(d.x, 0.5 + k * d.rise, d.z);
+        p.scale.setScalar(0.4 + k * d.grow);
+        p.material.opacity = 0.95 * (1 - k * k);
+      }
+    }
+    for (const f of this.fx.filter((x) => x.t >= x.life)) {
+      this.scene.remove(f.group);
+      for (const p of f.parts) {
+        p.geometry.dispose();
+        p.material.dispose();
+      }
+    }
+    this.fx = this.fx.filter((x) => x.t < x.life);
   }
 
   /** Lluvia, cielo encapotado y relámpagos según el tiempo que haga. */
@@ -967,6 +1047,7 @@ export class World {
   // ── Sincronización con la partida ──────────────────────────────────────────
 
   sync() {
+    this.#syncBattles();
     this.#syncVillagers();
     this.#syncHouses();
     this.#syncBuildings();
@@ -1296,6 +1377,7 @@ export class World {
 
     this.waterTime.value = t;
     this.#updateWeather(dt, now, dist);
+    this.#updateFx(dt);
     this.#updateSky(now);
     this.#updateLife(dt, t);
 

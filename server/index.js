@@ -198,7 +198,7 @@ async function api(req, res, url) {
       return send(res, 200, { result, snapshot });
     }
 
-    if (route === 'GET /api/ranking') return send(res, 200, world.ranking(uid));
+    if (route === 'GET /api/ranking') return send(res, 200, { ...world.ranking(uid), contest: world.contestView(uid) });
     if (route === 'GET /api/map') return send(res, 200, world.worldMap(uid));
 
     if (route === 'GET /api/chat') return send(res, 200, { messages: world.chatSince(uid, int(url.searchParams.get('after')) || 0) });
