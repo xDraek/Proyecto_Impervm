@@ -1,4 +1,5 @@
 import { UNITS } from '../game/data.js';
+import { unitIcon } from '../scene/portraits.js';
 import { bag, escapeHtml, fmtAgo, fmtNum, unitList } from './format.js';
 
 // Informes de combate, exploración y colonias.
@@ -9,7 +10,7 @@ function sideTable(title, side) {
   const rows = Object.entries(side.start)
     .map(([id, n]) => {
       const lost = side.lost[id] ?? 0;
-      return `<tr><td>${UNITS[id].icon} ${UNITS[id].name}</td><td>${fmtNum(n)}</td><td class="${lost ? 'bad' : ''}">${lost ? `−${fmtNum(lost)}` : '0'}</td></tr>`;
+      return `<tr><td class="u-cell">${unitIcon(id)} ${UNITS[id].name}</td><td>${fmtNum(n)}</td><td class="${lost ? 'bad' : ''}">${lost ? `−${fmtNum(lost)}` : '0'}</td></tr>`;
     })
     .join('');
   return `<div class="side"><h5>${title}</h5>${
@@ -39,7 +40,7 @@ export function playReplay(btn, r) {
   const { attTitle, defTitle } = sideTitles(r);
   const sideHtml = (key, title) =>
     `<div class="rp-side" data-side="${key}"><h5>${title}</h5>${Object.entries(b[key].start)
-      .map(([id, n]) => `<div class="rp-unit" data-u="${id}"><span class="rp-icon" title="${UNITS[id].name}">${UNITS[id].icon}</span><div class="rp-bar"><i style="width:100%"></i></div><b>${fmtNum(n)}</b></div>`)
+      .map(([id, n]) => `<div class="rp-unit" data-u="${id}">${unitIcon(id, 'rp-icon')}<div class="rp-bar"><i style="width:100%"></i></div><b>${fmtNum(n)}</b></div>`)
       .join('') || '<p class="muted small">Nadie</p>'}</div>`;
   box.innerHTML = `<div class="rp-stage"><div class="rp-round">¡A las armas!</div><div class="rp-sides">${sideHtml('att', attTitle)}<div class="rp-vs">⚔️</div>${sideHtml('def', defTitle)}</div></div>`;
   let i = 0;

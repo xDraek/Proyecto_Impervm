@@ -119,7 +119,8 @@ const TOPICS = [
   {
     icon: '⌨️',
     title: 'Atajos de teclado',
-    body: `<p><b>M</b>: cambiar entre tu isla y el archipiélago · <b>Esc</b>: cerrar ventanas y paneles · <b>?</b>: esta guía.</p>`,
+    body: `<p><b>M</b>: cambiar entre tu isla y el archipiélago · <b>Esc</b>: cerrar ventanas y paneles · <b>?</b>: esta guía.</p>
+      <p><b>1</b> misiones · <b>2</b> chat · <b>3</b> correo · <b>4</b> alianza · <b>5</b> clasificación · <b>6</b> mapa del mundo · <b>7</b> informes.</p>`,
   },
 ];
 

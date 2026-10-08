@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { UNITS } from '../game/data.js';
 import { createBuilding, createShip, createSoldier, cyl, disposeTree } from './models.js';
 
 // Retratos para los menús: el mismo modelo 3D del juego, dibujado una vez en un lienzo aparte
@@ -154,12 +155,6 @@ export function portrait(kind, id, { level = 1, width = 320, height = 180, model
   return url;
 }
 
-/** Retrato en <img> o, si no se puede, el emoji de siempre. */
-export function portraitImg(kind, id, fallback, { level, width, height, cls = 'card-art' } = {}) {
-  const url = portrait(kind, id, { level, width, height });
-  return url ? `<img class="${cls}" src="${url}" alt="" draggable="false" />` : `<span class="card-icon">${fallback}</span>`;
-}
-
 /**
  * Dibuja los retratos poco a poco cuando el navegador está libre, para que los menús
  * se abran al momento. `jobs` es una lista de [kind, id, opciones].
@@ -175,4 +170,21 @@ export function warmPortraits(jobs) {
     if (queue.length && !failed) idle(step);
   };
   idle(step);
+}
+
+/** Las tropas y barcos que tienen modelo propio (el Kraken no cabe en un retrato). */
+const NO_MODEL = new Set(['kraken']);
+
+/** URL del retrato de una tropa o barco, o null si no tiene. */
+export function unitPortrait(id) {
+  const u = UNITS[id];
+  if (!u || NO_MODEL.has(id)) return null;
+  return portrait(u.kind === 'barco' ? 'ship' : 'unit', id, { width: 120, height: 120 });
+}
+
+/** Retrato pequeño de una tropa para listas y tablas (o su emoji, si no tiene). */
+export function unitIcon(id, cls = 'u-mini') {
+  const url = unitPortrait(id);
+  const u = UNITS[id];
+  return url ? `<img class="${cls}" src="${url}" alt="" title="${u.name}" draggable="false" />` : `<span class="${cls} u-emoji" title="${u?.name ?? ''}">${u?.icon ?? '?'}</span>`;
 }

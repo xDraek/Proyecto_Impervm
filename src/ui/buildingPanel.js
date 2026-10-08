@@ -1,9 +1,9 @@
 import { BUILDINGS, HERO, HERO_SKILLS, RELIC_RARITY, RELIC_SLOTS, POWERS, POWER_KEYS, RESEARCH, RESEARCH_KEYS, RESOURCES, RESOURCE_KEYS, UNITS, UNIT_KEYS } from '../game/data.js';
 import { favorMax, favorRate, producerOutput, protectedAmount, requirementName, storageCapacity, townSpeedup, wallBonus } from '../game/rules.js';
-import { portrait, portraitImg } from '../scene/portraits.js';
+import { portrait, unitIcon } from '../scene/portraits.js';
 import { costList, escapeHtml, fmtDec, fmtNum, fmtTime, unitList } from './format.js';
 
-const unitArt = (id) => portraitImg(UNITS[id].kind === 'barco' ? 'ship' : 'unit', id, UNITS[id].icon, { width: 120, height: 120 });
+const unitArt = (id) => unitIcon(id, 'card-art');
 
 // Panel de detalle de un edificio. Devuelve el HTML y un `refresh` para las
 // partes que cambian sin que cambie la partida (vista previa del mercado).

@@ -1357,7 +1357,7 @@ export class World {
     const collect = (root) =>
       root?.traverse((o) => {
         const d = o.userData;
-        if (d.spin || d.swing || d.wave || d.smoke || d.flicker || d.bob || d.wiggle) this.animated.push(o);
+        if (d.spin || d.swing || d.wave || d.smoke || d.flicker || d.bob || d.wiggle || d.sparks) this.animated.push(o);
       });
     for (const slot of Object.values(this.slots)) {
       collect(slot.building);
@@ -1415,7 +1415,7 @@ export class World {
     }
 
     for (const o of this.animated) {
-      const { spin, swing, wave, smoke, flicker, bob, wiggle } = o.userData;
+      const { spin, swing, wave, smoke, flicker, bob, wiggle, sparks } = o.userData;
       if (spin) o.rotation[spin.axis] += spin.speed * dt;
       if (swing) o.rotation.y = Math.sin(t * swing.speed) * swing.amp;
       if (wave) o.rotation.y = Math.sin(t * 3) * 0.3;
@@ -1425,6 +1425,16 @@ export class World {
         o.rotation.z = Math.sin(t * bob.speed * 0.8 + o.id) * 0.05;
       }
       if (wiggle) o.rotation.z = wiggle.base + Math.sin(t * wiggle.speed + wiggle.phase) * wiggle.amp;
+      if (sparks) {
+        // Saltan cuando el martillo llega abajo (seno en -1) y se apagan al caer
+        const f = ((((t * sparks.speed - 1.5 * Math.PI) / (2 * Math.PI)) % 1) + 1) % 1;
+        o.children.forEach((s, k) => {
+          const [dx, dz] = s.userData.dir;
+          const r = f * (0.25 + (k % 3) * 0.08);
+          s.position.set(dx * r, f * 0.45 - f * f * 0.55, dz * r);
+          s.scale.setScalar(Math.max(0.01, 1 - f));
+        });
+      }
       if (smoke) {
         o.children.forEach((puff, k) => {
           const f = (t * 0.35 + smoke.phase + k / o.children.length) % 1;

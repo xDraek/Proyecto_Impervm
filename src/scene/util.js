@@ -148,7 +148,7 @@ function batchMaterial() {
   return (sharedBatchMaterial ??= new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 0.9 }));
 }
 
-const ANIMATED = ['spin', 'swing', 'wave', 'smoke', 'flicker', 'bob', 'wiggle'];
+const ANIMATED = ['spin', 'swing', 'wave', 'smoke', 'flicker', 'bob', 'wiggle', 'sparks'];
 
 /**
  * Funde en una sola malla las piezas de `root` que no se mueven ni brillan

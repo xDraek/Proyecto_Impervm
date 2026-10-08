@@ -149,8 +149,20 @@ function startGame(game) {
       .map((id) => ['building', id, { level: Math.max(1, game.level(id)), width: 340, height: 170 }]),
   ]);
 
+  // Atajos de la barra superior (1-7, en su orden) y rótulos que salen al momento con el ratón
+  const SHORTCUTS = ['quests-btn', 'chat-btn', 'mail-btn', 'alliance-btn', 'rank-btn', 'map-btn', 'reports-btn'];
+  for (const el of document.querySelectorAll('#topbar .top-actions .icon-btn[title], #view-btn')) {
+    const key = SHORTCUTS.indexOf(el.id) + 1;
+    el.dataset.tip = key ? `${el.title} · ${key}` : el.title;
+    el.setAttribute('aria-label', el.title);
+    el.removeAttribute('title');
+  }
+
   window.addEventListener('keydown', (e) => {
     if (e.target.matches?.('input, select, textarea')) return;
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    const shortcut = SHORTCUTS[Number(e.key) - 1];
+    if (shortcut) document.getElementById(shortcut)?.click();
     if (e.key === 'Escape') {
       if (!document.getElementById('modal').hidden) hud.closeModal();
       else select(null);

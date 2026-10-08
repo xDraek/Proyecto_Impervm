@@ -1,5 +1,6 @@
 import { UNITS, UNIT_KEYS } from '../game/data.js';
 import { battle } from '../game/combat.js';
+import { unitIcon } from '../scene/portraits.js';
 import { fmtDec, fmtNum } from './format.js';
 
 // Simulador de combate, como el de OGame: repite la batalla muchas veces con
@@ -13,7 +14,7 @@ function inputs(prefix, ids, values) {
   return ids
     .map((id) => {
       const u = UNITS[id];
-      return `<label title="${u.name}"><span>${u.icon} ${u.name}</span><input type="number" min="0" name="${prefix}-${id}" value="${values[id] ?? ''}" placeholder="0" inputmode="numeric" /></label>`;
+      return `<label title="${u.name}"><span class="u-cell">${unitIcon(id)} ${u.name}</span><input type="number" min="0" name="${prefix}-${id}" value="${values[id] ?? ''}" placeholder="0" inputmode="numeric" /></label>`;
     })
     .join('');
 }
@@ -78,7 +79,7 @@ export function runSimulation(form) {
     Object.entries(start)
       .map(([id, n]) => {
         const avg = (lost[id] ?? 0) / RUNS;
-        return `<tr><td>${UNITS[id].icon} ${UNITS[id].name}</td><td>${fmtNum(n)}</td><td class="${avg ? 'bad' : ''}">−${fmtDec(avg)}</td></tr>`;
+        return `<tr><td class="u-cell">${unitIcon(id)} ${UNITS[id].name}</td><td>${fmtNum(n)}</td><td class="${avg ? 'bad' : ''}">−${fmtDec(avg)}</td></tr>`;
       })
       .join('') || '<tr><td colspan="3" class="muted">Nadie</td></tr>';
   out.innerHTML = `

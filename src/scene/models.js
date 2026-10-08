@@ -126,6 +126,55 @@ function ayuntamiento(level) {
   return g;
 }
 
+// ── Trabajadores ─────────────────────────────────────────────────────────────
+
+const TOOL_HEADS = {
+  martillo: (arm) => arm.add(box(0.07, 0.1, 0.1, '#4a4f57', 0.27, -0.05, 0, { metalness: 0.5, roughness: 0.4 })),
+  hacha: (arm) => arm.add(box(0.05, 0.14, 0.03, '#c9ced6', 0.26, -0.1, 0, { metalness: 0.6, roughness: 0.35 })),
+  pico: (arm) => arm.add(box(0.03, 0.24, 0.03, '#8a8f96', 0.27, -0.12, 0, { metalness: 0.4, roughness: 0.5 })),
+  azada: (arm) => arm.add(box(0.03, 0.06, 0.12, '#8a8f96', 0.28, -0.09, 0)),
+};
+
+/**
+ * Trabajador que golpea sin parar con su herramienta (martillo, hacha, pico o azada).
+ * Mira hacia (tx, tz) desde (x, z); `base` y `amp` (radianes) fijan a qué altura golpea.
+ */
+function worker(tool, x, z, tx, tz, { phase = 0, color = '#8a5a3a', speed = 6, base = 0.15, amp = 0.6 } = {}) {
+  const g = new THREE.Group();
+  g.add(cyl(0.08, 0.11, 0.3, 6, color));
+  g.add(box(0.17, 0.05, 0.17, '#5e3b1c', 0, 0, 0));
+  const head = mesh(new THREE.SphereGeometry(0.065, 6, 5), '#e8c39e');
+  head.position.y = 0.37;
+  g.add(head);
+  // El brazo con la herramienta sube y baja (gira sobre el hombro)
+  const arm = new THREE.Group();
+  arm.position.set(0.03, 0.27, 0.07);
+  arm.add(box(0.3, 0.03, 0.03, C.woodDark, 0.15, -0.015, 0));
+  TOOL_HEADS[tool](arm);
+  arm.userData.wiggle = { base, amp, speed, phase };
+  g.add(arm);
+  g.scale.setScalar(1.5);
+  g.position.set(x, 0, z);
+  // El +X del trabajador apunta a lo que trabaja
+  g.rotation.y = Math.atan2(-(tz - z), tx - x);
+  return g;
+}
+
+/** Chispas que saltan del yunque cada vez que baja el martillo (que golpea a `speed`). */
+function sparks(x, y, z, speed) {
+  const g = new THREE.Group();
+  g.position.set(x, y, z);
+  for (let i = 0; i < 7; i++) {
+    const s = mesh(new THREE.BoxGeometry(0.045, 0.045, 0.045), '#ffcf5a', { emissive: '#ff9a1a', emissiveIntensity: 2.2 });
+    s.castShadow = false;
+    const a = (i / 7) * Math.PI * 2;
+    s.userData.dir = [Math.cos(a), Math.sin(a)];
+    g.add(s);
+  }
+  g.userData.sparks = { speed };
+  return g;
+}
+
 function aserradero(level) {
   const g = new THREE.Group();
   g.add(box(2.2, 1.2, 1.7, C.wood, -0.4, 0, -0.4));
@@ -161,6 +210,9 @@ function aserradero(level) {
     pile.rotation.y = rot;
     g.add(pile);
   }
+  // Leñador partiendo troncos junto a la sierra
+  g.add(box(0.3, 0.25, 0.3, C.woodLight, 0.2, 0, 1.55));
+  g.add(worker('hacha', -0.25, 1.55, 0.2, 1.55, { color: '#6b8f3a', speed: 3.5, base: 0.25 }));
   return g;
 }
 
@@ -190,6 +242,9 @@ function cantera(level) {
   jib.add(box(0.35, 0.3, 0.35, C.stone, 1.5, -1.5, 0));
   jib.userData.swing = { speed: 0.6, amp: 0.7 };
   g.add(jib);
+  // Cantero labrando un bloque
+  g.add(box(0.45, 0.35, 0.45, '#bdb7ab', -0.2, 0, 1.2));
+  g.add(worker('pico', -0.7, 1.35, -0.2, 1.2, { color: '#7a6a55', speed: 4, phase: 1, base: 0.45 }));
   return g;
 }
 
@@ -236,6 +291,8 @@ function mina(level) {
   const ore = mesh(new THREE.OctahedronGeometry(0.15), C.crystal, { emissive: '#2aa8d8', emissiveIntensity: 0.6 });
   ore.position.set(0, 0.55, 1.7);
   g.add(ore);
+  // Minero picando la veta
+  g.add(worker('pico', -1.0, 0.85, -1.3, 0.4, { color: '#55606b', speed: 4.5, phase: 2, base: 0.1 }));
   return g;
 }
 
@@ -344,6 +401,8 @@ function granja(level) {
     hub.userData.spin = { axis: 'z', speed: 1.4 };
     g.add(hub);
   }
+  // Campesino trabajando el primer campo
+  g.add(worker('azada', 0.15, -0.45, 0.7, -0.9, { color: '#3f6fa8', speed: 2.2, base: 0.05, amp: 0.55 }));
   // Cerca
   g.add(box(3.6, 0.3, 0.05, C.woodLight, 0, 0.1, 2.15));
   return g;
@@ -772,6 +831,8 @@ function forja(level) {
   // Yunque, martillo y piedra de afilar que gira
   g.add(box(0.3, 0.35, 0.25, C.dark, 0.6, 0.15, -0.2));
   g.add(box(0.55, 0.12, 0.25, '#4a4f57', 0.6, 0.5, -0.2, { metalness: 0.5, roughness: 0.4 }));
+  g.add(worker('martillo', 0.1, -0.2, 0.6, -0.2, { color: '#7a4a2a', speed: 7, base: 0.95, amp: 0.45 }));
+  g.add(sparks(0.6, 0.64, -0.2, 7));
   const wheel = new THREE.Group();
   wheel.position.set(0.8, 0.6, 0.55);
   const stone = mesh(new THREE.CylinderGeometry(0.32, 0.32, 0.1, 12), '#b9b2a6');

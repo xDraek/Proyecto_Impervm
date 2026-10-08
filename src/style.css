@@ -2659,7 +2659,7 @@ input[type='text'] {
 .rp-unit {
   position: relative;
   display: grid;
-  grid-template-columns: 22px 1fr 44px;
+  grid-template-columns: 30px 1fr 44px;
   gap: 6px;
   align-items: center;
   margin: 4px 0;
@@ -3370,4 +3370,96 @@ summary:focus-visible {
   .building-art img {
     object-fit: contain;
   }
+}
+
+/* ── Retratos pequeños de tropas en listas y tablas ──────────────────────── */
+
+.u-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.u-mini {
+  flex: none;
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  background: radial-gradient(circle at 50% 35%, #3d5a73 0%, #1f2b38 80%);
+  border: 1px solid rgba(242, 201, 76, 0.2);
+  object-fit: cover;
+  vertical-align: middle;
+}
+
+.u-emoji {
+  display: inline-grid;
+  place-items: center;
+  font-size: 14px;
+  line-height: 1;
+}
+
+.card-art.u-emoji {
+  font-size: 28px;
+}
+
+.rp-icon {
+  flex: none;
+  width: 30px;
+  height: 30px;
+  border-radius: 7px;
+  background: radial-gradient(circle at 50% 35%, #3d5a73 0%, #1f2b38 80%);
+  border: 1px solid rgba(242, 201, 76, 0.2);
+  object-fit: cover;
+}
+
+.rp-unit.dead .rp-icon {
+  filter: grayscale(1) brightness(0.6);
+}
+
+/* ── Rótulos de la barra superior ────────────────────────────────────────── */
+
+@media (hover: hover) {
+  [data-tip]::after {
+    content: attr(data-tip);
+    position: absolute;
+    top: calc(100% + 8px);
+    left: 50%;
+    transform: translate(-50%, -4px);
+    padding: 4px 9px;
+    border-radius: 6px;
+    background: #15100b;
+    border: 1px solid var(--panel-border);
+    color: var(--text);
+    font-size: 12px;
+    font-weight: 500;
+    white-space: nowrap;
+    opacity: 0;
+    pointer-events: none;
+    transition:
+      opacity 0.12s ease,
+      transform 0.12s ease;
+    z-index: 30;
+  }
+
+  [data-tip]:hover::after,
+  [data-tip]:focus-visible::after {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+
+  /* El último botón está pegado al borde: su rótulo se alinea a la derecha */
+  .top-actions > [data-tip]:last-child::after {
+    left: auto;
+    right: 0;
+    transform: translateY(-4px);
+  }
+
+  .top-actions > [data-tip]:last-child:hover::after {
+    transform: none;
+  }
+}
+
+#view-btn {
+  position: relative;
 }

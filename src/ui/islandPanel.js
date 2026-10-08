@@ -3,7 +3,7 @@ import { COLONY, ISLAND_TYPES, MISSION_TYPES, PLAYER_UNITS, RESOURCES, RESOURCE_
 import { colonyUpgrade, colonyYield } from '../game/rules.js';
 import { NEWBIE_POINTS } from '../game/Game.js';
 import { createIslandBase, createIslandFeature, islandLook } from '../scene/islands.js';
-import { portrait } from '../scene/portraits.js';
+import { portrait, unitIcon } from '../scene/portraits.js';
 import { bag, costList, escapeHtml, fmtAgo, fmtNum, fmtTime, unitList } from './format.js';
 
 // Panel de una isla del archipiélago: lo que se sabe de ella y el formulario
@@ -207,7 +207,7 @@ function fleetForm(game, view) {
     .map((id) => {
       const u = UNITS[id];
       return `<div class="fleet-row">
-        <span class="fleet-unit" title="${u.name}">${u.icon} ${u.name}</span>
+        <span class="fleet-unit u-cell" title="${u.name}">${unitIcon(id)} ${u.name}</span>
         <span class="muted">${fmtNum(game.units[id])}</span>
         <input type="number" name="f-${id}" min="0" max="${game.units[id]}" placeholder="0" inputmode="numeric" aria-label="${u.name} a enviar" />
         <button class="ghost small" data-action="fleet-all" data-unit="${id}">Todos</button>
