@@ -14,6 +14,8 @@ import {
   HERO,
   HERO_SKILLS,
   ISLAND_TYPES,
+  MERCENARIES,
+  MERCENARY_HOURS,
   JOINT_MAX,
   LAND_UNITS,
   PLAYER_UNITS,
@@ -614,6 +616,55 @@ export class Game extends EventTarget {
     this.world.donateWonder?.(id, this.userId, total, now);
     this.#note(`${WONDERS[wonderOf(isl)].icon} Aportas ${fmtBag(gift)} a la maravilla`, 'success');
     return this.#done();
+  }
+
+  // ── Mercenarios ────────────────────────────────────────────────────────────
+
+  /** Las compañías que ofrece hoy la taberna: cuántos vienen, qué cuestan y si ya la has contratado. */
+  mercenaryOffers(now = this.now()) {
+    const lvl = this.level('taberna');
+    const day = Math.floor(now / 86_400_000);
+    const hired = this.state.mercsHired?.day === day ? this.state.mercsHired.ids : [];
+    return Object.entries(MERCENARIES).map(([id, m]) => {
+      const count = lvl ? Math.round(m.base + m.per * (lvl - 1)) : 0;
+      const cost = Object.fromEntries(Object.entries(m.price).map(([r, n]) => [r, n * count]));
+      return { id, ...m, count, cost, hired: hired.includes(id) };
+    });
+  }
+
+  hireMercenaries(id, now = this.now()) {
+    this.#advance(now);
+    if (this.level('taberna') < 1) return this.#fail('Construye la taberna para contratar mercenarios.');
+    const offer = this.mercenaryOffers(now).find((o) => o.id === id);
+    if (!offer) return this.#fail('Esa compañía no existe.');
+    if (offer.hired) return this.#fail('Esa compañía ya está contratada hoy. Mañana habrá otra.');
+    if (!canAfford(this.state.resources, offer.cost)) return this.#fail('No tienes con qué pagarles.');
+    this.#pay(offer.cost, false);
+    this.state.units[offer.unit] += offer.count;
+    const day = Math.floor(now / 86_400_000);
+    this.state.mercsHired = { day, ids: [...(this.state.mercsHired?.day === day ? this.state.mercsHired.ids : []), id] };
+    this.state.mercs = [...(this.state.mercs ?? []), { id, unit: offer.unit, count: offer.count, until: now + hours(MERCENARY_HOURS) }];
+    this.#note(`${offer.icon} Llegan ${offer.count} × ${UNITS[offer.unit].name} a sueldo durante un día`, 'success');
+    return this.#done();
+  }
+
+  /** Se acaba el contrato: se van los que queden (primero los de casa, luego los de las flotas). */
+  #dismissMercs(c, t) {
+    this.state.mercs = (this.state.mercs ?? []).filter((x) => x !== c);
+    let left = c.count;
+    const home = Math.min(left, this.state.units[c.unit] ?? 0);
+    this.state.units[c.unit] -= home;
+    left -= home;
+    for (const m of this.state.missions) {
+      if (left <= 0) break;
+      const n = Math.min(left, m.units[c.unit] ?? 0);
+      if (!n) continue;
+      m.units[c.unit] -= n;
+      if (!m.units[c.unit]) delete m.units[c.unit];
+      left -= n;
+    }
+    const gone = c.count - left;
+    if (gone > 0) this.#note(`${MERCENARIES[c.id]?.icon ?? '⚔️'} Termina el contrato: se van ${gone} × ${UNITS[c.unit].name}`, 'info');
   }
 
   // ── Título ─────────────────────────────────────────────────────────────────
@@ -1361,6 +1412,7 @@ export class Game extends EventTarget {
     consider(worldEventAt(s.lastUpdate).end, () => {});
     // El final de un efecto divino también es un suceso: cambia la producción
     for (const [id, until] of Object.entries(s.buffs)) consider(until, () => delete s.buffs[id]);
+    for (const c of s.mercs ?? []) consider(c.until, (t) => this.#dismissMercs(c, t));
     return best;
   }
 

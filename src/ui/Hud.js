@@ -616,6 +616,9 @@ export class Hud {
       case 'upgrade':
         await this.#run(btn, () => game.upgrade(this.selected));
         break;
+      case 'hire':
+        await this.#run(btn, () => game.hireMercenaries(btn.dataset.id), null, 'coins');
+        break;
       case 'relic-equip':
         await this.#run(btn, () => game.equipRelic(btn.dataset.id, btn.dataset.on === '1'), null, 'magic');
         break;

@@ -284,6 +284,27 @@ function powerCard(game, id) {
   </div>`;
 }
 
+function mercenarySection(game) {
+  if (game.level('taberna') < 1) return '<h4>⚔️ Mercenarios</h4><p class="desc">Construye la taberna y vendrán soldados de fortuna dispuestos a luchar por oro.</p>';
+  const contracts = (game.state.mercs ?? [])
+    .map((c) => `<li><span>${UNITS[c.unit].icon} ${c.count} × ${UNITS[c.unit].name}</span><span class="q-time" data-until="${c.until}"></span></li>`)
+    .join('');
+  const offers = game
+    .mercenaryOffers()
+    .map(
+      (o) => `<div class="card">
+        <div class="card-head"><span class="card-icon">${o.icon}</span><div class="card-title"><b>${o.name}</b><div class="muted small">${o.count} × ${UNITS[o.unit].name} durante un día</div></div></div>
+        ${costList(o.cost, game.resources)}
+        <button class="primary small" data-action="hire" data-id="${o.id}" data-need='${JSON.stringify(o.cost)}' data-blocked="${o.hired ? 1 : 0}">${o.hired ? 'Contratada hoy' : 'Contratar'}</button>
+      </div>`,
+    )
+    .join('');
+  return `<h4>⚔️ Mercenarios</h4>
+    <p class="desc small">Soldados a sueldo durante un día: luchan y comen como los tuyos, y al acabar el contrato se van (aunque estén en una flota). Cada compañía se contrata una vez al día.</p>
+    ${contracts ? `<ul class="mini-list">${contracts}</ul>` : ''}
+    <div class="cards">${offers}</div>`;
+}
+
 function templeSection(game) {
   if (game.level('templo') < 1) return '<h4>Poderes divinos</h4><p class="desc">Construye el templo para ganar el favor de los dioses.</p>';
   const max = game.favorMax();
@@ -382,6 +403,7 @@ export function buildingPanel(hud, id) {
   else if (id === 'muralla') extra = wallSection(game);
   else if (id === 'ayuntamiento') extra = townSection(game) + `<div class="section">${heroSection(game)}</div><div class="section">${relicSection(game)}</div>`;
   else if (id === 'templo') extra = templeSection(game);
+  else if (id === 'taberna') extra = mercenarySection(game);
 
   const html = `
     <div class="panel-head">

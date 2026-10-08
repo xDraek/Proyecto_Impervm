@@ -98,6 +98,7 @@ const ACTIONS = {
   dismissVisitor: (g) => g.dismissVisitor(),
   markReportsRead: (g) => g.markReportsRead(),
   upgradeColony: (g, [id]) => (typeof id === 'string' ? g.upgradeColony(id) : bad()),
+  hireMercenaries: (g, [id]) => (typeof id === 'string' ? g.hireMercenaries(id) : bad()),
   setTitle: (g, [id]) => (typeof id === 'string' ? g.setTitle(id) : bad()),
   setBanner: (g, [color, emblem]) => (typeof color === 'string' && typeof emblem === 'string' ? g.setBanner(color, emblem) : bad()),
   equipRelic: (g, [id, on]) => (typeof id === 'string' ? g.equipRelic(id, on === true) : bad()),

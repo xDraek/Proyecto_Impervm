@@ -16,7 +16,8 @@ const TOPICS = [
     title: 'Recursos y almacén',
     body: `<p>Madera, piedra, comida, hierro, cristal y oro. La isla da un poco de cada uno y los edificios productores, mucho más.</p>
       <p>El <b>almacén</b> sube el máximo de cada recurso y esconde una parte que nadie te puede robar. Si el almacén está lleno, lo que se produce se pierde.</p>
-      <p>Las tropas <b>comen</b>: si la comida llega a cero hay hambruna y toda la producción cae a la mitad. La taberna reduce lo que comen.</p>`,
+      <p>Las tropas <b>comen</b>: si la comida llega a cero hay hambruna y toda la producción cae a la mitad. La taberna reduce lo que comen.</p>
+      <p>En la <b>taberna</b> también se contratan <b>mercenarios</b> por un día, pagando oro: útiles para una defensa urgente o un ataque puntual.</p>`,
   },
   {
     icon: '🏛️',

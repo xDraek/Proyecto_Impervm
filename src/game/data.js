@@ -697,6 +697,17 @@ export const DAILY_REWARDS = [
 // ── Logros ───────────────────────────────────────────────────────────────────
 // Se ganan solos al cumplirse y se enseñan en el perfil del jugador.
 
+// ── Mercenarios (taberna) ────────────────────────────────────────────────────
+// Tropas de alquiler durante un día. Cuantos más niveles de taberna, más vienen.
+// Cada compañía se puede contratar una vez al día.
+
+export const MERCENARIES = {
+  honderos: { name: 'Banda de honderos', icon: '🪨', unit: 'hondero', base: 15, per: 5, price: { oro: 6, comida: 4 } },
+  hoplitas: { name: 'Compañía de hoplitas', icon: '🛡️', unit: 'hoplita', base: 6, per: 2.5, price: { oro: 20, hierro: 6 } },
+  jinetes: { name: 'Jinetes de Tesalia', icon: '🐎', unit: 'caballero', base: 3, per: 1.2, price: { oro: 45, comida: 20 } },
+};
+export const MERCENARY_HOURS = 24;
+
 // ── Estandarte ───────────────────────────────────────────────────────────────
 // Cada jugador elige el color de sus banderas y un emblema que le identifica.
 
