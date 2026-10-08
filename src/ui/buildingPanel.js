@@ -1,6 +1,9 @@
 import { BUILDINGS, HERO, HERO_SKILLS, RELIC_RARITY, RELIC_SLOTS, POWERS, POWER_KEYS, RESEARCH, RESEARCH_KEYS, RESOURCES, RESOURCE_KEYS, UNITS, UNIT_KEYS } from '../game/data.js';
 import { favorMax, favorRate, producerOutput, protectedAmount, requirementName, storageCapacity, townSpeedup, wallBonus } from '../game/rules.js';
+import { portrait, portraitImg } from '../scene/portraits.js';
 import { costList, escapeHtml, fmtDec, fmtNum, fmtTime, unitList } from './format.js';
+
+const unitArt = (id) => portraitImg(UNITS[id].kind === 'barco' ? 'ship' : 'unit', id, UNITS[id].icon, { width: 120, height: 120 });
 
 // Panel de detalle de un edificio. Devuelve el HTML y un `refresh` para las
 // partes que cambian sin que cambie la partida (vista previa del mercado).
@@ -171,12 +174,12 @@ function unitCard(game, id) {
   const homeTag = home ? `<span class="card-lvl">${fmtNum(home)} en casa</span>` : '';
   if (info.missing.length) {
     return `<div class="card locked">
-      <div class="card-head"><span class="card-icon">${u.icon}</span><div class="card-title"><b>${u.name}</b> ${homeTag}
+      <div class="card-head">${unitArt(id)}<div class="card-title"><b>${u.name}</b> ${homeTag}
       <div class="card-sub">🔒 Requiere ${reqText(info.missing)}</div></div></div></div>`;
   }
   const input = `n-${id}`;
   return `<div class="card">
-    <div class="card-head"><span class="card-icon">${u.icon}</span><div class="card-title"><b>${u.name}</b> ${homeTag}
+    <div class="card-head">${unitArt(id)}<div class="card-title"><b>${u.name}</b> ${homeTag}
       <div class="card-sub">${u.description}</div></div></div>
     <div class="stats">${unitStats(u, game)}</div>
     <div class="card-row">${costList(u.cost, game.resources, input)}<span class="time">⏱ ${fmtTime(info.seconds)} c/u</span></div>
@@ -293,7 +296,7 @@ function mercenarySection(game) {
     .mercenaryOffers()
     .map(
       (o) => `<div class="card">
-        <div class="card-head"><span class="card-icon">${o.icon}</span><div class="card-title"><b>${o.name}</b><div class="muted small">${o.count} × ${UNITS[o.unit].name} durante un día</div></div></div>
+        <div class="card-head">${unitArt(o.unit)}<div class="card-title"><b>${o.name}</b><div class="muted small">${o.count} × ${UNITS[o.unit].name} durante un día</div></div></div>
         ${costList(o.cost, game.resources)}
         <button class="primary small" data-action="hire" data-id="${o.id}" data-need='${JSON.stringify(o.cost)}' data-blocked="${o.hired ? 1 : 0}">${o.hired ? 'Contratada hoy' : 'Contratar'}</button>
       </div>`,
@@ -392,6 +395,16 @@ function townSection(game) {
     <div class="info-row"><span>🏴‍☠️ Amenaza pirata</span><b>${game.level('ayuntamiento') >= 3 ? `Nv ${game.raidTier()}` : 'Ninguna aún'}</b></div>`;
 }
 
+/** Ilustración del edificio a su nivel (o como quedará, si aún no está construido). */
+function buildingArt(id, level) {
+  // La muralla rodea toda la isla: no cabe en un retrato
+  if (id === 'muralla') return '';
+  const url = portrait('building', id, { level: Math.max(1, level), width: 340, height: 170 });
+  if (!url) return '';
+  const tag = level > 0 ? `Nivel ${level}` : 'Así quedará';
+  return `<div class="building-art${level > 0 ? '' : ' unbuilt'}"><img src="${url}" alt="" draggable="false" /><span class="art-tag">${tag}</span></div>`;
+}
+
 export function buildingPanel(hud, id) {
   const game = hud.game;
   const b = BUILDINGS[id];
@@ -414,6 +427,7 @@ export function buildingPanel(hud, id) {
       </div>
       <button class="icon-btn" data-action="close" title="Cerrar">✕</button>
     </div>
+    ${buildingArt(id, level)}
     <p class="desc">${b.description}</p>
     ${upgradeSection(game, id)}
     ${extra ? `<div class="section">${extra}</div>` : ''}`;

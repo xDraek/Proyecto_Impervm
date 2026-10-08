@@ -55,6 +55,15 @@ button {
   touch-action: none;
 }
 
+/* Viñeta: oscurece un poco los bordes para centrar la mirada en la isla */
+#scene::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: radial-gradient(ellipse 75% 70% at 50% 52%, transparent 60%, rgba(8, 12, 28, 0.38) 100%);
+}
+
 .muted {
   color: var(--muted);
 }
@@ -718,6 +727,68 @@ select:focus {
   line-height: 1.1;
 }
 
+/* Retratos 3D de tropas y barcos */
+.card-art {
+  flex: none;
+  width: 54px;
+  height: 54px;
+  border-radius: 10px;
+  background: radial-gradient(circle at 50% 35%, #3d5a73 0%, #1f2b38 75%);
+  border: 1px solid rgba(242, 201, 76, 0.25);
+  box-shadow: inset 0 0 12px rgba(0, 0, 0, 0.45);
+  object-fit: cover;
+}
+
+.card.locked .card-art {
+  filter: grayscale(0.85) brightness(0.7);
+}
+
+/* Ilustración del edificio en su panel */
+.building-art {
+  position: relative;
+  margin: 4px 0 10px;
+  border-radius: 10px;
+  overflow: hidden;
+  border: 1px solid rgba(242, 201, 76, 0.22);
+  background:
+    radial-gradient(ellipse 70% 60% at 50% 100%, rgba(111, 174, 74, 0.25), transparent 70%),
+    linear-gradient(180deg, #4a9be0 0%, #a9d4f2 70%, #cfe8f7 100%);
+  aspect-ratio: 2 / 1;
+}
+
+.building-art img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.island-art {
+  aspect-ratio: 34 / 15;
+  background:
+    radial-gradient(ellipse 60% 55% at 50% 60%, rgba(120, 200, 230, 0.35), transparent 70%),
+    linear-gradient(180deg, #2f6f9e 0%, #3f8fc0 100%);
+}
+
+.building-art.unbuilt img {
+  filter: saturate(0.35) brightness(1.05);
+  opacity: 0.75;
+}
+
+.building-art .art-tag {
+  position: absolute;
+  left: 8px;
+  bottom: 8px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(24, 20, 16, 0.78);
+  border: 1px solid var(--panel-border);
+  color: var(--gold);
+  font-family: var(--font-title);
+  font-size: 11px;
+  font-weight: 600;
+}
+
 .card-title {
   flex: 1;
   min-width: 0;
@@ -1175,6 +1246,39 @@ select:focus {
   line-height: 1.25;
   white-space: nowrap;
   pointer-events: none;
+}
+
+.label {
+  transition: opacity 0.25s ease;
+}
+
+.label-mini {
+  display: none;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.label.lbl-compact {
+  padding: 2px 7px;
+}
+
+.label.lbl-compact > .label-name,
+.label.lbl-compact > .label-lvl,
+.label.lbl-compact > .label-bar {
+  display: none;
+}
+
+.label.lbl-compact > .label-mini {
+  display: inline;
+}
+
+/* Las islas encogidas se quedan con el nombre */
+.label.isl.lbl-compact > .label-name {
+  display: inline;
+}
+
+.label.lbl-hidden {
+  opacity: 0;
 }
 
 .label-name {
@@ -3056,4 +3160,214 @@ input[type='text'] {
 
 .progress.horde-bar i {
   background: linear-gradient(90deg, #ff7a6b, #c9533a);
+}
+
+/* ── Pulido visual de paneles y ventanas ─────────────────────────────────── */
+
+#topbar,
+#sidebar,
+#panel,
+.modal-card {
+  background: linear-gradient(180deg, rgba(40, 33, 25, 0.9), rgba(22, 18, 14, 0.9));
+  box-shadow:
+    inset 0 1px 0 rgba(255, 236, 190, 0.07),
+    0 10px 34px rgba(0, 0, 0, 0.4);
+}
+
+.modal-card {
+  background: linear-gradient(180deg, rgba(40, 33, 25, 0.98), rgba(22, 18, 14, 0.98));
+}
+
+/* Fondo de las ventanas: oscurece y desenfoca el juego, y la ventana entra con un pequeño salto */
+#modal {
+  background: radial-gradient(ellipse at center, rgba(10, 8, 6, 0.4), rgba(6, 5, 4, 0.7));
+  backdrop-filter: blur(3px);
+}
+
+#modal.opening {
+  animation: modal-fade 0.18s ease-out;
+}
+
+#modal.opening > .modal-card {
+  animation: modal-pop 0.22s cubic-bezier(0.2, 0.9, 0.3, 1.2);
+}
+
+@keyframes modal-fade {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes modal-pop {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.97);
+  }
+}
+
+/* Cabecera con medallón y filete dorado */
+.panel-head {
+  padding-bottom: 12px;
+  margin-bottom: 4px;
+  border-bottom: 1px solid transparent;
+  border-image: linear-gradient(90deg, rgba(242, 201, 76, 0.55), rgba(242, 201, 76, 0.08) 85%, transparent) 1;
+}
+
+.panel-icon {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 46px;
+  height: 46px;
+  border-radius: 50%;
+  font-size: 24px;
+  background: radial-gradient(circle at 35% 30%, #4a3c2b, #17120d 75%);
+  border: 1px solid rgba(242, 201, 76, 0.5);
+  box-shadow:
+    inset 0 0 10px rgba(0, 0, 0, 0.6),
+    0 0 0 3px rgba(242, 201, 76, 0.08);
+}
+
+.panel-head h3 {
+  font-size: 17px;
+  letter-spacing: 0.03em;
+  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.6);
+}
+
+/* Títulos de sección con una línea que se desvanece */
+#panel h4,
+.modal-card h4 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+#panel h4::after,
+.modal-card h4::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: linear-gradient(90deg, rgba(242, 201, 76, 0.35), transparent);
+}
+
+/* Botones con relieve y respuesta al pulsar */
+.primary,
+.danger,
+.ghost,
+.tab-btn,
+.icon-btn {
+  transition:
+    transform 0.08s ease,
+    filter 0.15s ease,
+    border-color 0.15s ease,
+    background-color 0.15s ease;
+}
+
+.primary {
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.45),
+    inset 0 -2px 0 rgba(120, 80, 10, 0.35),
+    0 2px 6px rgba(0, 0, 0, 0.3);
+  text-shadow: 0 1px 0 rgba(255, 240, 200, 0.5);
+}
+
+.danger {
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.35),
+    inset 0 -2px 0 rgba(90, 20, 10, 0.35),
+    0 2px 6px rgba(0, 0, 0, 0.3);
+}
+
+.primary:active:not(:disabled),
+.danger:active:not(:disabled),
+.ghost:active:not(:disabled),
+.tab-btn:active,
+.icon-btn:active {
+  transform: translateY(1px) scale(0.98);
+}
+
+.primary:disabled,
+.danger:disabled {
+  box-shadow: none;
+  text-shadow: none;
+}
+
+.icon-btn:hover {
+  background-color: rgba(242, 201, 76, 0.14);
+}
+
+/* Foco visible al moverse con el teclado */
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+summary:focus-visible {
+  outline: 2px solid var(--gold);
+  outline-offset: 2px;
+}
+
+/* Tarjetas que responden al ratón */
+.card {
+  transition:
+    border-color 0.15s ease,
+    background-color 0.15s ease;
+}
+
+.card:not(.locked):hover {
+  border-color: rgba(242, 201, 76, 0.22);
+  background-color: rgba(255, 255, 255, 0.06);
+}
+
+/* Barras de desplazamiento finas y doradas */
+#sidebar,
+#panel,
+.modal-card,
+.guide-list {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(242, 201, 76, 0.35) transparent;
+}
+
+#sidebar::-webkit-scrollbar,
+#panel::-webkit-scrollbar,
+.modal-card::-webkit-scrollbar {
+  width: 8px;
+}
+
+#sidebar::-webkit-scrollbar-thumb,
+#panel::-webkit-scrollbar-thumb,
+.modal-card::-webkit-scrollbar-thumb {
+  border-radius: 4px;
+  background: rgba(242, 201, 76, 0.3);
+}
+
+#sidebar::-webkit-scrollbar-track,
+#panel::-webkit-scrollbar-track,
+.modal-card::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* Edificio activo en la lista: barra dorada a la izquierda */
+.list li.active {
+  box-shadow: inset 3px 0 0 var(--gold);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #modal.opening,
+  #modal.opening > .modal-card,
+  #panel,
+  .label {
+    animation: none;
+    transition: none;
+  }
+}
+
+@media (max-width: 700px) {
+  /* En el móvil la ilustración ocupa menos alto (se ve entera, con el cielo a los lados) */
+  .building-art {
+    aspect-ratio: 5 / 2;
+  }
+
+  .building-art img {
+    object-fit: contain;
+  }
 }

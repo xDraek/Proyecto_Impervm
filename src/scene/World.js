@@ -236,6 +236,9 @@ export class World {
     r.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     r.shadowMap.enabled = true;
     r.shadowMap.type = THREE.PCFShadowMap;
+    // Mapeo de tonos de cine: luces más suaves y colores con más cuerpo
+    r.toneMapping = THREE.ACESFilmicToneMapping;
+    r.toneMappingExposure = 1.05;
     this.container.appendChild(r.domElement);
     this.renderer = r;
 
@@ -296,6 +299,7 @@ export class World {
     Object.assign(sun.shadow.camera, { left: -36, right: 36, top: 36, bottom: -36, near: 1, far: 140 });
     sun.shadow.bias = -0.0005;
     sun.shadow.normalBias = 0.03;
+    sun.shadow.radius = 2.5; // bordes de sombra suaves
     scene.add(sun, sun.target);
     this.skyKey = null;
     this.#updateSky(clock.now());
@@ -600,7 +604,7 @@ export class World {
 
       const el = document.createElement('div');
       el.className = 'label';
-      el.innerHTML = `<span class="label-name">${BUILDINGS[id].name}</span><span class="label-lvl"></span><span class="label-bar"><i></i></span>`;
+      el.innerHTML = `<span class="label-name">${BUILDINGS[id].name}</span><span class="label-lvl"></span><span class="label-bar"><i></i></span><span class="label-mini">${BUILDINGS[id].icon} <b></b></span>`;
       const label = new CSS2DObject(el);
       this.scene.add(label);
 
@@ -1098,6 +1102,8 @@ export class World {
 
       slot.label.position.set(slot.center.x, Math.max(top, slot.pos.y + (building ? 2.6 : 0)) + 0.9, slot.center.z);
       slot.el.querySelector('.label-lvl').textContent = level > 0 ? `Nv ${level}` : id === 'puerto' || id === 'muralla' ? 'Sin construir' : 'Parcela libre';
+      slot.el.querySelector('.label-mini b').textContent = level > 0 ? level : '·';
+      slot.level = level;
       slot.el.classList.toggle('building', building);
       slot.el.classList.toggle('empty', level === 0);
     }
@@ -1216,13 +1222,14 @@ export class World {
       else if (view.colonizedBy != null) status = `🚩 Colonia de ${view.colonistName}`;
       else if (view.explored && view.tier) status += ` · Nv ${view.tier}`;
       if (view.type === 'continente') status = view.horde ? `🔥 ¡Horda! ${view.horde.left} bárbaros` : `🗺️ Continente · maravilla nivel ${view.wonder?.level ?? 0}`;
-      entry.el.classList.toggle('war', view.type === 'continente' && !!view.horde);
       if (view.inbound.length) status += ' · ⛵';
       entry.el.querySelector('.label-lvl').textContent = status;
       entry.el.classList.toggle('colony', !!view.colonized);
       entry.el.classList.toggle('ally', !!ally);
       entry.el.classList.toggle('pact', view.relation === 'pacto');
-      entry.el.classList.toggle('war', view.relation === 'guerra');
+      entry.el.classList.toggle('war', view.relation === 'guerra' || (view.type === 'continente' && !!view.horde));
+      // Lo que más importa al jugador se queda con la etiqueta entera cuando no caben todas
+      entry.prio = view.type === 'continente' && view.horde ? 400 : view.colonized ? 350 : view.type === 'jugador' ? 300 : view.type === 'continente' ? 250 : view.explored ? 100 : 0;
       entry.el.classList.toggle('player', view.type === 'jugador');
       entry.el.classList.toggle('unknown', !view.explored);
     }
@@ -1510,8 +1517,77 @@ export class World {
       this.hoverRing.scale.setScalar(radius);
     }
 
+    this.frame = (this.frame ?? 0) + 1;
+    if (this.frame % 3 === 0) this.#declutter();
     this.renderer.render(this.scene, this.camera);
     this.labelRenderer.render(this.scene, this.camera);
+  }
+
+  /**
+   * Etiquetas sin amontonarse: de la más importante a la menos, cada una se queda entera si cabe;
+   * si pisa a otra se encoge (icono y nivel, o solo el nombre de la isla) y, si ni así cabe, se esconde.
+   * Al pasar el ratón o seleccionar algo, su etiqueta pasa la primera.
+   */
+  #declutter() {
+    if (this.showcase) return;
+    const items = [];
+    const boost = (id) => (id === this.selected ? 2000 : id === this.hovered ? 1500 : 0);
+    if (this.view === 'isla') {
+      const q = this.game.queue;
+      for (const s of Object.values(this.slots)) {
+        const prio = boost(s.id) + (q?.id === s.id ? 1000 : 0) + (s.id === 'ayuntamiento' ? 600 : 0) + (s.level ?? 0) * 10;
+        items.push({ el: s.el, obj: s.label, prio, island: false });
+      }
+    } else {
+      const target = this.controls.target;
+      for (const [id, e] of Object.entries(this.islands)) {
+        items.push({ el: e.el, obj: e.label, prio: boost(id) + (e.prio ?? 0) - e.pos.distanceTo(target) * 0.5, island: true });
+      }
+      if (this.homeLabel.visible) items.push({ el: this.homeLabel.element, obj: this.homeLabel, prio: 1200, island: true });
+    }
+    const W = this.renderer.domElement.clientWidth;
+    const H = this.renderer.domElement.clientHeight;
+    const v = (this.tmpV ??= new THREE.Vector3());
+    const placed = [];
+    const hits = (r) => placed.some((p) => r.x0 < p.x1 && r.x1 > p.x0 && r.y0 < p.y1 && r.y1 > p.y0);
+    const rect = (x, y, w, h) => ({ x0: x - w / 2 - 2, x1: x + w / 2 + 2, y0: y - h / 2 - 1, y1: y + h / 2 + 1 });
+    items.sort((a, b) => b.prio - a.prio);
+    for (const it of items) {
+      const { el, obj } = it;
+      if (!obj.visible) continue;
+      v.copy(obj.position).project(this.camera);
+      if (v.z > 1 || Math.abs(v.x) > 1.2 || Math.abs(v.y) > 1.2) continue;
+      const x = ((v.x + 1) / 2) * W;
+      const y = ((1 - v.y) / 2) * H;
+      // El tamaño entero se mide una vez (y otra si cambia el texto)
+      const text = el.textContent;
+      if (el._text !== text || !el._full) {
+        el.classList.remove('lbl-compact', 'lbl-hidden');
+        el._state = 'full';
+        el._full = { w: el.offsetWidth, h: el.offsetHeight };
+        // Aún sin dibujar (detrás de la cámara): se mide en otra vuelta
+        if (!el._full.w) {
+          el._full = null;
+          continue;
+        }
+        const name = el.firstElementChild;
+        el._mini = it.island ? { w: name.offsetWidth + 14, h: name.offsetHeight + 6 } : { w: 38, h: 20 };
+        el._text = text;
+      }
+      let state = 'hidden';
+      for (const [s, size] of [['full', el._full], ['compact', el._mini]]) {
+        const r = rect(x, y, size.w, size.h);
+        if (hits(r)) continue;
+        placed.push(r);
+        state = s;
+        break;
+      }
+      if (el._state !== state) {
+        el._state = state;
+        el.classList.toggle('lbl-compact', state === 'compact');
+        el.classList.toggle('lbl-hidden', state === 'hidden');
+      }
+    }
   }
 }
 

@@ -1,7 +1,7 @@
 import './style.css';
 import { isMuted, musicOn, play, setAmbienceLevel, setMusic, setMuted, unlockAudio } from './audio.js';
 import { clock, universe } from './config.js';
-import { BUILDINGS } from './game/data.js';
+import { BUILDINGS, PLAYER_UNITS, UNITS } from './game/data.js';
 import { Game, newState } from './game/Game.js';
 import { freshIslandState, generateSector } from './game/world.js';
 import { ClientGame } from './net/ClientGame.js';
@@ -9,6 +9,7 @@ import { ClientWorld } from './net/ClientWorld.js';
 import { getToken, setToken } from './net/api.js';
 import { connectLive } from './net/socket.js';
 import { World } from './scene/World.js';
+import { warmPortraits } from './scene/portraits.js';
 import { Hud } from './ui/Hud.js';
 import { showLanding } from './ui/landing.js';
 
@@ -139,6 +140,14 @@ function startGame(game) {
   world.setDayNight(readDayNight());
   const hud = new Hud(game, { onSelect: select, onView: setView, settings, onLogout: logout });
   game.addEventListener('logout', logout);
+
+  // Los retratos de los menús se dibujan en los ratos libres: primero las tropas y lo ya construido
+  warmPortraits([
+    ...PLAYER_UNITS.map((id) => [UNITS[id].kind === 'barco' ? 'ship' : 'unit', id, { width: 120, height: 120 }]),
+    ...Object.keys(BUILDINGS)
+      .filter((id) => id !== 'muralla')
+      .map((id) => ['building', id, { level: Math.max(1, game.level(id)), width: 340, height: 170 }]),
+  ]);
 
   window.addEventListener('keydown', (e) => {
     if (e.target.matches?.('input, select, textarea')) return;

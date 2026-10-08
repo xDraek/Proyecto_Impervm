@@ -1,6 +1,9 @@
+import * as THREE from 'three';
 import { COLONY, ISLAND_TYPES, MISSION_TYPES, PLAYER_UNITS, RESOURCES, RESOURCE_KEYS, UNITS, WONDERS, WONDER_LEVELS, WONDER_RESOURCES } from '../game/data.js';
 import { colonyUpgrade, colonyYield } from '../game/rules.js';
 import { NEWBIE_POINTS } from '../game/Game.js';
+import { createIslandBase, createIslandFeature, islandLook } from '../scene/islands.js';
+import { portrait } from '../scene/portraits.js';
 import { bag, costList, escapeHtml, fmtAgo, fmtNum, fmtTime, unitList } from './format.js';
 
 // Panel de una isla del archipiélago: lo que se sabe de ella y el formulario
@@ -333,6 +336,25 @@ function refreshFleet(game, id, root) {
   if (reason && reason.textContent !== hint) reason.textContent = hint;
 }
 
+/** La isla tal como se ve en el mapa, en pequeño (con la bandera de quien la gobierne). */
+function islandArt(game, view) {
+  const isl = game.world.island(view.id);
+  if (!isl || view.type === 'brumas') return '';
+  const ownerId = view.type === 'jugador' ? view.owner : view.colonizedBy;
+  const bannerColor = ownerId === game.userId ? game.state.banner?.color : game.world.playerInfo(ownerId)?.banner?.color;
+  const look = `${islandLook(view)}|${bannerColor ?? ''}`;
+  const url = portrait('island', `${view.id}|${look}`, {
+    width: 340,
+    height: 150,
+    model: () => {
+      const g = new THREE.Group();
+      g.add(createIslandBase(isl), createIslandFeature({ ...isl, colonizedBy: view.colonizedBy, bannerColor }, look));
+      return g;
+    },
+  });
+  return url ? `<div class="building-art island-art"><img src="${url}" alt="" draggable="false" /></div>` : '';
+}
+
 export function islandPanel(hud, id) {
   const game = hud.game;
   const view = game.island(id);
@@ -352,6 +374,7 @@ export function islandPanel(hud, id) {
       </div>
       <button class="icon-btn" data-action="close" title="Cerrar">✕</button>
     </div>
+    ${islandArt(game, view)}
     ${infoSection(game, view)}
     ${inboundSection(game, view)}
     ${fleetForm(game, view)}`;

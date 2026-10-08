@@ -240,22 +240,31 @@ export class Hud {
   openReports() {
     this.modalKind = 'reports';
     this.modal.innerHTML = reportsHtml(this.game.reports);
-    this.modal.hidden = false;
+    this.#reveal();
     this.modal.querySelector('details')?.setAttribute('open', '');
     this.game.markReportsRead();
+  }
+
+  /** Al abrir (no al redibujar) la ventana entra con su animación. */
+  #reveal() {
+    if (!this.modal.hidden) return;
+    this.modal.hidden = false;
+    this.modal.classList.add('opening');
+    clearTimeout(this.openingTimer);
+    this.openingTimer = setTimeout(() => this.modal.classList.remove('opening'), 300);
   }
 
   /** Abre (o actualiza) una ventana con el HTML dado. */
   showModal(kind, html) {
     this.modalKind = kind;
-    this.modal.hidden = false;
+    this.#reveal();
     if (html) this.#setHtml(this.modal, 'modal', html);
   }
 
   async openModal(kind) {
     this.modalKind = kind;
     this.cache.modal = '';
-    this.modal.hidden = false;
+    this.#reveal();
     if (kind === 'ranking') {
       this.modal.innerHTML = '<div class="modal-card narrow"><p class="muted">Cargando la clasificación…</p></div>';
       try {
