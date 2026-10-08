@@ -63,7 +63,8 @@ const TOPICS = [
     icon: '🏰',
     title: 'Otros jugadores',
     body: `<p>Espía sus ciudades con botes y atácalas para llevarte lo que quepa en tus barcos (salvo lo que esconde su almacén). Con menos de ${NEWBIE_POINTS} puntos tienes <b>protección de novato</b>: nadie te ataca y tú no atacas a jugadores.</p>
-      <p>Verás llegar los ataques: aviso arriba, la flota en el mapa y ⚔️ en el título de la pestaña.</p>`,
+      <p>Verás llegar los ataques: aviso arriba, la flota en el mapa y ⚔️ en el título de la pestaña.</p>
+      <p><b>Sabotaje</b> 🔥: tus botes se cuelan en una ciudad rival para quemar parte de lo que no está en su almacén o retrasar su obra. Son más fáciles de pillar que los espías: cuidado con su muralla y su torre de vigía.</p>`,
   },
   {
     icon: '🤝',

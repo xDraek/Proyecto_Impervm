@@ -10,7 +10,7 @@ import { questsHtml, rankingHtml } from './modals.js';
 import { openGuide } from './guide.js';
 import { Tutorial } from './tutorial.js';
 import { WorldMap } from './worldMap.js';
-import { reportsHtml, playReplay } from './reports.js';
+import { reportsHtml, playReplay, sharedReportHtml } from './reports.js';
 import { Social } from './social.js';
 
 const $ = (sel) => document.querySelector(sel);
@@ -90,9 +90,20 @@ export class Hud {
       if (task && !task.disabled) return this.#run(task, () => game.claimTask(task.dataset.id), null, 'coins');
       const claim = e.target.closest('[data-action="claim"]');
       if (claim && !claim.disabled) return this.#run(claim, () => game.claimQuest(claim.dataset.id), null, 'coins');
+      const share = e.target.closest('[data-action="share-report"]');
+      if (share) {
+        const channel = this.game.alliance && confirm('¿Compartirlo solo con tu alianza? (Cancelar = en el chat general)') ? 'alianza' : 'global';
+        api('POST', '/api/chat/share', { t: Number(share.dataset.t), channel })
+          .then(() => {
+            this.toast('📢 Informe compartido en el chat', 'success');
+            share.disabled = true;
+          })
+          .catch((err) => this.toast(err.message, 'error'));
+        return;
+      }
       const replay = e.target.closest('[data-action="replay"]');
       if (replay) {
-        const report = this.game.reports.find((r) => r.t === Number(replay.dataset.t) && r.battle?.log);
+        const report = this.modalKind === 'shared' ? this.sharedReport : this.game.reports.find((r) => r.t === Number(replay.dataset.t) && r.battle?.log);
         if (report) playReplay(replay, report);
         return;
       }
@@ -123,6 +134,15 @@ export class Hud {
       const del = e.target.closest('[data-delete]')?.dataset.delete;
       if (del) {
         api('POST', '/api/admin/delete-chat', { id: Number(del) }).catch((err) => this.toast(err.message, 'error'));
+        return;
+      }
+      const shared = e.target.closest('[data-shared]')?.dataset.shared;
+      if (shared) {
+        const m = this.chatMessages.find((x) => x.id === Number(shared));
+        if (m?.report) {
+          this.sharedReport = m.report;
+          this.showModal('shared', sharedReportHtml(m));
+        }
         return;
       }
       const name = e.target.closest('[data-profile]')?.dataset.profile;
@@ -915,7 +935,9 @@ export class Hud {
         const time = new Date(m.t).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
         return m.system
           ? `<div class="msg system"><span>${escapeHtml(m.text)}</span><time>${time}</time></div>`
-          : `<div class="msg${m.name === this.game.username ? ' mine' : ''}"><b data-profile="${escapeHtml(m.name)}">${escapeHtml(m.name)}</b> <span>${escapeHtml(m.text)}</span><time>${time}</time>${
+          : `<div class="msg${m.name === this.game.username ? ' mine' : ''}"><b data-profile="${escapeHtml(m.name)}">${escapeHtml(m.name)}</b>${m.title ? `<em class="msg-title">${escapeHtml(m.title)}</em>` : ''} <span>${escapeHtml(m.text)}</span>${
+              m.report ? `<button class="link small" data-shared="${m.id}">Ver informe ▶</button>` : ''
+            }<time>${time}</time>${
               this.game.admin ? `<button class="msg-del" data-delete="${m.id}" title="Borrar mensaje">✕</button>` : ''
             }</div>`;
       })

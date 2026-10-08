@@ -585,6 +585,7 @@ export const MISSION_TYPES = {
   atacar: { name: 'Atacar', icon: '⚔️' },
   colonizar: { name: 'Colonizar', icon: '🚩' },
   conquistar: { name: 'Conquistar', icon: '🏴' },
+  sabotaje: { name: 'Sabotaje', icon: '🔥' },
   expedicion: { name: 'Expedición', icon: '🧭' },
   transporte: { name: 'Transporte', icon: '📦' },
   apoyo: { name: 'Apoyo', icon: '🛡️' },

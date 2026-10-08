@@ -2,7 +2,7 @@ import { clock, universe } from '../src/config.js';
 import { RESOURCES } from '../src/game/data.js';
 import { count } from '../src/game/combat.js';
 import { Game, newState } from '../src/game/Game.js';
-import { CONTEST_CATEGORIES, CONTEST_DAYS, CONTEST_PRIZES, WONDERS } from '../src/game/data.js';
+import { ACHIEVEMENTS, CONTEST_CATEGORIES, CONTEST_DAYS, CONTEST_PRIZES, WONDERS } from '../src/game/data.js';
 import { playerCombat, wonderLevel, wonderOf, worldEventAt } from '../src/game/rules.js';
 import { footprint, freshIslandState, generateContinent, generateSector, homeIsland, sectorCenter, sectorVertices } from '../src/game/world.js';
 import { hashPassword, newRecoveryCode, newSecret, normalizeCode, verifyPassword } from './auth.js';
@@ -481,6 +481,15 @@ export class WorldServer {
     return { name: target.name, ...target.spyReport() };
   }
 
+  sabotage(ownerId, payload, t) {
+    const target = this.games.get(ownerId);
+    if (!target || target.state.vacation) return null;
+    target.update(t);
+    const res = target.receiveSabotage(payload, t);
+    target.dirty = true;
+    return res;
+  }
+
   attackPlayer(ownerId, payload, t) {
     const target = this.games.get(ownerId);
     if (!target || target.state.vacation) return null;
@@ -777,7 +786,32 @@ export class WorldServer {
       if (!a) throw new UserError('No estás en ninguna alianza.');
       ch = `a:${a.id}`;
     }
-    return this.#pushChat({ name: user.username, text, channel: ch });
+    return this.#pushChat({ name: user.username, title: this.#titleOf(userId), text, channel: ch });
+  }
+
+  /** El título que lleva un jugador (el nombre de un logro suyo), o null. */
+  #titleOf(userId) {
+    const id = this.games.get(userId)?.state.title;
+    return id ? (ACHIEVEMENTS.find((a) => a.id === id)?.name ?? null) : null;
+  }
+
+  /** Publicar un informe de combate en el chat (general o de la alianza). */
+  shareReport(userId, t, channel = 'global') {
+    const game = this.games.get(userId);
+    const r = game.state.reports.find((x) => x.t === t && x.battle);
+    if (!r) throw new UserError('Ese informe ya no existe.');
+    const muted = this.meta.mod[userId]?.mutedUntil ?? 0;
+    if (muted > Date.now()) throw new UserError('Estás silenciado en el chat.');
+    let ch = 'global';
+    if (channel === 'alianza') {
+      const a = this.allianceOf(userId);
+      if (!a) throw new UserError('No estás en ninguna alianza.');
+      ch = `a:${a.id}`;
+    }
+    const icon = { victoria: '🏆', derrota: '💀', empate: '🏳️' }[r.outcome] ?? '📜';
+    // Solo lo necesario para verlo y repetir el combate
+    const report = { t: r.t, kind: r.kind, outcome: r.outcome, title: r.title, islandName: r.islandName, enemy: r.enemy, defending: r.defending, battle: r.battle, loot: r.loot, wall: r.wall, towers: r.towers };
+    return this.#pushChat({ name: game.name, title: this.#titleOf(userId), text: `${icon} ${r.title}`, channel: ch, report });
   }
 
   /** Mensajes nuevos que puede leer el jugador: el canal global y el de su alianza. */
@@ -1355,6 +1389,8 @@ export class WorldServer {
       achievements: game.achievements(),
       hero: game.state.hero ? { name: game.state.hero.name, level: game.state.hero.level } : null,
       banner: game.state.banner ?? null,
+      title: this.#titleOf(id),
+      titleId: game.state.title ?? null,
       history: (game.state.history ?? []).map((h) => ({ day: h.day, points: h.points })),
       muted: (this.meta.mod[id]?.mutedUntil ?? 0) > Date.now(),
       banned: this.isBanned(id),

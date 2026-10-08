@@ -52,6 +52,8 @@ El servidor guarda el mundo en memoria y lo vuelca a la base de datos cada 10 se
 - **Encargos diarios** 📜: cada día tres tareas distintas (invertir, entrenar, saquear, explorar, comerciar…) con recompensa, y premio extra por cumplir las tres.
 - **Competición semanal** 🏅: cada semana se premia a los tres mejores en saqueo, militar y construcción (solo cuenta lo hecho esa semana). Los ganadores quedan en el salón de la fama, en la pestaña «Semana» de la clasificación.
 - **Efectos de combate**: humo, fuego y destellos en la isla donde se libra una batalla (también en tu muralla cuando te atacan).
+- **Sabotaje** 🔥: manda botes a la ciudad de un rival para quemar parte de sus recursos o retrasar su obra. La muralla y la torre de vigía pillan a los saboteadores.
+- **Títulos y informes compartidos**: lleva uno de tus logros como título junto a tu nombre en el chat, y publica tus combates en el chat para que otros vean la repetición.
 - **Tu estandarte** 🎨: elige el color de tus banderas y un emblema (🦅 🐂 🦁 🔱…) desde tu perfil, y renombra tu ciudad una vez por semana. Tu perfil enseña la evolución de tus puntos en una gráfica.
 - **Tráfico marítimo**: ves navegar las flotas de tus vecinos (sin saber qué llevan).
 - **Guía del juego** 📖 (desde ⚙ o con la tecla `?`): todos los sistemas explicados, con buscador.

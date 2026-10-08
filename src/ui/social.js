@@ -312,14 +312,18 @@ export class Social {
     if (!data || this.hud.modalKind !== 'profile') return;
     const p = data.profile;
     const earned = new Set(p.achievements);
+    const meView = p.name === this.game.username;
     const medals = ACHIEVEMENTS.map(
-      (a) => `<li class="${earned.has(a.id) ? 'got' : ''}" title="${a.name}: ${a.text}"><span>${a.icon}</span><b>${a.name}</b><small>${a.text}</small></li>`,
+      (a) =>
+        `<li class="${earned.has(a.id) ? 'got' : ''} ${p.titleId === a.id ? 'titled' : ''}" title="${a.name}: ${a.text}"><span>${a.icon}</span><b>${a.name}</b><small>${a.text}</small>${
+          meView && earned.has(a.id) ? `<button class="link small" data-action="set-title" data-id="${p.titleId === a.id ? '' : a.id}">${p.titleId === a.id ? 'Quitar título' : 'Usar de título'}</button>` : ''
+        }</li>`,
     ).join('');
     const me = p.name === this.game.username;
     this.hud.showModal(
       'profile',
       `<div class="modal-card">
-        ${head(p.banner?.emblem ?? '👤', `${escapeHtml(p.name)}${p.alliance ? ` <span class="tag">[${escapeHtml(p.alliance.tag)}]</span>` : ''}`, `${p.online ? '🟢 En línea' : 'Desconectado'} · en el archipiélago desde ${new Date(p.joined).toLocaleDateString('es-ES')}`)}
+        ${head(p.banner?.emblem ?? '👤', `${escapeHtml(p.name)}${p.alliance ? ` <span class="tag">[${escapeHtml(p.alliance.tag)}]</span>` : ''}`, `${p.title ? `«${escapeHtml(p.title)}» · ` : ''}${p.online ? '🟢 En línea' : 'Desconectado'} · en el archipiélago desde ${new Date(p.joined).toLocaleDateString('es-ES')}`)}
         <div class="stat-grid">
           <div><b>${p.rank ?? '—'}</b><span>puesto</span></div>
           <div><b>${fmtNum(p.points)}</b><span>puntos</span></div>
@@ -679,6 +683,12 @@ export class Social {
       case 'mail-to':
         this.compose(btn.dataset.name);
         return true;
+      case 'set-title': {
+        const res = await this.game.setTitle(btn.dataset.id);
+        if (!res.ok) this.hud.toast(res.reason, 'error');
+        else this.openProfile(this.game.username);
+        return true;
+      }
       case 'banner': {
         const res = await this.game.setBanner(btn.dataset.color, btn.dataset.emblem);
         if (!res.ok) this.hud.toast(res.reason, 'error');

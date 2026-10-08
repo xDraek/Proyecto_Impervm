@@ -90,6 +90,7 @@ function reportBody(r) {
     const { attTitle, defTitle } = sideTitles(r);
     parts.push(`<div class="battle">${sideTable(attTitle, r.battle.att)}${sideTable(defTitle, r.battle.def)}</div>`);
     if (r.battle.log?.length) parts.push(`<button class="ghost small replay-btn" data-action="replay" data-t="${r.t}">▶ Ver el combate</button><div class="replay"></div>`);
+    if (!r.shared) parts.push(`<button class="ghost small" data-action="share-report" data-t="${r.t}">📢 Compartir en el chat</button>`);
     const notes = [`${r.battle.rounds} ${r.battle.rounds === 1 ? 'asalto' : 'asaltos'}`];
     if (r.towers) notes.push(`las torres dispararon ${fmtNum(r.towers)} por asalto`);
     if (r.wall) notes.push(`fortificación enemiga +${Math.round(r.wall * 100)} %`);
@@ -106,6 +107,16 @@ function reportBody(r) {
   if (r.lostUnits) parts.push(`<div class="info-row"><span>Barcos y tropas perdidos</span><span>${unitList(r.lostUnits)}</span></div>`);
   if (r.reward) parts.push(`<div class="info-row"><span>Botín de los piratas</span><span>${bag(r.reward)}</span></div>`);
   return parts.join('');
+}
+
+/** Un informe que otro jugador ha compartido en el chat. */
+export function sharedReportHtml(m) {
+  const r = { ...m.report, shared: true };
+  return `<div class="modal-card">
+    <div class="panel-head"><span class="panel-icon">📜</span><div><h3>${escapeHtml(r.title)}</h3><div class="panel-lvl">Informe compartido por ${escapeHtml(m.name)}${r.islandName ? ` · ${escapeHtml(r.islandName)}` : ''}</div></div>
+    <button class="icon-btn" data-action="close-modal" title="Cerrar">✕</button></div>
+    <div class="r-body">${reportBody(r)}</div>
+  </div>`;
 }
 
 export function reportsHtml(reports) {

@@ -98,6 +98,7 @@ const ACTIONS = {
   dismissVisitor: (g) => g.dismissVisitor(),
   markReportsRead: (g) => g.markReportsRead(),
   upgradeColony: (g, [id]) => (typeof id === 'string' ? g.upgradeColony(id) : bad()),
+  setTitle: (g, [id]) => (typeof id === 'string' ? g.setTitle(id) : bad()),
   setBanner: (g, [color, emblem]) => (typeof color === 'string' && typeof emblem === 'string' ? g.setBanner(color, emblem) : bad()),
   equipRelic: (g, [id, on]) => (typeof id === 'string' ? g.equipRelic(id, on === true) : bad()),
   sellRelic: (g, [id]) => (typeof id === 'string' ? g.sellRelic(id) : bad()),
@@ -239,6 +240,11 @@ async function api(req, res, url) {
     if (route === 'GET /api/map') return send(res, 200, world.worldMap(uid));
 
     if (route === 'GET /api/chat') return send(res, 200, { messages: world.chatSince(uid, int(url.searchParams.get('after')) || 0) });
+    if (route === 'POST /api/chat/share') {
+      if (limited(`chat:${uid}`, 5, 10_000)) return send(res, 429, { error: 'Espera un poco antes de escribir otra vez.' });
+      const { t, channel } = await readJson(req);
+      return send(res, 200, { message: world.shareReport(uid, Number(t), channel) });
+    }
     if (route === 'POST /api/chat') {
       if (limited(`chat:${uid}`, 5, 10_000)) return send(res, 429, { error: 'Espera un poco antes de escribir otra vez.' });
       const { text, channel } = await readJson(req);

@@ -3018,3 +3018,23 @@ input[type='text'] {
   white-space: nowrap;
   pointer-events: none;
 }
+
+/* ── Títulos e informes compartidos ──────────────────────────────────────── */
+
+.msg-title {
+  margin-left: 4px;
+  font-size: 10px;
+  font-style: normal;
+  color: var(--muted);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 6px;
+  padding: 0 4px;
+}
+
+.medals li.titled {
+  outline: 1px solid var(--gold);
+}
+
+.medals li .link {
+  margin-top: 2px;
+}

@@ -199,6 +199,7 @@ function fleetForm(game, view) {
   else types.push('explorar');
   const hostile = ['barbaros', 'ciudadela', 'piratas', 'kraken', 'jugador'].includes(view.type);
   if (view.type !== 'brumas' && view.colonizedBy == null && (!view.explored || hostile)) types.push('atacar');
+  if (view.type === 'jugador' && !(view.alliance && view.alliance.id === game.alliance?.id)) types.push('sabotaje');
   if (view.type === 'jugador') types.push('transporte');
   if (view.type === 'jugador' && view.alliance && view.alliance.id === game.alliance?.id) types.push('apoyo');
   if (view.type === 'libre' && view.explored && view.colonizedBy == null) types.push('colonizar');
@@ -206,7 +207,7 @@ function fleetForm(game, view) {
 
   const buttons = types
     .map((t) => {
-      const label = t === 'explorar' && view.type === 'jugador' ? 'Espiar' : MISSION_TYPES[t].name;
+      const label = t === 'explorar' && view.type === 'jugador' ? 'Espiar' : t === 'sabotaje' ? 'Sabotear' : MISSION_TYPES[t].name;
       return `<button class="${t === 'atacar' ? 'danger' : 'primary'} small" data-action="mission" data-type="${t}">${MISSION_TYPES[t].icon} ${label}</button>`;
     })
     .join('');
@@ -277,7 +278,7 @@ export function readPayload(root) {
  */
 export function fleetFor(game, type, units, payload = {}) {
   if (Object.keys(units).length) return units;
-  if (type === 'explorar' && game.units.bote > 0) return { bote: 1 };
+  if ((type === 'explorar' || type === 'sabotaje') && game.units.bote > 0) return { bote: 1 };
   if (type === 'transporte' && game.units.mercante > 0) {
     const total = Object.values(payload).reduce((a, b) => a + b, 0);
     const need = Math.max(1, Math.ceil(total / UNITS.mercante.cargo));

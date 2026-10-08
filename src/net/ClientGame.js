@@ -151,6 +151,10 @@ export class ClientGame extends Game {
     return this.#act('heroSkill', skill);
   }
 
+  setTitle(id) {
+    return this.#act('setTitle', id);
+  }
+
   setBanner(color, emblem) {
     return this.#act('setBanner', color, emblem);
   }

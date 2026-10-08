@@ -117,7 +117,7 @@ export function newState({ now = clock.now(), home, name }) {
     notes: [],
     favor: 0,
     buffs: {},
-    stats: { spent: 0, victories: 0, raidsRepelled: 0, expeditions: 0, powers: 0, treasures: 0, kraken: 0, pvpWins: 0, trades: 0, transports: 0, kills: 0, loot: 0, conquests: 0, donated: 0, contestWins: 0, trained: 0, explorations: 0, exchanges: 0, upgrades: 0, researched: 0 },
+    stats: { spent: 0, victories: 0, raidsRepelled: 0, expeditions: 0, powers: 0, treasures: 0, kraken: 0, pvpWins: 0, trades: 0, transports: 0, kills: 0, loot: 0, conquests: 0, donated: 0, contestWins: 0, trained: 0, explorations: 0, exchanges: 0, upgrades: 0, researched: 0, sabotages: 0 },
     daily: { last: null, streak: 0, best: 0 },
     hero: null,
     quests: { claimed: [] },
@@ -616,6 +616,16 @@ export class Game extends EventTarget {
     return this.#done();
   }
 
+  // ── Título ─────────────────────────────────────────────────────────────────
+
+  /** Uno de tus logros como título junto a tu nombre ('' para no llevar ninguno). */
+  setTitle(id, now = this.now()) {
+    this.#advance(now);
+    if (id && !this.achievements().includes(id)) return this.#fail('Todavía no has ganado ese logro.');
+    this.state.title = id || null;
+    return this.#done();
+  }
+
   // ── Estandarte ─────────────────────────────────────────────────────────────
 
   setBanner(color, emblem, now = this.now()) {
@@ -930,6 +940,13 @@ export class Game extends EventTarget {
       if (type === 'explorar') {
         if (Object.keys(sent).some((id) => !UNITS[id].explorer)) reason ||= 'Para espiar envía solo botes exploradores.';
         if (view.vacation) reason ||= `${view.ownerName} está de vacaciones: no hay nada que espiar.`;
+      } else if (type === 'sabotaje') {
+        if (Object.keys(sent).some((id) => !UNITS[id].explorer)) reason ||= 'Los saboteadores van en botes exploradores.';
+        if (this.world.sameAlliance?.(this.userId, isl.owner)) reason ||= `${view.ownerName} es de tu alianza.`;
+        else if (view.relation === 'pacto') reason ||= `Tu alianza tiene un pacto de no agresión con la de ${view.ownerName}.`;
+        else if (view.vacation) reason ||= `${view.ownerName} está de vacaciones.`;
+        else if (view.protected) reason ||= `${view.ownerName} está bajo protección de novato.`;
+        else if (this.isProtected()) reason ||= `Mientras tengas menos de ${NEWBIE_POINTS} puntos no puedes sabotear a otros jugadores.`;
       } else if (type === 'transporte') {
         load = this.#cleanPayload(payload);
         const total = sum(load);
@@ -1436,6 +1453,7 @@ export class Game extends EventTarget {
       // La isla ha desaparecido del mundo: la flota vuelve sin más
     } else if (isl.type === 'jugador') {
       if (m.type === 'explorar') this.#arriveSpy(m, isl, t);
+      else if (m.type === 'sabotaje') this.#arriveSabotage(m, isl, t);
       else if (m.type === 'apoyo') {
         // Si ya no sois aliados al llegar, las tropas se dan la vuelta
         if (!this.world.sameAlliance?.(this.userId, isl.owner)) {
@@ -1504,6 +1522,67 @@ export class Game extends EventTarget {
     }
     this.#report({ t, kind: 'exploracion', island: isl.id, islandName: isl.name, title: `${first ? 'Descubierta' : 'Explorada'}: ${isl.name}`, text, intel, loot });
     this.#note(`🔭 ${isl.name}: ${ISLAND_TYPES[isl.type].name}`, 'success');
+  }
+
+  /** Saboteadores en la ciudad de otro jugador: si no los pillan, queman o retrasan algo. */
+  #arriveSabotage(m, isl, t) {
+    const owner = this.world.playerInfo(isl.owner)?.name ?? isl.name;
+    const rel = this.world.relation?.(this.userId, isl.owner);
+    const res = rel === 'aliado' || rel === 'pacto' ? null : this.world.sabotage?.(isl.owner, { attackerName: this.state.name, stealth: relicBonus(this.state, 'sigilo') }, t);
+    if (!res) {
+      this.#report({ t, kind: 'exploracion', island: isl.id, islandName: isl.name, title: `Sabotaje cancelado en ${isl.name}`, text: 'Los saboteadores no han podido (o no debían) acercarse. Vuelven a casa.' });
+      return;
+    }
+    if (res.caught) {
+      const lost = { ...m.units };
+      m.units = {};
+      this.#report({ t, kind: 'exploracion', island: isl.id, islandName: isl.name, outcome: 'derrota', title: `Saboteadores capturados en ${isl.name}`, text: `Los vigías de ${owner} los han descubierto. Has perdido los botes.`, lostUnits: lost });
+      this.#note(`🔥 Han capturado a tus saboteadores en ${isl.name}`, 'error');
+      return;
+    }
+    this.state.stats.sabotages = (this.state.stats.sabotages ?? 0) + 1;
+    this.#report({ t, kind: 'exploracion', island: isl.id, islandName: isl.name, outcome: 'victoria', title: `Sabotaje en ${isl.name}`, text: res.text, enemy: owner });
+    this.#note(`🔥 Sabotaje en ${isl.name}: ${res.text}`, 'success');
+  }
+
+  /** Te sabotean la ciudad. Muralla y torre de vigía ayudan a pillarlos. */
+  receiveSabotage({ attackerName, stealth = 0 }, t) {
+    const chance = Math.min(0.85, 0.15 + 0.08 * this.level('muralla') + 0.05 * this.level('torre')) * (1 - stealth);
+    if (Math.random() < chance) {
+      this.#report({ t, kind: 'defensa', outcome: 'victoria', title: 'Saboteadores capturados', text: `Tus vigías han capturado a los saboteadores de ${attackerName} antes de que hicieran nada.` });
+      this.#note(`🔥 Tus vigías han capturado a unos saboteadores de ${attackerName}`, 'success');
+      this.#dirty = true;
+      return { caught: true };
+    }
+    const q = this.state.queue;
+    let mine;
+    let theirs;
+    if (q && Math.random() < 0.5) {
+      // Retrasan la obra en marcha (un 30 % de lo que le queda, como mucho una hora de juego)
+      const delay = Math.round(Math.min(Math.max(0, q.end - t) * 0.3, hours(1)));
+      q.end += delay;
+      const mins = Math.max(1, Math.round(delay / 60000));
+      mine = `Han saboteado la obra de ${BUILDINGS[q.id].name}: se retrasa ${mins} min.`;
+      theirs = `La obra de ${BUILDINGS[q.id].name} se retrasa ${mins} min.`;
+    } else {
+      // Queman parte de lo que no está a salvo en el almacén
+      const safe = protectedAmount(this.state);
+      const pool = RESOURCE_KEYS.filter((r) => this.state.resources[r] - safe > 50).sort(() => Math.random() - 0.5).slice(0, 2);
+      const burnt = {};
+      for (const r of pool) {
+        const n = Math.floor((this.state.resources[r] - safe) * 0.12);
+        if (n > 0) {
+          burnt[r] = n;
+          this.state.resources[r] -= n;
+        }
+      }
+      mine = Object.keys(burnt).length ? `Han quemado ${fmtBag(burnt)} de tus almacenes.` : 'No encontraron nada que quemar.';
+      theirs = Object.keys(burnt).length ? `Arden ${fmtBag(burnt)} en sus almacenes.` : 'No había nada fuera del almacén que quemar.';
+    }
+    this.#report({ t, kind: 'defensa', outcome: 'derrota', title: 'Sabotaje en tu ciudad', text: `Saboteadores de ${attackerName}. ${mine}` });
+    this.#note(`🔥 ¡Sabotaje! ${mine}`, 'error');
+    this.#dirty = true;
+    return { caught: false, text: theirs };
   }
 
   #arriveSpy(m, isl, t) {
