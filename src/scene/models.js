@@ -694,7 +694,7 @@ function emptyPlot(id) {
 
 // ── Edificios de la segunda ampliación ───────────────────────────────────────
 
-function smokeColumn(x, y, z, phase = 0) {
+export function smokeColumn(x, y, z, phase = 0) {
   const smoke = new THREE.Group();
   smoke.position.set(x, y, z);
   for (let k = 0; k < 3; k++) {

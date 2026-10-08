@@ -113,6 +113,52 @@ function gull() {
   }
 }
 
+// ── Lluvia y truenos ─────────────────────────────────────────────────────────
+
+let rain = null;
+
+/** Intensidad de la lluvia (0 a 1): un siseo de ruido blanco filtrado. */
+export function setRain(k) {
+  if (!ctx) return;
+  if (!rain) {
+    const len = ctx.sampleRate * 3;
+    const buf = ctx.createBuffer(1, len, ctx.sampleRate);
+    const data = buf.getChannelData(0);
+    for (let i = 0; i < len; i++) data[i] = Math.random() * 2 - 1;
+    const src = ctx.createBufferSource();
+    src.buffer = buf;
+    src.loop = true;
+    const filter = ctx.createBiquadFilter();
+    filter.type = 'bandpass';
+    filter.frequency.value = 2400;
+    filter.Q.value = 0.6;
+    rain = ctx.createGain();
+    rain.gain.value = 0;
+    src.connect(filter).connect(rain).connect(master);
+    src.start();
+  }
+  rain.gain.setTargetAtTime(0.09 * k, ctx.currentTime, 1.5);
+}
+
+/** Un trueno lejano: un golpe grave de ruido que se apaga despacio. */
+export function thunder(power = 1) {
+  if (!ctx || muted || document.hidden) return;
+  const t = ctx.currentTime;
+  const src = ctx.createBufferSource();
+  src.buffer = noiseBuffer(3);
+  const filter = ctx.createBiquadFilter();
+  filter.type = 'lowpass';
+  filter.frequency.setValueAtTime(900, t);
+  filter.frequency.exponentialRampToValueAtTime(120, t + 2.5);
+  const g = ctx.createGain();
+  g.gain.setValueAtTime(0.0001, t);
+  g.gain.exponentialRampToValueAtTime(0.5 * power, t + 0.08);
+  g.gain.exponentialRampToValueAtTime(0.0001, t + 2.8);
+  src.connect(filter).connect(g).connect(master);
+  src.start(t);
+  src.stop(t + 3);
+}
+
 /** El ambiente baja en el mapa (estás lejos de la orilla). */
 export function setAmbienceLevel(k) {
   if (ambience) ambience.gain.setTargetAtTime(0.18 * k, ctx.currentTime, 0.5);

@@ -40,10 +40,10 @@ function playerSection(game, view) {
 }
 
 function colonySection(game, view) {
-  const r = RESOURCES[view.specialty];
   const col = view.colony ?? {};
+  const r = RESOURCES[col.specialty ?? view.specialty];
   const level = col.level ?? 1;
-  const yieldAt = (n) => colonyYield({ ...view, level: n });
+  const yieldAt = (n) => colonyYield({ yield: col.yield ?? view.yield, level: n });
   let upgrade;
   if (col.upgradeEnd) {
     upgrade = `<p class="hint">🔨 Los colonos amplían la colonia al nivel ${level + 1}: terminan en <span data-until="${col.upgradeEnd}"></span>.</p>`;
@@ -58,7 +58,7 @@ function colonySection(game, view) {
       <button class="primary" data-action="colony-upgrade" data-need='${JSON.stringify(cost)}' data-blocked="${busy ? 1 : 0}">🔨 Ampliar · ${fmtTime(seconds)}</button>
       ${busy ? '<p class="muted small">Ya estás ampliando otra colonia: solo hay colonos para una obra a la vez.</p>' : ''}`;
   }
-  return `<p class="desc">Tus colonos trabajan la isla y mandan sus cosechas a la capital.</p>
+  return `<p class="desc">${col.conquered ? 'La ciudad que conquistaste a los bárbaros: tus colonos la gobiernan y mandan su producción a la capital.' : 'Tus colonos trabajan la isla y mandan sus cosechas a la capital.'}</p>
     <div class="info-row"><span>🚩 Nivel</span><b>${level} / ${COLONY.maxLevel}</b></div>
     <div class="effect"><span>${r.icon} Producción de la colonia</span><b class="up">+${fmtNum(yieldAt(level))}/h</b></div>
     ${upgrade}`;
@@ -94,6 +94,9 @@ function infoSection(game, view) {
 
 function infoSectionFor(game, view, t) {
   if (view.type === 'jugador') return playerSection(game, view);
+  if (view.colonizedBy != null && !view.colonized && view.type === 'ciudadela') {
+    return `<p class="desc">Ciudad bárbara conquistada por <b>${escapeHtml(view.colonistName)}</b>. Ya no quedan bárbaros: su bandera ondea sobre la empalizada.</p>`;
+  }
   if (view.colonizedBy != null && !view.colonized) {
     const r = RESOURCES[view.specialty];
     return `<p class="desc">Colonia de <b>${escapeHtml(view.colonistName)}</b>. Produce ${r.icon} ${r.name.toLowerCase()} para su imperio.</p>`;
@@ -169,6 +172,7 @@ function fleetForm(game, view) {
   if (view.type === 'jugador') types.push('transporte');
   if (view.type === 'jugador' && view.alliance && view.alliance.id === game.alliance?.id) types.push('apoyo');
   if (view.type === 'libre' && view.explored && view.colonizedBy == null) types.push('colonizar');
+  if (view.type === 'ciudadela' && view.explored && view.colonizedBy == null) types.push('conquistar');
 
   const buttons = types
     .map((t) => {
@@ -183,7 +187,9 @@ function fleetForm(game, view) {
     : '';
   const colony = types.includes('colonizar')
     ? `<div class="hint">Los colonos viajan en un mercante y se quedan con él. Llevan:</div>${costList(game.planMission('colonizar', view.id, { mercante: 1 }).cost ?? {}, game.resources)}`
-    : '';
+    : types.includes('conquistar')
+      ? `<div class="hint">🏴 Para conquistarla, tus tropas tienen que acabar con toda la guarnición. Los colonos van en un mercante, se quedan con él y llevan:</div>${costList(game.planMission('conquistar', view.id, { mercante: 1, lancero: 1 }).cost ?? {}, game.resources)}`
+      : '';
   return `<div class="section">
     <h4>Enviar flota <span class="muted small">(${game.missions.length}/${game.fleetSlots()} en el mar)</span></h4>
     <div class="fleet">${rows}</div>

@@ -14,6 +14,7 @@ import {
   cyl,
   WINDOW_GLOW,
   disposeTree,
+  smokeColumn,
   gableRoof,
   mat,
   mesh,
@@ -25,6 +26,7 @@ import { escapeHtml } from '../ui/format.js';
 import { Batch, bakeStatic, mountainGeometry, paintByNormal, plateauGeometry, polar, rng } from './util.js';
 import { createWater, setShores } from './water.js';
 import { clock } from '../config.js';
+import { setRain, thunder } from '../audio.js';
 
 const HORIZON = '#cfe8f7';
 const WATER_Y = -0.7;
@@ -80,7 +82,29 @@ const VIEWS = {
   isla: { offset: new THREE.Vector3(33, 34, 46), min: 16, max: 115 },
   mapa: { offset: new THREE.Vector3(0, 420, 250), min: 60, max: 900 },
 };
-const SHIP_PRIORITY = ['galeon', 'trirreme', 'mercante', 'bote'];
+const SHIP_PRIORITY = ['dromon', 'galeon', 'trirreme', 'brulote', 'mercante', 'bote'];
+
+// Clima: cada media hora real cambia (igual para todos, sale de la hora)
+const WEATHER_MS = 30 * 60 * 1000;
+const WEATHERS = [
+  { id: 'despejado', p: 0.55, dark: 0, rain: 0 },
+  { id: 'nublado', p: 0.2, dark: 0.35, rain: 0 },
+  { id: 'lluvia', p: 0.17, dark: 0.55, rain: 0.7 },
+  { id: 'tormenta', p: 0.08, dark: 0.8, rain: 1, storm: true },
+];
+const RAIN_DROPS = 1600;
+
+/** El tiempo que hace en el instante `t`. */
+export function weatherAt(t) {
+  const n = Math.floor(t / WEATHER_MS);
+  const x = Math.sin(n * 127.1 + 311.7) * 43758.5453;
+  let r = x - Math.floor(x);
+  for (const w of WEATHERS) {
+    if (r < w.p) return w;
+    r -= w.p;
+  }
+  return WEATHERS[0];
+}
 
 /** Polilínea recorrible por longitud de arco (u en [0, 1]). */
 class Route {
@@ -127,6 +151,10 @@ export class World {
     this.dayNight = true;
     this.villagers = [];
     this.gulls = [];
+    this.carts = [];
+    this.boats = [];
+    this.dolphins = [];
+    this.weather = { dark: 0, rain: 0, storm: false, flash: 0, rainSound: -1 };
 
     this.#setupRenderer();
     this.#setupScene();
@@ -285,7 +313,8 @@ export class World {
     // s: altura del sol entre -1 (medianoche) y 1 (mediodía)
     const phase = (now % DAY_MS) / DAY_MS;
     const s = this.dayNight ? Math.sin(phase * Math.PI * 2) : 1;
-    const key = Math.round(s * 100);
+    const dark = this.weather?.dark ?? 0;
+    const key = `${Math.round(s * 100)}|${Math.round(dark * 40)}`;
     if (key === this.skyKey) return;
     this.skyKey = key;
 
@@ -294,8 +323,10 @@ export class World {
     const col = (name) => new THREE.Color(from[name]).lerp(new THREE.Color(to[name]), k);
     const num = (name) => from[name] + (to[name] - from[name]) * k;
 
-    const top = col('top');
-    const horizon = col('horizon');
+    // Con mal tiempo el cielo se vuelve gris plomo
+    const grey = new THREE.Color(s >= 0 ? '#7d8794' : '#252a33');
+    const top = col('top').lerp(grey, dark * 0.95);
+    const horizon = col('horizon').lerp(grey, dark * 0.85);
     const ctx = this.skyCtx;
     const grad = ctx.createLinearGradient(0, 0, 0, 256);
     grad.addColorStop(0, `#${top.getHexString()}`);
@@ -306,9 +337,11 @@ export class World {
     this.scene.fog.color.copy(horizon);
 
     this.sun.color.copy(col('sun'));
-    this.sun.intensity = num('sunI');
-    this.hemi.color.copy(col('hemi'));
-    this.hemi.intensity = num('hemiI');
+    this.sun.intensity = num('sunI') * (1 - 0.8 * dark);
+    this.hemi.color.copy(col('hemi')).lerp(new THREE.Color('#9aa3ad'), dark * 0.7);
+    this.hemi.intensity = num('hemiI') * (1 - 0.45 * dark);
+    this.hemiBase = this.hemi.intensity;
+    this.cloudMaterial?.color.set('#ffffff').lerp(new THREE.Color('#7f8894'), dark);
     // De día el sol cruza el cielo; de noche la luna sale por el lado contrario
     const a = phase * Math.PI * 2;
     this.sun.position.set(Math.cos(a) * 34, 14 + Math.abs(s) * 32, 18 + Math.sin(a) * 10);
@@ -645,6 +678,7 @@ export class World {
     const rand = rng(42);
     const geo = new THREE.IcosahedronGeometry(1, 0);
     const material = new THREE.MeshStandardMaterial({ color: '#ffffff', flatShading: true, roughness: 1, transparent: true, opacity: 0.95 });
+    this.cloudMaterial = material;
     for (let i = 0; i < 22; i++) {
       const cloud = new THREE.Group();
       const puffs = 3 + Math.floor(rand() * 3);
@@ -668,6 +702,45 @@ export class World {
     this.lifeGroup = new THREE.Group();
     this.scene.add(this.lifeGroup);
     const rand = rng(99);
+    // Pesqueros que faenan alrededor de la isla
+    for (let i = 0; i < 4; i++) {
+      const boat = createShip(i === 3 ? 'mercante' : 'bote');
+      boat.scale.setScalar(i === 3 ? 2.2 : 2.4);
+      boat.userData.sail = { r: ISLAND_R + 9 + rand() * 12, speed: (2 + rand() * 1.5) * (i % 2 ? 1 : -1), phase: rand() * Math.PI * 2 };
+      this.lifeGroup.add(boat);
+      this.boats.push(boat);
+    }
+    // Delfines que saltan de vez en cuando
+    for (let i = 0; i < 3; i++) {
+      const d = dolphin();
+      d.visible = false;
+      d.userData.jump = { next: 2 + rand() * 6 + i * 3, t: -1 };
+      this.lifeGroup.add(d);
+      this.dolphins.push(d);
+    }
+    // Carros de bueyes por la avenida del puerto
+    for (let i = 0; i < 2; i++) {
+      const c = cart();
+      c.userData.walk = { avenue: true, s: 6 + i * 9, dir: i ? -1 : 1, speed: 0.6, lane: i ? 0.35 : -0.35 };
+      this.lifeGroup.add(c);
+      this.carts.push(c);
+    }
+    // Lluvia: gotas como trazos cortos que caen alrededor de lo que miras
+    const pos = new Float32Array(RAIN_DROPS * 6);
+    this.rainSeeds = new Float32Array(RAIN_DROPS * 3);
+    for (let i = 0; i < RAIN_DROPS; i++) {
+      this.rainSeeds[i * 3] = rand() * 2 - 1;
+      this.rainSeeds[i * 3 + 1] = rand() * 2 - 1;
+      this.rainSeeds[i * 3 + 2] = rand();
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    this.rain = new THREE.LineSegments(geo, new THREE.LineBasicMaterial({ color: '#d6e6f5', transparent: true, opacity: 0, depthWrite: false }));
+    this.rain.frustumCulled = false;
+    this.rain.visible = false;
+    this.scene.add(this.rain);
+    this.flashLight = new THREE.AmbientLight('#dfe8ff', 0);
+    this.scene.add(this.flashLight);
     for (let i = 0; i < 7; i++) {
       const gull = createGull();
       gull.userData.fly = { r: 12 + rand() * 24, h: 10 + rand() * 7, speed: (0.15 + rand() * 0.15) * (i % 2 ? 1 : -1), phase: rand() * Math.PI * 2 };
@@ -692,6 +765,63 @@ export class World {
       this.lifeGroup.add(v);
       this.villagers.push(v);
     }
+  }
+
+  /** Lluvia, cielo encapotado y relámpagos según el tiempo que haga. */
+  #updateWeather(dt, now, dist) {
+    const w = this.weather;
+    const target = this.showcase ? WEATHERS[0] : (WEATHERS.find((x) => x.id === this.weatherOverride) ?? weatherAt(now));
+    const k = Math.min(1, dt * 0.25);
+    w.dark += (target.dark - w.dark) * k;
+    w.rain += (target.rain - w.rain) * k;
+    w.storm = !!target.storm;
+    if (Math.abs(w.rain - w.rainSound) > 0.03) {
+      w.rainSound = w.rain;
+      setRain(this.view === 'isla' ? w.rain : w.rain * 0.4);
+    }
+
+    // Gotas alrededor del objetivo de la cámara (más grandes y dispersas en el mapa)
+    this.rain.visible = w.rain > 0.02;
+    if (this.rain.visible) {
+      this.rain.material.opacity = 0.45 * w.rain;
+      const span = THREE.MathUtils.clamp(dist * 0.7, 30, 260);
+      const height = span * 0.8;
+      const len = span * 0.025;
+      const c = this.controls.target;
+      const pos = this.rain.geometry.attributes.position.array;
+      const fall = (now / 1000) * 0.9;
+      const drops = Math.round(RAIN_DROPS * Math.min(1, 0.3 + w.rain));
+      for (let i = 0; i < RAIN_DROPS; i++) {
+        const o = i * 6;
+        if (i >= drops) {
+          pos.fill(0, o, o + 6);
+          continue;
+        }
+        const x = c.x + this.rainSeeds[i * 3] * span;
+        const z = c.z + this.rainSeeds[i * 3 + 1] * span;
+        const y = WATER_Y + ((this.rainSeeds[i * 3 + 2] - fall) % 1 + 1) % 1 * height;
+        pos[o] = x;
+        pos[o + 1] = y;
+        pos[o + 2] = z;
+        pos[o + 3] = x + len * 0.25;
+        pos[o + 4] = y - len;
+        pos[o + 5] = z;
+      }
+      this.rain.geometry.attributes.position.needsUpdate = true;
+    }
+
+    // Con lluvia se ve menos lejos
+    this.scene.fog.near *= 1 - 0.5 * w.rain;
+    this.scene.fog.far *= 1 - 0.55 * w.rain;
+
+    // Relámpagos en las tormentas
+    w.flash = Math.max(0, w.flash - dt * 4);
+    if (w.storm && w.dark > 0.6 && Math.random() < dt * 0.12) {
+      w.flash = 1;
+      const power = 0.5 + Math.random() * 0.5;
+      setTimeout(() => thunder(power), 500 + Math.random() * 1800);
+    }
+    this.flashLight.intensity = w.flash * w.flash * 3;
   }
 
   /** Casas de los barrios: más cuanto más grande es el ayuntamiento. */
@@ -721,16 +851,24 @@ export class World {
       if (s.chimney) h.add(box(0.16, 0.5, 0.16, C.stone, s.w * 0.25, wallH + 0.1, -s.d * 0.2));
       h.position.copy(s.p);
       h.rotation.y = s.rot;
+      // Humo en algunas chimeneas (no en todas, para no recargar)
+      if (s.chimney && i % 2 === 0) {
+        const top = new THREE.Vector3(s.w * 0.25, wallH + 0.7, -s.d * 0.2).applyEuler(new THREE.Euler(0, s.rot, 0)).add(s.p);
+        const smoke = smokeColumn(top.x, top.y, top.z, i * 0.37);
+        smoke.scale.setScalar(0.7);
+        this.houseGroup.add(smoke);
+      }
       batch.add(h);
     });
     this.houseGroup.add(batch.build());
+    this.#collectAnimated();
   }
 
   #updateLife(dt, t) {
     const gate = THREE.MathUtils.degToRad(GATE_ANGLE);
-    this.villagers.forEach((v, i) => {
+    [...this.villagers, ...this.carts].forEach((v, i) => {
       const w = v.userData.walk;
-      const bob = Math.abs(Math.sin(t * 9 + i)) * 0.04;
+      const bob = v.userData.cart ? 0 : Math.abs(Math.sin(t * 9 + i)) * 0.04;
       if (w.avenue) {
         w.s += w.dir * w.speed * dt;
         if (w.s > ISLAND_R - 1.8 || w.s < 3.8) w.dir *= -1;
@@ -743,6 +881,37 @@ export class World {
         v.rotation.y = w.a + (w.dir > 0 ? Math.PI / 2 : -Math.PI / 2);
       }
     });
+    for (const [i, boat] of this.boats.entries()) {
+      const f = boat.userData.sail;
+      const a = f.phase + (t * f.speed) / f.r;
+      boat.position.set(Math.sin(a) * f.r, WATER_Y + Math.sin(t * 1.3 + i) * 0.08, Math.cos(a) * f.r);
+      boat.rotation.set(0, a + (f.speed > 0 ? Math.PI / 2 : -Math.PI / 2), Math.sin(t * 1.1 + i) * 0.06);
+    }
+    for (const d of this.dolphins) {
+      const j = d.userData.jump;
+      j.next -= dt;
+      if (j.t < 0 && j.next <= 0) {
+        // Un salto cerca de la costa, en una dirección al azar
+        const a = Math.random() * Math.PI * 2;
+        const r = ISLAND_R + 8 + Math.random() * 20;
+        j.from = new THREE.Vector3(Math.sin(a) * r, 0, Math.cos(a) * r);
+        j.dir = new THREE.Vector3(Math.cos(a), 0, -Math.sin(a)).multiplyScalar(Math.random() < 0.5 ? 1 : -1);
+        j.t = 0;
+        d.visible = true;
+      }
+      if (j.t >= 0) {
+        j.t += dt / 1.4;
+        const p = Math.min(1, j.t);
+        d.position.copy(j.from).addScaledVector(j.dir, p * 7);
+        d.position.y = WATER_Y - 0.6 + Math.sin(p * Math.PI) * 2.4;
+        d.rotation.set(Math.cos(p * Math.PI) * -0.9, Math.atan2(j.dir.x, j.dir.z), 0, 'YXZ');
+        if (p >= 1) {
+          j.t = -1;
+          j.next = 4 + Math.random() * 9;
+          d.visible = false;
+        }
+      }
+    }
     for (const [i, gull] of this.gulls.entries()) {
       const f = gull.userData.fly;
       const a = f.phase + t * f.speed;
@@ -1085,6 +1254,7 @@ export class World {
       collect(slot.building);
       collect(slot.scaffold);
     }
+    collect(this.houseGroup);
     for (const isl of Object.values(this.islands)) collect(isl.feature);
     for (const f of this.fleets.values()) collect(f.group);
     collect(this.raidGroup);
@@ -1125,6 +1295,7 @@ export class World {
     this.homeLabel.visible = this.view === 'mapa';
 
     this.waterTime.value = t;
+    this.#updateWeather(dt, now, dist);
     this.#updateSky(now);
     this.#updateLife(dt, t);
 
@@ -1269,5 +1440,46 @@ function sheep() {
   g.add(box(0.42, 0.26, 0.28, '#f4f1e8', 0, 0.14, 0));
   g.add(box(0.14, 0.14, 0.14, '#3a332c', 0.26, 0.26, 0));
   for (const [x, z] of [[-0.14, -0.09], [0.14, -0.09], [-0.14, 0.09], [0.14, 0.09]]) g.add(box(0.05, 0.14, 0.05, '#3a332c', x, 0, z));
+  return g;
+}
+
+function dolphin() {
+  const g = new THREE.Group();
+  const body = mesh(new THREE.SphereGeometry(0.5, 10, 8), '#6d7f8f');
+  body.scale.set(0.55, 0.5, 1.6);
+  g.add(body);
+  const belly = mesh(new THREE.SphereGeometry(0.45, 8, 6), '#c9d3db');
+  belly.scale.set(0.45, 0.3, 1.3);
+  belly.position.y = -0.12;
+  g.add(belly);
+  const fin = mesh(new THREE.ConeGeometry(0.16, 0.45, 4), '#5d6e7d');
+  fin.position.set(0, 0.32, -0.1);
+  fin.rotation.x = -0.4;
+  g.add(fin);
+  const tail = box(0.7, 0.05, 0.25, '#5d6e7d', 0, -0.02, -0.85);
+  g.add(tail);
+  const snout = mesh(new THREE.ConeGeometry(0.12, 0.4, 6), '#6d7f8f');
+  snout.rotation.x = Math.PI / 2;
+  snout.position.z = 0.9;
+  g.add(snout);
+  return g;
+}
+
+function cart() {
+  const g = new THREE.Group();
+  g.userData.cart = true;
+  // Buey delante (+Z) y carro con sacos detrás
+  g.add(box(0.36, 0.34, 0.75, '#8a6a4a', 0, 0.22, 0.7));
+  g.add(box(0.24, 0.24, 0.28, '#7a5a3a', 0, 0.38, 1.15));
+  for (const [x, z] of [[-0.12, 0.45], [0.12, 0.45], [-0.12, 0.95], [0.12, 0.95]]) g.add(box(0.07, 0.22, 0.07, '#5e3b1c', x, 0, z));
+  g.add(box(0.05, 0.05, 0.6, C.woodDark, 0, 0.35, 0.1));
+  g.add(box(0.7, 0.32, 0.9, C.wood, 0, 0.28, -0.5));
+  for (const x of [-0.4, 0.4]) {
+    const wheel = cyl(0.24, 0.24, 0.06, 10, C.woodDark, 0, 0, 0);
+    wheel.rotation.z = Math.PI / 2;
+    wheel.position.set(x, 0.24, -0.5);
+    g.add(wheel);
+  }
+  for (const [x, c] of [[-0.15, '#e9dcc0'], [0.17, '#d8c49a']]) g.add(box(0.28, 0.24, 0.32, c, x, 0.6, -0.5));
   return g;
 }

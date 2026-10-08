@@ -300,6 +300,7 @@ function tree(color, palm) {
 export function islandLook(view) {
   if (view.type === 'brumas') return 'brumas';
   if (view.type === 'jugador') return `ciudad-${view.townLevel >= 6 ? 3 : view.townLevel >= 3 ? 2 : 1}`;
+  if (view.type === 'ciudadela' && view.colonizedBy != null) return view.colonized ? 'ciudadela-propia' : 'ciudadela-otro';
   if (view.colonized) return 'colonia';
   if (view.colonizedBy != null) return 'colonia-otro';
   if (!view.explored) return 'niebla';
@@ -317,6 +318,8 @@ export function createIslandFeature(isl, look) {
     niebla: () => mist(g, R, rand),
     barbaros: () => camp(g, R, rand),
     ciudadela: () => citadel(g, R, rand),
+    'ciudadela-propia': () => citadel(g, R, rand, C.cloth[0]),
+    'ciudadela-otro': () => citadel(g, R, rand, ownerColor(isl)),
     piratas: () => fort(g, R),
     ruinas: () => ruins(g, R, rand, true),
     'ruinas-saqueadas': () => ruins(g, R, rand, false),
@@ -638,7 +641,7 @@ function colony(g, isl, R, rand, flagColor) {
 }
 
 /** Ciudad bárbara del continente: empalizada doble, torres de madera, chozas y un gran salón. */
-function citadel(g, R, rand) {
+function citadel(g, R, rand, owner = null) {
   const batch = new Batch();
   for (const [r, h] of [[R * 0.62, 1.5], [R * 0.4, 1.1]]) {
     for (let a = 0; a < 360; a += 7) {
@@ -691,7 +694,7 @@ function citadel(g, R, rand) {
     g.add(fire);
   }
   for (let i = 0; i < 5; i++) {
-    const b = createSoldier(i % 2 ? 'barbaro' : 'arquero');
+    const b = createSoldier(owner ? (i % 2 ? 'lancero' : 'hoplita') : i % 2 ? 'barbaro' : 'arquero');
     b.scale.setScalar(1.8);
     b.position.copy(polar(R * 0.3, 160 + i * 18));
     b.rotation.y = rand() * Math.PI * 2;
@@ -699,7 +702,7 @@ function citadel(g, R, rand) {
   }
   // Estandarte
   g.add(cyl(0.05, 0.05, 3.4, 6, C.dark, 1.9, 0, 0));
-  const flag = box(1.0, 0.7, 0.03, '#7a2f22', 0, 0, 0);
+  const flag = box(1.0, 0.7, 0.03, owner ?? '#7a2f22', 0, 0, 0);
   flag.geometry.translate(0.5, 0, 0);
   flag.position.set(1.9, 3.0, 0);
   flag.userData.wave = true;

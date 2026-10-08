@@ -103,7 +103,7 @@ export function newState({ now = clock.now(), home, name }) {
     notes: [],
     favor: 0,
     buffs: {},
-    stats: { spent: 0, victories: 0, raidsRepelled: 0, expeditions: 0, powers: 0, treasures: 0, kraken: 0, pvpWins: 0, trades: 0, transports: 0, kills: 0, loot: 0 },
+    stats: { spent: 0, victories: 0, raidsRepelled: 0, expeditions: 0, powers: 0, treasures: 0, kraken: 0, pvpWins: 0, trades: 0, transports: 0, kills: 0, loot: 0, conquests: 0 },
     daily: { last: null, streak: 0, best: 0 },
     hero: null,
     quests: { claimed: [] },
@@ -723,7 +723,7 @@ export class Game extends EventTarget {
     const joint = opts.join ? (this.world.jointAttack?.(opts.join) ?? null) : null;
     const seconds = joint ? Math.max(1, Math.ceil((joint.arrive - this.now()) / 1000)) : travel;
     const slots = fleetSlots(s);
-    const pendingColonies = s.missions.filter((m) => m.type === 'colonizar').length;
+    const pendingColonies = s.missions.filter((m) => m.type === 'colonizar' || m.type === 'conquistar').length;
     let cost = null;
 
     if (target === s.home) reason ||= 'Es tu propia isla.';
@@ -796,6 +796,20 @@ export class Game extends EventTarget {
       if (!sent.mercante) reason ||= 'Los colonos viajan en un barco mercante.';
       cost = colonyCost(colonies + pendingColonies);
       if (!canAfford(s.resources, cost)) reason ||= 'No tienes los recursos para fundar la colonia.';
+    } else if (type === 'conquistar') {
+      // Vencer a la guarnición y quedarse con la ciudad: un ataque con colonos detrás
+      const colonies = s.colonies.length;
+      const max = maxColonies(s);
+      if (isl.type !== 'ciudadela') reason ||= 'Solo se pueden conquistar las ciudades bárbaras de los continentes.';
+      else if (!view.explored) reason ||= 'Espía la ciudad antes de intentar conquistarla.';
+      else if (rt?.colonizedBy != null) reason ||= rt.colonizedBy === this.userId ? 'Ya es tuya.' : `${view.colonistName} ya la ha conquistado.`;
+      else if (s.missions.some((m) => m.type === 'conquistar' && m.target === target)) reason ||= 'Ya va una flota a conquistarla.';
+      else if (max === 0) reason ||= 'Investiga Cartografía para poder gobernar otras tierras.';
+      else if (colonies + pendingColonies >= max) reason ||= `Ya tienes ${colonies + pendingColonies}/${max} colonias. Investiga más Cartografía.`;
+      if (!hasCombat(sent)) reason ||= 'Envía tropas para vencer a la guarnición.';
+      if (!sent.mercante) reason ||= 'Los colonos viajan en un barco mercante.';
+      cost = colonyCost(colonies + pendingColonies);
+      if (!canAfford(s.resources, cost)) reason ||= 'No tienes los recursos para gobernar la ciudad.';
     } else {
       reason ||= 'Misión desconocida.';
     }
@@ -1250,6 +1264,7 @@ export class Game extends EventTarget {
     } else if (m.type === 'explorar') this.#arriveExplore(m, isl, t);
     else if (m.type === 'atacar') this.#arriveAttack(m, isl, t);
     else if (m.type === 'colonizar') this.#arriveColonize(m, isl, t);
+    else if (m.type === 'conquistar') this.#arriveConquer(m, isl, t);
     else if (m.type === 'expedicion') this.#arriveExpedition(m, isl, t);
 
     if (m.type === 'apoyo' && !m.rejected && count(m.units) > 0) {
@@ -1516,6 +1531,49 @@ export class Game extends EventTarget {
       this.#note('🐙 ¡Has derrotado al Kraken! Los mares son tuyos.', 'success');
       this.world.announce?.(`🐙 ${this.state.name} ha derrotado al Kraken de ${isl.name}`);
     }
+  }
+
+  /** Asalto a una ciudad bárbara: si cae toda la guarnición, los colonos se quedan con ella. */
+  #arriveConquer(m, isl, t) {
+    const cost = { ...m.cargo };
+    m.cargo = {};
+    this.#arriveAttack(m, isl, t);
+    const rt = this.world.islandState(isl.id);
+    const won = count(garrisonAt(isl, rt, t)) === 0 && hasCombat(m.units);
+    const room = this.state.colonies.length < maxColonies(this.state);
+    if (!won || !room || !m.units.mercante || !this.world.colonize?.(isl.id, this.userId)) {
+      // Los colonos vuelven con lo que llevaban
+      for (const [r, n] of Object.entries(cost)) m.cargo[r] = (m.cargo[r] ?? 0) + n;
+      this.#report({
+        t,
+        kind: 'colonia',
+        island: isl.id,
+        islandName: isl.name,
+        outcome: 'derrota',
+        title: `${isl.name} resiste`,
+        text: won ? 'La ciudad ya no se puede gobernar. Los colonos vuelven a casa.' : 'Sin vencer a toda la guarnición no hay conquista. Los colonos vuelven a casa.',
+      });
+      return;
+    }
+    // Lo que más se producía allí es lo que mandará la ciudad conquistada
+    const specialty = Object.entries(isl.loot?.mix ?? { hierro: 1 }).sort((a, b) => b[1] - a[1])[0][0];
+    const colonyYieldBase = Math.round(60 + (isl.tier ?? 4) * 30);
+    this.state.colonies.push({ id: isl.id, name: isl.name, specialty, yield: colonyYieldBase, conquered: true });
+    this.state.stats.conquests = (this.state.stats.conquests ?? 0) + 1;
+    m.units.mercante -= 1;
+    if (!m.units.mercante) delete m.units.mercante;
+    const r = RESOURCES[specialty];
+    this.#report({
+      t,
+      kind: 'colonia',
+      island: isl.id,
+      islandName: isl.name,
+      outcome: 'victoria',
+      title: `¡Has conquistado ${isl.name}!`,
+      text: `Tu bandera ondea sobre la empalizada. La ciudad mandará ${r.icon} ${r.name.toLowerCase()} a tu capital y puedes ampliarla como cualquier colonia.`,
+    });
+    this.#note(`🏴 ¡Has conquistado ${isl.name}!`, 'success');
+    this.world.announce?.(`🏴 ${this.state.name} conquista la ciudad bárbara de ${isl.name}`);
   }
 
   #arriveColonize(m, isl, t) {
@@ -1798,6 +1856,7 @@ export class Game extends EventTarget {
 
 export function garrisonAt(isl, rt, t) {
   const out = {};
+  if (rt.colonizedBy != null) return out; // conquistada: ya no hay bárbaros
   const regen = hours(isl.regenHours ?? 1);
   for (const [id, full] of Object.entries(isl.garrison ?? {})) {
     const n = Math.min(full, (rt.garrison[id] ?? 0) + (full * Math.max(0, t - rt.garrisonAt)) / regen);
