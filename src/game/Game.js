@@ -651,6 +651,25 @@ export class Game extends EventTarget {
     return this.#done();
   }
 
+  /**
+   * Bajas propias en combate: los mercenarios caen los primeros, así que se descuentan de sus
+   * contratos (y al acabar el contrato solo se marchan los que siguen vivos, no tus tropas).
+   */
+  #mercsLost(lost) {
+    if (!this.state.mercs?.length) return;
+    for (const [unit, total] of Object.entries(lost ?? {})) {
+      let n = total;
+      for (const c of this.state.mercs) {
+        if (n <= 0) break;
+        if (c.unit !== unit) continue;
+        const k = Math.min(n, c.count);
+        c.count -= k;
+        n -= k;
+      }
+    }
+    this.state.mercs = this.state.mercs.filter((c) => c.count > 0);
+  }
+
   /** Se acaba el contrato: se van los que queden (primero los de casa, luego los de las flotas). */
   #dismissMercs(c, t) {
     this.state.mercs = (this.state.mercs ?? []).filter((x) => x !== c);
@@ -1096,7 +1115,7 @@ export class Game extends EventTarget {
       cost = colonyCost(colonies + pendingColonies);
       if (!canAfford(s.resources, cost)) reason ||= 'No tienes los recursos para gobernar la ciudad.';
     } else {
-      reason ||= 'Misión desconocida.';
+      reason ||= 'Esa misión no se puede hacer en esta isla.';
     }
     return { ok: !reason, reason, units: sent, seconds, travel, capacity, used, cargo, ships, cost, load, joint };
   }
@@ -1210,8 +1229,10 @@ export class Game extends EventTarget {
       if (!qs.length) return this.#fail('No hay ninguna obra ni investigación en curso.');
       for (const q of qs) q.end = now + (q.end - now) * 0.7;
     } else if (id === 'viento') {
-      if (!s.missions.length) return this.#fail('No tienes flotas en el mar.');
-      for (const m of s.missions) {
+      // Las estacionadas no navegan y las de un ataque conjunto llegan con su jefe
+      const sailing = s.missions.filter((m) => (m.phase === 'ida' && !m.joint) || m.phase === 'vuelta');
+      if (!sailing.length) return this.#fail('No tienes flotas navegando.');
+      for (const m of sailing) {
         if (m.phase === 'ida') m.arrive = now + (m.arrive - now) * 0.5;
         else m.back = now + (m.back - now) * 0.5;
       }
@@ -1727,6 +1748,7 @@ export class Game extends EventTarget {
     h.names = { ...(h.names ?? {}), [this.userId]: this.state.name };
     this.state.stats.kills += killed;
     m.units = result.att.left;
+    this.#mercsLost(result.att.lost);
     this.world.touch?.(isl.id);
     const left = count(h.garrison);
     const outcome = result.winner === 'att' ? 'victoria' : result.winner === 'def' ? 'derrota' : 'empate';
@@ -1939,6 +1961,7 @@ export class Game extends EventTarget {
     rt.garrison = result.def.left;
     rt.garrisonAt = t;
     m.units = result.att.left;
+    this.#mercsLost(result.att.lost);
 
     let loot = null;
     if (result.winner === 'att') {
@@ -2097,6 +2120,7 @@ export class Game extends EventTarget {
       const result = battle({ units: army }, { units: m.units, atkMul, hpMul });
       s.stats.kills += count(result.att.lost);
       m.units = result.def.left;
+      this.#mercsLost(result.def.lost);
       const won = result.winner !== 'att';
       const loot = won ? { oro: 15 * pirata } : null;
       if (loot) add(loot);
@@ -2120,6 +2144,7 @@ export class Game extends EventTarget {
           m.units[id] = n - k;
         }
       }
+      this.#mercsLost(lost);
       Object.assign(report, { title: '¡Una serpiente marina!', text: 'Un monstruo surge de las profundidades y se lleva parte de la flota.', lostUnits: lost, outcome: 'derrota' });
     } else if (roll < 0.97) {
       const hidden = (this.world.islandsNear?.(this.state.home, 600) ?? [])
@@ -2200,6 +2225,9 @@ export class Game extends EventTarget {
       lefts[owner][id] += extra;
     }
     pools.forEach((pool, i) => pool.apply(lefts[i]));
+    const homeLost = {};
+    for (const [id, n] of Object.entries(pools[0].units)) if (n - (lefts[0][id] ?? 0) > 0) homeLost[id] = n - (lefts[0][id] ?? 0);
+    this.#mercsLost(homeLost);
 
     // Cada aliado recibe su propio informe con sus bajas
     const outcome = result.winner === 'att' ? 'derrota' : result.winner === 'def' ? 'victoria' : 'empate';
