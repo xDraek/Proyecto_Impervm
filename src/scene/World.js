@@ -554,9 +554,12 @@ export class World {
      * ¿Cabe aquí algo de radio `size`? Lejos de la orilla, la muralla, las calles (`pad` de margen)
      * y de lo que ya hay. Los árboles son «blandos»: se pueden tocar entre ellos y con las matas.
      */
+    // Zonas enteras donde no va nada más (ni hierba): los campos de la granja
+    const zones = [];
     const free = (p, pad = 0.7, size = 0) => {
       const r = Math.hypot(p.x, p.z);
       if (r + size > coastAt(p) - 1.3) return false;
+      if (zones.some((inZone) => inZone(p, size + 0.15))) return false;
       if (r + size > ROAD_R - 1.0 && r - size < WALL_R + 0.9) return false;
       for (const rd of this.roads) {
         const a = THREE.MathUtils.degToRad(rd.deg);
@@ -569,6 +572,7 @@ export class World {
     // La hierba crece en todo lo que no sea edificio, calle, muralla o montaña (también bajo los árboles)
     const fixed = blockers.slice();
     const lawn = (p) => {
+      if (zones.some((inZone) => inZone(p, 0.05))) return false;
       const r = Math.hypot(p.x, p.z);
       if (r > coastAt(p) - 0.9 || (r > ROAD_R - 0.9 && r < WALL_R + 0.8)) return false;
       for (const rd of this.roads) {
@@ -588,19 +592,127 @@ export class World {
       decor.add(obj);
     };
 
-    // Campos de cultivo y un prado con ovejas junto a la granja
+    // Campos de cultivo agrupados en la pradera de detrás de la granja: un mosaico de parcelas
+    // pegadas unas a otras (trigo, cebada, hortalizas, barbecho y amapolas en las lindes) sin hierba
+    // ni árboles por medio, una cerca de piedra seca alrededor, almiares y un espantapájaros
     const farm = L.granja;
-    const crops = ['#e3c25a', '#cfb24a', '#8fbf4a', '#d9b44a'];
+    const farmPos = polar(farm.r, farm.angle);
+    const farmRot = Math.atan2(-farmPos.x, -farmPos.z);
+    // De las coordenadas de la granja (z negativa: hacia fuera de la ciudad) a las de la isla
+    const fromFarm = (x, z) =>
+      new THREE.Vector3(farmPos.x + x * Math.cos(farmRot) + z * Math.sin(farmRot), 0, farmPos.z - x * Math.sin(farmRot) + z * Math.cos(farmRot));
+    const fieldRand = rng(91);
+    const CROPS = [
+      { kind: 'trigo', colors: ['#e3c25a', '#d9b44a', '#ecd06a'], h: 0.24 },
+      { kind: 'cebada', colors: ['#cdbf6a', '#c2b55e', '#d6c977'], h: 0.2 },
+      { kind: 'huerta', colors: ['#5f9a3a', '#6fae4a', '#4f8a32'], h: 0.14 },
+      { kind: 'trigo', colors: ['#e3c25a', '#d9b44a', '#ecd06a'], h: 0.24 },
+      { kind: 'barbecho', colors: ['#6e4f2c', '#7a5a34'], h: 0.06 },
+      { kind: 'verde', colors: ['#8fbf4a', '#86b544', '#9ac955'], h: 0.16 },
+    ];
+    const plots = [];
+    const FW = 1.6;
+    const FD = 1.3;
+    // Lo que ocupa todo el mosaico, en coordenadas de la granja
+    const area = { x0: -2.5 * FW, x1: 2.5 * FW, z0: -(3.35 + 2.5 * FD), z1: -(3.35 - 0.5 * FD) };
+    const toFarm = (q) => {
+      const dx = q.x - farmPos.x;
+      const dz = q.z - farmPos.z;
+      return { x: dx * Math.cos(farmRot) - dz * Math.sin(farmRot), z: dx * Math.sin(farmRot) + dz * Math.cos(farmRot) };
+    };
     for (let ring = 0; ring < 3; ring++) {
       for (let k = -2; k <= 2; k++) {
-        const p = polar(farm.r + 3.2 + ring * 1.8, farm.angle + k * 9);
-        if (!free(p, 0.4, 0.8)) continue;
-        blockers.push({ p, r: 1.0 });
+        const x = k * FW;
+        const z = -(3.35 + ring * FD);
+        const p = fromFarm(x, z);
+        // Detrás de la granja es su sitio: solo se salta una parcela si se sale a la playa o pisa un monte
+        const offIsland = Math.hypot(p.x, p.z) + 0.9 > coastAt(p) - 1.3;
+        if (offIsland || this.mountains.some((m) => polar(m.r, m.angle).distanceTo(p) < m.radius + 1.4)) continue;
+        plots.push({ x, z, p });
+        const crop = CROPS[Math.floor(fieldRand() * CROPS.length)];
+        const w = FW;
+        const d = FD;
         const field = new THREE.Group();
-        field.add(box(1.6, 0.1, 1.25, '#8a6a46'));
-        for (let row = 0; row < 4; row++) field.add(box(1.5, 0.12, 0.18, crops[(ring + k + 9) % 4], 0, 0.1, -0.45 + row * 0.3));
-        place(field, p, THREE.MathUtils.degToRad(farm.angle + k * 9));
+        field.add(box(w, 0.06, d, '#7a5a34'));
+        const rows = crop.kind === 'huerta' ? 4 : 6;
+        for (let row = 0; row < rows; row++) {
+          const rz = -d / 2 + 0.12 + (row * (d - 0.24)) / (rows - 1);
+          if (crop.kind === 'huerta') {
+            // Hileras de coles y lechugas
+            for (let c = 0; c < 7; c++) {
+              const head = mesh(new THREE.DodecahedronGeometry(0.08 + fieldRand() * 0.03), crop.colors[(row + c) % 3]);
+              head.position.set(-w / 2 + 0.14 + c * ((w - 0.28) / 6), 0.1, rz);
+              head.scale.y = 0.75;
+              field.add(head);
+            }
+          } else if (crop.kind === 'barbecho') {
+            field.add(box(w - 0.08, 0.05, 0.08, crop.colors[row % 2], 0, 0.06, rz));
+          } else {
+            field.add(box(w - 0.1, crop.h * (0.85 + fieldRand() * 0.3), 0.13, crop.colors[row % 3], 0, 0.06, rz));
+          }
+        }
+        // Amapolas en alguna linde
+        if (crop.kind === 'trigo' && fieldRand() < 0.6) {
+          for (let f = 0; f < 6; f++) {
+            const poppy = mesh(new THREE.DodecahedronGeometry(0.035), '#d23a2a');
+            poppy.position.set(-w / 2 + fieldRand() * w, 0.12, d / 2 - 0.03);
+            field.add(poppy);
+          }
+        }
+        place(field, p.clone().setY(0.01), farmRot);
       }
+    }
+    // Todo el mosaico (y la cerca) queda libre de hierba, árboles, casas y piedras
+    zones.push((q, margin) => {
+      const f = toFarm(q);
+      return f.x > area.x0 - 0.45 - margin && f.x < area.x1 + 0.45 + margin && f.z > area.z0 - 0.45 - margin && f.z < area.z1 + 0.4 + margin;
+    });
+    // Cerca de piedra seca alrededor del mosaico (con su entrada por el camino)
+    if (plots.length) {
+      const xs = plots.map((f) => f.x);
+      const zs = plots.map((f) => f.z);
+      const x0 = Math.min(...xs) - FW / 2 - 0.22;
+      const x1 = Math.max(...xs) + FW / 2 + 0.22;
+      const z0 = Math.min(...zs) - FD / 2 - 0.22;
+      const z1 = Math.max(...zs) + FD / 2 + 0.22;
+      const wall = (ax, az, bx, bz) => {
+        const n = Math.max(1, Math.round(Math.hypot(bx - ax, bz - az) / 0.5));
+        for (let i = 0; i < n; i++) {
+          const t = (i + 0.5) / n;
+          const q = fromFarm(ax + (bx - ax) * t, az + (bz - az) * t);
+          const stone = new THREE.Mesh(new THREE.DodecahedronGeometry(0.2), mat(i % 3 ? C.stone : C.stoneDark));
+          stone.position.set(q.x, 0.08, q.z);
+          stone.scale.set(1.4, 0.75, 1.0);
+          stone.rotation.y = fieldRand() * Math.PI;
+          decor.add(stone);
+        }
+      };
+      wall(x0, z0, x1, z0);
+      wall(x0, z0, x0, z1);
+      wall(x1, z0, x1, z1);
+      // Por delante (hacia la casa) la cerca deja paso al camino
+      wall(x0, z1, -0.6, z1);
+      wall(0.3, z1, x1, z1);
+      // Almiares en la linde y un espantapájaros en un trigal
+      for (const [hx, hz] of [[x1 + 1.05, z0 + 0.6], [x1 + 1.1, z0 + 1.45]]) {
+        const q = fromFarm(hx, hz);
+        if (!free(q, 0.2, 0.35)) continue;
+        blockers.push({ p: q, r: 0.4 });
+        const stack = new THREE.Group();
+        stack.add(cyl(0.28, 0.32, 0.34, 9, '#d9b45a'));
+        const top = mesh(new THREE.ConeGeometry(0.3, 0.42, 9), '#cfa84e');
+        top.position.y = 0.55;
+        stack.add(top);
+        place(stack, q);
+      }
+      const mid = plots[Math.floor(plots.length / 2)];
+      const crow = new THREE.Group();
+      crow.add(box(0.04, 0.75, 0.04, C.woodDark), box(0.5, 0.04, 0.04, C.woodDark, 0, 0.55, 0));
+      crow.add(box(0.2, 0.26, 0.1, '#8a5a3a', 0, 0.42, 0));
+      const hat = mesh(new THREE.ConeGeometry(0.13, 0.12, 7), '#c9a65a');
+      hat.position.y = 0.82;
+      crow.add(hat);
+      place(crow, mid.p.clone().setY(0.05), farmRot);
     }
 
     // Barrios: las casas van apareciendo al subir el ayuntamiento (primero dentro de la muralla)
@@ -854,7 +966,8 @@ export class World {
       if (id !== 'ayuntamiento') root.rotation.y = Math.atan2(-pos.x, -pos.z);
       this.scene.add(root);
 
-      if (id !== 'ayuntamiento' && id !== 'puerto' && id !== 'muralla') {
+      // La granja no tiene solar: la casa y la era están sobre la hierba
+      if (id !== 'ayuntamiento' && id !== 'puerto' && id !== 'muralla' && id !== 'granja') {
         const plot = cyl(2.3, 2.4, 0.12, 28, C.dirt);
         plot.castShadow = false;
         root.add(plot);

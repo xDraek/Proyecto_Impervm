@@ -686,15 +686,18 @@ function windmill() {
     g.add(blossom);
   }
 
-  // Velas: eje de madera hacia delante y ocho varas con su vela triangular, atadas por cabos
+  // Velas: el eje de madera sale de la torre (quieto) y en su punta giran solo las aspas: ocho
+  // varas con su vela triangular de lona, atadas por cabos
   const hub = new THREE.Group();
   const axle = cyl(0.07, 0.09, 0.42, 8, C.wood, 0, 0, 0);
   axle.rotation.x = Math.PI / 2;
-  axle.position.z = 0.0;
+  axle.position.z = -0.2;
   hub.add(axle);
   const cap = mesh(new THREE.SphereGeometry(0.1, 8, 6), C.woodDark);
   cap.position.z = 0.24;
   hub.add(cap);
+  const rotor = new THREE.Group();
+  hub.add(rotor);
   const N = 8;
   const L = 1.25;
   const canvas = new THREE.MeshStandardMaterial({ color: '#efe4c6', roughness: 0.95, side: THREE.DoubleSide, flatShading: true });
@@ -704,7 +707,7 @@ function windmill() {
     const spar = box(0.035, L, 0.035, C.woodLight, 0, 0, 0);
     spar.position.set(0, 0, 0.18);
     spar.rotation.z = a;
-    hub.add(spar);
+    rotor.add(spar);
     // Vela: triángulo de la vara a un punto adelantado del giro, combado hacia atrás
     const dir = (t, off = 0) => new THREE.Vector3(-Math.sin(a + off) * t, Math.cos(a + off) * t, 0.18);
     const p0 = dir(0.22);
@@ -714,14 +717,14 @@ function windmill() {
     geo.computeVertexNormals();
     const sail = new THREE.Mesh(geo, canvas);
     sail.castShadow = true;
-    hub.add(sail);
+    rotor.add(sail);
     rope.push(p1);
   }
   // Cabos de punta a punta y del eje a cada punta
   const ropePts = [];
   rope.forEach((p, i) => ropePts.push(p, rope[(i + 1) % N], new THREE.Vector3(0, 0, 0.45), p));
-  hub.add(new THREE.LineSegments(new THREE.BufferGeometry().setFromPoints(ropePts), new THREE.LineBasicMaterial({ color: '#8a7350' })));
-  hub.userData.spin = { axis: 'z', speed: 0.9 };
+  rotor.add(new THREE.LineSegments(new THREE.BufferGeometry().setFromPoints(ropePts), new THREE.LineBasicMaterial({ color: '#8a7350' })));
+  rotor.userData.spin = { axis: 'z', speed: 0.9 };
   // El eje sale de lo alto de la torre, hacia fuera y a un lado de la puerta
   const mount = new THREE.Group();
   mount.position.set(0, top - 0.12, 0);
@@ -733,36 +736,103 @@ function windmill() {
   return g;
 }
 
+/**
+ * Casa del labrador como las de las Cícladas, a juego con el molino: cubos encalados de esquinas
+ * suaves, azotea con pretil, puerta y contraventanas azules con marcos de piedra, escalera
+ * exterior a la azotea, pérgola con parra, ánforas y buganvilla.
+ */
+function farmhouse(x, z) {
+  const g = new THREE.Group();
+  const blue = '#2c5ea8';
+  // Zócalo de piedra y dos cuerpos encalados, el de atrás más alto
+  g.add(box(1.7, 0.12, 1.4, C.stone, 0, 0, 0));
+  g.add(box(1.6, 1.0, 1.3, C.white, 0, 0.12, 0));
+  g.add(box(0.85, 0.55, 0.8, C.white, 0.32, 1.12, -0.2));
+  // Pretiles de las azoteas con su remate redondeado
+  for (const [w, d, y, px, pz] of [[1.62, 1.32, 1.12, 0, 0], [0.87, 0.82, 1.67, 0.32, -0.2]]) {
+    g.add(box(w, 0.1, d, C.wall, px, y, pz));
+    g.add(box(w - 0.12, 0.02, d - 0.12, '#d9c7a4', px, y + 0.06, pz));
+  }
+  // Puerta azul en arco con jambas de piedra y escalones
+  g.add(box(0.46, 0.72, 0.05, C.stone, -0.35, 0.12, 0.66));
+  g.add(box(0.36, 0.64, 0.06, blue, -0.35, 0.12, 0.665));
+  const arch = mesh(new THREE.CylinderGeometry(0.18, 0.18, 0.06, 12, 1, false, 0, Math.PI), blue);
+  arch.rotation.set(Math.PI / 2, 0, Math.PI / 2);
+  arch.position.set(-0.35, 0.76, 0.665);
+  g.add(arch);
+  g.add(box(0.6, 0.06, 0.24, C.stone, -0.35, 0.06, 0.78), box(0.66, 0.06, 0.34, C.stoneDark, -0.35, 0, 0.82));
+  // Ventanas con contraventanas azules y marco de piedra
+  for (const [wx, wy, wz, ry] of [[0.35, 0.55, 0.66, 0], [0.81, 0.55, 0.0, Math.PI / 2], [0.32, 1.32, 0.21, 0]]) {
+    const w = new THREE.Group();
+    w.add(box(0.3, 0.3, 0.04, C.stone, 0, 0, 0), box(0.2, 0.22, 0.05, C.dark, 0, 0.04, 0.005, WINDOW_GLOW));
+    for (const s of [-1, 1]) w.add(box(0.1, 0.24, 0.03, blue, s * 0.17, 0.03, 0.03));
+    w.position.set(wx, wy, wz);
+    w.rotation.y = ry;
+    g.add(w);
+  }
+  // Escalera de obra a la azotea, por el lado
+  for (let k = 0; k < 5; k++) g.add(box(0.28, 0.2 * (k + 1), 0.2, C.white, -0.66, 0.12, -0.5 + k * 0.2));
+  // Pérgola con parra delante de la puerta
+  for (const px of [-0.75, 0.05]) g.add(box(0.06, 0.95, 0.06, C.woodDark, px, 0, 1.05));
+  g.add(box(0.95, 0.05, 0.5, C.woodDark, -0.35, 0.95, 0.85));
+  for (let k = 0; k < 7; k++) {
+    const leaf = mesh(new THREE.DodecahedronGeometry(0.12), k % 3 ? '#5f8f3a' : '#4f7d30');
+    leaf.position.set(-0.75 + k * 0.13, 1.02, 0.7 + (k % 2) * 0.28);
+    leaf.scale.set(1.3, 0.55, 1.2);
+    g.add(leaf);
+  }
+  // Ánforas, una tinaja grande y buganvilla por la fachada
+  g.add(amphora(0.3, 0.12, 0.85, '#b9643a', 0.85), amphora(0.55, 0.12, 0.8, '#a5542f', 0.7));
+  g.add(cyl(0.16, 0.12, 0.34, 10, '#b06a3a', -0.95, 0.12, 0.85));
+  const flowers = ['#d6336c', '#e64980', '#c2255c', '#5f8f3a'];
+  for (let k = 0; k < 14; k++) {
+    const blossom = mesh(new THREE.DodecahedronGeometry(0.06 + (k % 3) * 0.012), flowers[k % 4]);
+    blossom.position.set(0.05 + (k % 4) * 0.07, 0.2 + Math.floor(k / 4) * 0.22 + (k % 2) * 0.05, 0.67);
+    g.add(blossom);
+  }
+  // Una chimenea encalada
+  g.add(box(0.18, 0.4, 0.18, C.white, 0.6, 1.67, -0.45), box(0.24, 0.05, 0.24, C.wall, 0.6, 2.07, -0.45));
+  g.position.set(x, 0, z);
+  return g;
+}
+
 function granja(level) {
   const g = new THREE.Group();
-  // Granero
-  g.add(box(1.6, 1.1, 1.3, C.barn, -0.9, 0, -0.8));
-  g.add(gableRoof(1.9, 0.8, 1.6, C.roofRed, -0.9, 1.1, -0.8));
-  g.add(box(0.5, 0.7, 0.05, C.white, -0.9, 0, -0.14));
-  // Campos de trigo: más parcelas con el nivel
-  const fields = [
-    [0.9, -0.9],
-    [0.9, 0.4],
-    [-0.6, 1.0],
-    [0.9, 1.6],
-    [-1.9, 0.6],
-  ];
-  const n = Math.min(fields.length, 1 + Math.floor(level / 2));
-  for (let i = 0; i < n; i++) {
-    const [x, z] = fields[i];
-    g.add(box(1.2, 0.06, 1.0, '#7a5a34', x, 0, z));
-    for (let r = 0; r < 4; r++) g.add(box(1.1, 0.22, 0.12, i % 2 ? '#e3c25a' : '#cfb24a', x, 0.06, z - 0.36 + r * 0.24));
+  // Casa del labrador con su era de tierra apisonada delante (los campos están en la pradera de
+  // detrás, los pone la escena)
+  g.add(farmhouse(-0.9, -0.8));
+  const yard = cyl(1.35, 1.45, 0.03, 14, '#b89a6a', 0.75, 0, 0.35);
+  yard.scale.set(1, 1, 0.75);
+  g.add(yard);
+  // Almiares y una carreta en la era (más almiares con el nivel)
+  const stacks = Math.min(3, 1 + Math.floor(level / 4));
+  for (let i = 0; i < stacks; i++) {
+    const hx = 0.35 + i * 0.55;
+    g.add(cyl(0.24, 0.27, 0.32, 9, '#d9b45a', hx, 0, 0.75));
+    const top = mesh(new THREE.ConeGeometry(0.26, 0.34, 9), '#cfa84e');
+    top.position.set(hx, 0.48, 0.75);
+    g.add(top);
   }
+  const cartG = new THREE.Group();
+  cartG.add(box(0.7, 0.08, 0.45, C.wood, 0, 0.22, 0), box(0.04, 0.04, 0.6, C.woodDark, 0, 0.2, 0.45));
+  for (const s of [-1, 1]) {
+    const wheel = cyl(0.17, 0.17, 0.05, 10, C.woodDark, 0, 0, 0);
+    wheel.rotation.z = Math.PI / 2;
+    wheel.position.set(s * 0.38, 0.17, 0);
+    cartG.add(wheel);
+  }
+  cartG.add(box(0.5, 0.16, 0.3, '#e3c25a', 0, 0.3, 0));
+  cartG.position.set(1.55, 0, -0.35);
+  cartG.rotation.y = 0.5;
+  g.add(cartG);
   // Molino de las Cícladas a partir del nivel 3
   if (level >= 3) {
     const mill = windmill();
-    mill.position.set(-2.5, 0, -1.85);
+    mill.position.set(-2.5, 0, -1.6);
     g.add(mill);
   }
-  // Campesino trabajando el primer campo
-  g.add(worker('azada', 0.15, -0.45, 0.7, -0.9, { color: '#3f6fa8', speed: 2.2, base: 0.05, amp: 0.55 }));
-  // Cerca
-  g.add(box(3.6, 0.3, 0.05, C.woodLight, 0, 0.1, 2.15));
+  // Campesino cavando en el primer campo de la pradera, detrás de la casa
+  g.add(worker('azada', 0.5, -3.35, 0.5, -3.9, { color: '#3f6fa8', speed: 2.2, base: 0.05, amp: 0.55 }));
   return g;
 }
 
@@ -1520,7 +1590,8 @@ function astillero(level) {
 const FACTORIES = { ayuntamiento, aserradero, cantera, granja, mina, fundicion, mercado, almacen, academia, templo, cuartel, puerto, muralla, coloso, taberna, forja, torre, faro, astillero };
 
 // Los que no tienen sitio alrededor (están en la costa, sobre rocas o rodean la isla)
-const NO_ADORN = new Set(['puerto', 'muralla', 'faro', 'astillero', 'coloso']);
+// Sin enlosado delante: los del mar, la muralla, el coloso y la granja (que está en el campo)
+const NO_ADORN = new Set(['puerto', 'muralla', 'faro', 'astillero', 'coloso', 'granja']);
 
 /**
  * Escalones de prosperidad comunes a todos los edificios: con el nivel ganan un enlosado
