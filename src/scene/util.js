@@ -106,6 +106,8 @@ export class Batch {
     obj.traverse((o) => {
       if (!o.isMesh) return;
       let g = o.geometry.index ? o.geometry.toNonIndexed() : o.geometry.clone();
+      // Piezas que ya traen su color por vértice (cascos de barco, figuras horneadas…): se respeta
+      const own = o.material.vertexColors ? g.attributes.color : null;
       for (const k of Object.keys(g.attributes)) if (k !== 'position' && k !== 'normal') g.deleteAttribute(k);
       g.applyMatrix4(o.matrixWorld);
       if (this.glowMaterial && o.material === this.glowMaterial) {
@@ -115,7 +117,13 @@ export class Batch {
       const c = o.material.color ?? new THREE.Color('#ffffff');
       const n = g.attributes.position.count;
       const colors = new Float32Array(n * 3);
-      for (let i = 0; i < n; i++) c.toArray(colors, i * 3);
+      for (let i = 0; i < n; i++) {
+        if (own) {
+          colors[i * 3] = own.getX(i) * c.r;
+          colors[i * 3 + 1] = own.getY(i) * c.g;
+          colors[i * 3 + 2] = own.getZ(i) * c.b;
+        } else c.toArray(colors, i * 3);
+      }
       g.setAttribute('color', new THREE.BufferAttribute(colors, 3));
       this.colored.push(g);
     });

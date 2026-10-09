@@ -944,10 +944,8 @@ export class World {
       boat.scale.setScalar(1.7);
       decor.add(boat);
       onSand(boat.position, 2.0);
-      // Red tendida a secar
-      const net = new THREE.Group();
-      net.add(box(0.06, 0.8, 0.06, C.woodDark, -0.6, 0, 0), box(0.06, 0.8, 0.06, C.woodDark, 0.6, 0, 0), box(1.2, 0.5, 0.03, '#c9b48a', 0, 0.25, 0));
-      place(net, np, THREE.MathUtils.degToRad(a));
+      // Red de pesca tendida a secar entre dos palos, con sus corchos, y otra amontonada al pie
+      place(dryingNet(), np, THREE.MathUtils.degToRad(a));
       onSand(np, 0.9);
     }
     // Palmeras: ni encima de una barca o cabaña ni pegadas unas a otras
@@ -2614,6 +2612,54 @@ function amphoraPot(x, z) {
   const g = new THREE.Group();
   g.add(cyl(0.1, 0.07, 0.16, 7, '#b9643a', x, 0, z));
   g.add(box(0.16, 0.1, 0.16, '#e86a8a', x, 0.16, z));
+  return g;
+}
+
+/**
+ * Red de pesca tendida a secar: dos palos con un cabo, la malla colgando combada (hilos cruzados),
+ * corchos en la relinga y un montón de red al pie.
+ */
+function dryingNet() {
+  const g = new THREE.Group();
+  const W = 1.3;
+  const H = 0.95;
+  for (const x of [-W / 2, W / 2]) g.add(box(0.05, H + 0.1, 0.05, C.woodDark, x, 0, 0));
+  g.add(box(W, 0.02, 0.02, '#8a7350', 0, H, 0));
+  const twine = '#7a6a48';
+  // Comba de la red: más baja en el centro
+  const sag = (x) => 0.12 * (1 - (2 * x / W) ** 2);
+  const cols = 9;
+  for (let i = 0; i < cols; i++) {
+    const x = -W / 2 + 0.06 + (i * (W - 0.12)) / (cols - 1);
+    const len = H - 0.18 - sag(x);
+    g.add(box(0.012, len, 0.012, twine, x, H - len, 0.01));
+  }
+  for (let j = 0; j < 6; j++) {
+    const y = H - 0.05 - j * 0.12;
+    for (let i = 0; i < cols - 1; i++) {
+      const x0 = -W / 2 + 0.06 + (i * (W - 0.12)) / (cols - 1);
+      const x1 = x0 + (W - 0.12) / (cols - 1);
+      const y0 = y - sag(x0) * (j / 5);
+      const y1 = y - sag(x1) * (j / 5);
+      const seg = box(Math.hypot(x1 - x0, y1 - y0), 0.012, 0.012, twine, 0, 0, 0);
+      seg.position.set((x0 + x1) / 2, (y0 + y1) / 2, 0.01);
+      seg.rotation.z = Math.atan2(y1 - y0, x1 - x0);
+      g.add(seg);
+    }
+  }
+  // Corchos en lo alto
+  for (let i = 0; i < 6; i++) {
+    const cork = mesh(new THREE.SphereGeometry(0.035, 6, 4), i % 2 ? '#d98a3a' : '#e8d2a0');
+    cork.position.set(-W / 2 + 0.15 + i * ((W - 0.3) / 5), H - 0.03, 0.02);
+    g.add(cork);
+  }
+  // Red amontonada al pie
+  for (let k = 0; k < 4; k++) {
+    const lump = mesh(new THREE.DodecahedronGeometry(0.14 - k * 0.02), k % 2 ? '#8a7350' : '#7a6a48');
+    lump.position.set(0.25 + k * 0.08, 0.05, 0.28 + (k % 2) * 0.08);
+    lump.scale.y = 0.45;
+    g.add(lump);
+  }
   return g;
 }
 
