@@ -600,6 +600,139 @@ function almacen(level) {
   return g;
 }
 
+/**
+ * Molino de las islas griegas: torre redonda encalada, tejado cónico de paja con su remate, una
+ * greca azul bajo el alero, puerta y ventanuco azules con marco de piedra, escalones, ánforas y
+ * buganvilla; delante, el eje de madera con ocho velas triangulares de lona atadas con cabos.
+ */
+function windmill() {
+  const g = new THREE.Group();
+  const R = 0.52;
+  const H = 1.95;
+  const blue = '#2c5ea8';
+  // Zócalo de piedra, torre encalada (un poco más estrecha arriba) y cornisa
+  g.add(cyl(R + 0.1, R + 0.14, 0.16, 16, C.stone, 0, 0, 0));
+  g.add(cyl(R - 0.04, R, H, 16, C.white, 0, 0.16, 0));
+  // Greca azul bajo el alero: banda azul con filetes blancos y la llave en blanco
+  const top = 0.16 + H;
+  g.add(cyl(R - 0.02, R - 0.02, 0.2, 16, blue, 0, top - 0.3, 0));
+  for (const y of [top - 0.31, top - 0.11]) g.add(cyl(R - 0.01, R - 0.01, 0.025, 16, C.white, 0, y, 0));
+  for (let k = 0; k < 14; k++) {
+    const a = (k / 14) * Math.PI * 2;
+    const key = new THREE.Group();
+    key.add(box(0.07, 0.022, 0.012, C.white, 0, 0.05, 0), box(0.022, 0.07, 0.012, C.white, 0.024, 0, 0), box(0.04, 0.022, 0.012, C.white, 0.004, 0, 0));
+    key.position.set(Math.sin(a) * (R - 0.012), top - 0.255, Math.cos(a) * (R - 0.012));
+    key.rotation.y = a;
+    g.add(key);
+  }
+  // Tejado cónico de paja: alero grueso, cono con relieve y remate de madera
+  g.add(cyl(R + 0.08, R + 0.1, 0.1, 16, '#9c7a45', 0, top - 0.06, 0));
+  const roofGeo = new THREE.ConeGeometry(R + 0.1, 0.78, 18, 4);
+  const rp = roofGeo.attributes.position;
+  for (let i = 0; i < rp.count; i++) {
+    const y = rp.getY(i);
+    if (y > 0.38) continue;
+    const k = 1 + Math.sin(i * 12.9898) * 0.035;
+    rp.setX(i, rp.getX(i) * k);
+    rp.setZ(i, rp.getZ(i) * k);
+  }
+  roofGeo.computeVertexNormals();
+  const roof = mesh(roofGeo, '#c4a066');
+  roof.position.set(0, top + 0.43, 0);
+  g.add(roof);
+  for (const [y, r] of [[top + 0.2, R - 0.02], [top + 0.45, R * 0.62]]) {
+    const ring = mesh(new THREE.TorusGeometry(r, 0.018, 4, 18), '#a8844e');
+    ring.rotation.x = Math.PI / 2;
+    ring.position.y = y;
+    g.add(ring);
+  }
+  g.add(cyl(0.03, 0.05, 0.16, 6, C.woodDark, 0, top + 0.8, 0));
+  const knob = mesh(new THREE.SphereGeometry(0.05, 8, 6), C.woodDark);
+  knob.position.y = top + 1.0;
+  g.add(knob);
+
+  // Puerta azul con dintel y jambas de piedra (de lado, para que las velas no la tapen)
+  const door = new THREE.Group();
+  door.add(box(0.36, 0.72, 0.06, C.stone, 0, 0.16, 0), box(0.28, 0.66, 0.07, blue, 0, 0.16, 0.01));
+  door.add(box(0.42, 0.07, 0.08, C.stoneDark, 0, 0.86, 0.01));
+  for (let k = 0; k < 4; k++) door.add(box(0.27, 0.012, 0.075, '#244d8a', 0, 0.24 + k * 0.16, 0.012));
+  // Escalones
+  door.add(box(0.5, 0.08, 0.22, C.stone, 0, 0.08, 0.14), box(0.56, 0.08, 0.3, C.stoneDark, 0, 0, 0.18));
+  // Hacia fuera de la ciudad (el edificio mira a la plaza), que es por donde se ve
+  const aDoor = Math.PI - 1.0;
+  door.position.set(Math.sin(aDoor) * R, 0, Math.cos(aDoor) * R);
+  door.rotation.y = aDoor;
+  g.add(door);
+  // Ventanuco con marco de piedra y contraventana azul
+  const win = new THREE.Group();
+  win.add(box(0.22, 0.22, 0.05, C.stone, 0, 0, 0), box(0.15, 0.15, 0.06, blue, 0, 0.035, 0.005));
+  const aWin = Math.PI - 0.4;
+  win.position.set(Math.sin(aWin) * (R - 0.03), 1.25, Math.cos(aWin) * (R - 0.03));
+  win.rotation.y = aWin;
+  g.add(win);
+  // Ánforas junto a la puerta y buganvilla trepando por la pared
+  const by = (a, d) => [Math.sin(a) * d, Math.cos(a) * d];
+  for (const [a, d, c, k] of [[aDoor - 0.5, R + 0.22, '#b9643a', 0.9], [aDoor + 0.55, R + 0.2, '#a5542f', 0.75]]) {
+    const [x, z] = by(a, d);
+    g.add(amphora(x, 0.16, z, c, k));
+  }
+  const flowers = ['#d6336c', '#e64980', '#c2255c'];
+  for (let k = 0; k < 18; k++) {
+    const a = aDoor - 0.62 + (k % 6) * 0.08 + Math.sin(k * 3.1) * 0.05;
+    const y = 0.3 + Math.floor(k / 3) * 0.22 + Math.sin(k * 1.7) * 0.06;
+    const [x, z] = by(a, R + 0.02);
+    const blossom = mesh(new THREE.DodecahedronGeometry(0.06 + (k % 3) * 0.015), k % 4 === 0 ? '#5f8f3a' : flowers[k % 3]);
+    blossom.position.set(x, y, z);
+    g.add(blossom);
+  }
+
+  // Velas: eje de madera hacia delante y ocho varas con su vela triangular, atadas por cabos
+  const hub = new THREE.Group();
+  const axle = cyl(0.07, 0.09, 0.42, 8, C.wood, 0, 0, 0);
+  axle.rotation.x = Math.PI / 2;
+  axle.position.z = 0.0;
+  hub.add(axle);
+  const cap = mesh(new THREE.SphereGeometry(0.1, 8, 6), C.woodDark);
+  cap.position.z = 0.24;
+  hub.add(cap);
+  const N = 8;
+  const L = 1.25;
+  const canvas = new THREE.MeshStandardMaterial({ color: '#efe4c6', roughness: 0.95, side: THREE.DoubleSide, flatShading: true });
+  const rope = [];
+  for (let k = 0; k < N; k++) {
+    const a = (k / N) * Math.PI * 2;
+    const spar = box(0.035, L, 0.035, C.woodLight, 0, 0, 0);
+    spar.position.set(0, 0, 0.18);
+    spar.rotation.z = a;
+    hub.add(spar);
+    // Vela: triángulo de la vara a un punto adelantado del giro, combado hacia atrás
+    const dir = (t, off = 0) => new THREE.Vector3(-Math.sin(a + off) * t, Math.cos(a + off) * t, 0.18);
+    const p0 = dir(0.22);
+    const p1 = dir(L);
+    const p2 = dir(L * 0.97, 0.36).setZ(0.12);
+    const geo = new THREE.BufferGeometry().setFromPoints([p0, p1, p2]);
+    geo.computeVertexNormals();
+    const sail = new THREE.Mesh(geo, canvas);
+    sail.castShadow = true;
+    hub.add(sail);
+    rope.push(p1);
+  }
+  // Cabos de punta a punta y del eje a cada punta
+  const ropePts = [];
+  rope.forEach((p, i) => ropePts.push(p, rope[(i + 1) % N], new THREE.Vector3(0, 0, 0.45), p));
+  hub.add(new THREE.LineSegments(new THREE.BufferGeometry().setFromPoints(ropePts), new THREE.LineBasicMaterial({ color: '#8a7350' })));
+  hub.userData.spin = { axis: 'z', speed: 0.9 };
+  // El eje sale de lo alto de la torre, hacia fuera y a un lado de la puerta
+  const mount = new THREE.Group();
+  mount.position.set(0, top - 0.12, 0);
+  mount.rotation.y = Math.PI + 0.5;
+  hub.position.set(0, 0, R + 0.12);
+  mount.add(hub);
+  g.add(mount);
+  g.scale.setScalar(1.05);
+  return g;
+}
+
 function granja(level) {
   const g = new THREE.Group();
   // Granero
@@ -620,21 +753,11 @@ function granja(level) {
     g.add(box(1.2, 0.06, 1.0, '#7a5a34', x, 0, z));
     for (let r = 0; r < 4; r++) g.add(box(1.1, 0.22, 0.12, i % 2 ? '#e3c25a' : '#cfb24a', x, 0.06, z - 0.36 + r * 0.24));
   }
-  // Molino a partir del nivel 3
+  // Molino de las Cícladas a partir del nivel 3
   if (level >= 3) {
-    g.add(cyl(0.32, 0.45, 1.9, 8, C.wall, -2.0, 0, -1.4));
-    const cap = mesh(new THREE.ConeGeometry(0.45, 0.6, 8), C.roofRed);
-    cap.position.set(-2.0, 2.2, -1.4);
-    g.add(cap);
-    const hub = new THREE.Group();
-    hub.position.set(-2.0, 1.75, -0.98);
-    for (let k = 0; k < 4; k++) {
-      const blade = box(0.16, 1.1, 0.03, C.white, 0, 0, 0);
-      blade.rotation.z = (k * Math.PI) / 2;
-      hub.add(blade);
-    }
-    hub.userData.spin = { axis: 'z', speed: 1.4 };
-    g.add(hub);
+    const mill = windmill();
+    mill.position.set(-2.5, 0, -1.85);
+    g.add(mill);
   }
   // Campesino trabajando el primer campo
   g.add(worker('azada', 0.15, -0.45, 0.7, -0.9, { color: '#3f6fa8', speed: 2.2, base: 0.05, amp: 0.55 }));

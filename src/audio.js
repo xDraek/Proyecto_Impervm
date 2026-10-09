@@ -6,11 +6,14 @@
 const MUTE_KEY = 'imperium.muted';
 const MUSIC_KEY = 'imperium.music';
 const MUSIC_VOLUME_KEY = 'imperium.musicVolume';
+const AMBIENT_VOLUME_KEY = 'imperium.ambientVolume';
 // Volumen de la música a tope (el deslizador va de 0 a 1 sobre esto)
 const MUSIC_MAX = 0.65;
 
 let ctx = null;
 let master = null;
+// El mar, las gaviotas, la lluvia y los truenos pasan por aquí: su volumen lo elige el jugador
+let ambientBus = null;
 let ambience = null;
 let muted = readMuted();
 
@@ -30,6 +33,9 @@ function ensure() {
   master = ctx.createGain();
   master.gain.value = muted ? 0 : 0.6;
   master.connect(ctx.destination);
+  ambientBus = ctx.createGain();
+  ambientBus.gain.value = ambientVolume();
+  ambientBus.connect(master);
   startAmbience();
   if (musicOn()) startMusic();
   return ctx;
@@ -55,6 +61,27 @@ export function setMuted(value) {
 }
 
 // ── Ambiente: oleaje y gaviotas ──────────────────────────────────────────────
+
+/** Volumen del sonido ambiente (mar, gaviotas, lluvia y truenos), de 0 a 1. */
+export function ambientVolume() {
+  try {
+    const raw = localStorage.getItem(AMBIENT_VOLUME_KEY);
+    const v = Number(raw);
+    return raw === null || !Number.isFinite(v) ? 1 : Math.max(0, Math.min(1, v));
+  } catch {
+    return 1;
+  }
+}
+
+export function setAmbientVolume(v) {
+  v = Math.max(0, Math.min(1, v));
+  try {
+    localStorage.setItem(AMBIENT_VOLUME_KEY, String(v));
+  } catch {
+    // sin almacenamiento: solo esta sesión
+  }
+  if (ambientBus) ambientBus.gain.setTargetAtTime(v, ctx.currentTime, 0.08);
+}
 
 function noiseBuffer(seconds) {
   const len = Math.floor(ctx.sampleRate * seconds);
@@ -84,7 +111,7 @@ function startAmbience() {
   const lfoGain = ctx.createGain();
   lfoGain.gain.value = 0.1;
   lfo.connect(lfoGain).connect(gain.gain);
-  src.connect(filter).connect(gain).connect(master);
+  src.connect(filter).connect(gain).connect(ambientBus);
   src.start();
   lfo.start();
   ambience = gain;
@@ -95,14 +122,14 @@ function startAmbience() {
 let gullTrack = null;
 
 /** Pista grabada en bucle que pasa por el volumen general (y se calla con el silencio). */
-function track(url, volume) {
+function track(url, volume, bus = master) {
   const el = new Audio(url);
   el.loop = true;
   el.preload = 'auto';
   el.crossOrigin = 'anonymous';
   const gain = ctx.createGain();
   gain.gain.value = 0;
-  ctx.createMediaElementSource(el).connect(gain).connect(master);
+  ctx.createMediaElementSource(el).connect(gain).connect(bus);
   return { el, gain, volume, playing: false };
 }
 
@@ -120,7 +147,7 @@ function fade(t, level, seconds) {
  */
 export function setGulls(k) {
   if (!ctx || document.hidden) return;
-  gullTrack ??= track('/audio/gaviotas.mp3', 0.55);
+  gullTrack ??= track('/audio/gaviotas.mp3', 0.55, ambientBus);
   const level = Math.max(0, Math.min(1, k)) * gullTrack.volume;
   fade(gullTrack, level, 1.2);
   // Sin gaviotas cerca, la pista se para del todo (no gasta nada)
@@ -231,7 +258,7 @@ export function setRain(k) {
     filter.Q.value = 0.6;
     rain = ctx.createGain();
     rain.gain.value = 0;
-    src.connect(filter).connect(rain).connect(master);
+    src.connect(filter).connect(rain).connect(ambientBus);
     src.start();
   }
   rain.gain.setTargetAtTime(0.09 * k, ctx.currentTime, 1.5);
@@ -251,7 +278,7 @@ export function thunder(power = 1) {
   g.gain.setValueAtTime(0.0001, t);
   g.gain.exponentialRampToValueAtTime(0.5 * power, t + 0.08);
   g.gain.exponentialRampToValueAtTime(0.0001, t + 2.8);
-  src.connect(filter).connect(g).connect(master);
+  src.connect(filter).connect(g).connect(ambientBus);
   src.start(t);
   src.stop(t + 3);
 }

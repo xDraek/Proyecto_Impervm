@@ -4414,3 +4414,8 @@ body.landing-mode #cam-controls {
   color: var(--muted);
   font-size: 12px;
 }
+
+/* El volumen del ambiente va sin casilla delante */
+.menu label.volume-solo {
+  padding-left: 0;
+}

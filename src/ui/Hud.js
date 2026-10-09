@@ -197,9 +197,11 @@ export class Hud {
       this.menu.hidden = !this.menu.hidden;
       this.menu.querySelector('[name="sound"]').checked = settings.sound();
       this.menu.querySelector('[name="music"]').checked = settings.music();
-      const vol = Math.round(settings.musicVolume() * 100);
-      this.menu.querySelector('[name="music-volume"]').value = vol;
-      this.menu.querySelector('.volume-pct').textContent = `${vol} %`;
+      for (const [name, value] of [['music-volume', settings.musicVolume()], ['ambient-volume', settings.ambientVolume()]]) {
+        const vol = Math.round(value * 100);
+        this.menu.querySelector(`[name="${name}"]`).value = vol;
+        this.menu.querySelector(`.volume-pct[data-for="${name}"]`).textContent = `${vol} %`;
+      }
       this.menu.querySelector('[name="daynight"]').checked = settings.dayNight();
       this.menu.querySelector('[name="labels"]').checked = settings.labels();
       this.menu.querySelector('[name="quality"]').checked = settings.quality();
@@ -216,13 +218,15 @@ export class Hud {
       if (e.target.name === 'quality') settings.setQuality(e.target.checked);
       if (e.target.name === 'notify') settings.setNotify(e.target.checked).then((on) => (e.target.checked = on));
     });
-    // Volumen de la música: cambia mientras se arrastra
+    // Volumen de la música y del ambiente: cambian mientras se arrastra
     this.menu.addEventListener('input', (e) => {
-      if (e.target.name !== 'music-volume') return;
+      if (e.target.name !== 'music-volume' && e.target.name !== 'ambient-volume') return;
       const v = Number(e.target.value);
-      settings.setMusicVolume(v / 100);
-      this.menu.querySelector('.volume-pct').textContent = `${v} %`;
-      this.menu.querySelector('[name="music"]').checked = settings.music();
+      if (e.target.name === 'music-volume') {
+        settings.setMusicVolume(v / 100);
+        this.menu.querySelector('[name="music"]').checked = settings.music();
+      } else settings.setAmbientVolume(v / 100);
+      this.menu.querySelector(`.volume-pct[data-for="${e.target.name}"]`).textContent = `${v} %`;
     });
     this.menu.querySelector('[data-action="guide"]').addEventListener('click', () => {
       this.menu.hidden = true;

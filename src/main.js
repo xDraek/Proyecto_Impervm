@@ -1,5 +1,5 @@
 import './style.css';
-import { isMuted, musicOn, musicVolume, play, setAmbienceLevel, setMusic, setMusicVolume, setMuted, unlockAudio } from './audio.js';
+import { ambientVolume, isMuted, musicOn, musicVolume, play, setAmbienceLevel, setAmbientVolume, setMusic, setMusicVolume, setMuted, unlockAudio } from './audio.js';
 import { clock, universe } from './config.js';
 import { BUILDINGS, PLAYER_UNITS, UNITS } from './game/data.js';
 import { Game, newState } from './game/Game.js';
@@ -134,6 +134,8 @@ function startGame(game) {
     },
     music: () => musicOn(),
     setMusic: (on) => setMusic(on),
+    ambientVolume: () => ambientVolume(),
+    setAmbientVolume: (v) => setAmbientVolume(v),
     musicVolume: () => musicVolume(),
     setMusicVolume: (v) => {
       setMusicVolume(v);
