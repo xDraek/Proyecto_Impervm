@@ -37,12 +37,38 @@ test('la protección dura lo que dice y luego se puede volver a bloquear', async
   assert.equal(C.planMission('bloquear', B.state.home, { trirreme: 5 }).ok, true);
 });
 
-test('quien bloquea o invade pierde su propia protección', async () => {
+test('quien bloquea pierde su propia protección', async () => {
   const { A, B } = await freed();
   B.state.units.trirreme = 3;
   assert.ok(B.shield());
   assert.equal(B.sendMission('bloquear', A.state.home, { trirreme: 3 }).ok, true);
   assert.equal(B.shield(), null);
+});
+
+test('quien invade pierde su propia protección', async () => {
+  const { A, B } = await freed();
+  Object.assign(B.state.units, { dromon: 2, hoplita: 10 });
+  assert.ok(B.shield());
+  assert.equal(B.sendMission('invadir', A.state.home, { dromon: 2, hoplita: 10 }).ok, true);
+  assert.equal(B.shield(), null);
+});
+
+test('un bloqueo que llega a una ciudad recién liberada se da la vuelta', async () => {
+  const env = await makeWorld();
+  const [A, B, C] = env.players;
+  A.state.units.trirreme = 6;
+  C.state.units.trirreme = 7;
+  // Pericles sale primero, pero llegará una hora después que Lucio
+  assert.equal(C.sendMission('bloquear', B.state.home, { trirreme: 6 }, null, {}).ok, true);
+  const late = C.state.missions.at(-1);
+  const block = sendAndArrive(env, A, 'bloquear', B.state.home, { trirreme: 6 });
+  late.arrive = block.arrive + HOUR;
+  assert.match(C.planMission('bloquear', B.state.home, { trirreme: 1 }).reason, /ya bloquea|Ya tienes/);
+  A.recall(block.id);
+  env.until(late.arrive);
+  assert.equal(B.state.blockade, null, 'no la bloquea nadie');
+  assert.notEqual(late.phase, 'estacionada');
+  assert.match(C.state.reports[0].text ?? '', /protegido/);
 });
 
 test('una invasión que llega a una ciudad recién liberada saquea pero no se queda', async () => {
@@ -88,3 +114,44 @@ test('entre alianzas en guerra no hay límite de ataques', async () => {
   A.state.units.trirreme = 50;
   for (let i = 0; i < PROTECTION.attacksPerDay + 2; i++) assert.equal(A.sendMission('atacar', B.state.home, { trirreme: 1 }, null, {}).ok, true);
 });
+
+// El escudo y el relevo de un bloqueo dependen del orden de los hechos, no del orden en que el
+// servidor procesa las partidas en cada vuelta del bucle.
+
+/**
+ * `blocker` bloquea a Aníbal y `invader` le manda una invasión que llega `offset` ms después de que
+ * acabe el bloqueo (negativo: antes). Se avanza con una sola vuelta del bucle para que las dos
+ * cosas caigan en la misma.
+ */
+async function raceBlockade(names, offset) {
+  const env = await makeWorld(names);
+  const get = (n) => env.players.find((g) => g.name === n);
+  const [blocker, invader, victim] = [get('Bruto'), get('Casio'), get('Anibal')];
+  blocker.state.units.trirreme = 6;
+  Object.assign(invader.state.units, { dromon: 10, hoplita: 150, mercante: 4 });
+  const block = sendAndArrive(env, blocker, 'bloquear', victim.state.home, { trirreme: 6 });
+  assert.equal(invader.sendMission('invadir', victim.state.home, { dromon: 10, hoplita: 150, mercante: 4 }, null, {}).ok, true);
+  const inv = invader.state.missions.at(-1);
+  // Que la invasión llegue justo alrededor del final del bloqueo
+  const travel = inv.arrive - inv.depart;
+  inv.arrive = block.until + offset;
+  inv.depart = inv.arrive - travel;
+  env.until(Math.max(block.until, inv.arrive) + 490);
+  return { victim, inv };
+}
+
+for (const order of [['Casio', 'Anibal', 'Bruto'], ['Bruto', 'Anibal', 'Casio']]) {
+  const who = order[0] === 'Casio' ? 'el invasor' : 'quien bloquea';
+  test(`una invasión que llega justo después de acabar el bloqueo no se salta el escudo (primero ${who})`, async () => {
+    const { victim, inv } = await raceBlockade(order, 200);
+    assert.equal(victim.state.occupied, null, 'no se queda ocupando');
+    assert.notEqual(inv.phase, 'estacionada');
+    assert.ok(victim.shield(), 'sigue protegida');
+  });
+  test(`una invasión que llega justo antes de acabar el bloqueo lo releva y ocupa (primero ${who})`, async () => {
+    const { victim, inv } = await raceBlockade(order, -200);
+    assert.equal(inv.phase, 'estacionada', 'se queda ocupando');
+    assert.ok(victim.state.occupied, 'la ciudad queda ocupada');
+    assert.equal(victim.shield(), null, 'ocupada no está protegida');
+  });
+}

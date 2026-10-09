@@ -381,8 +381,9 @@ export class WorldServer {
       banner: game.state.banner ?? null,
       alliance: a ? { id: a.id, tag: a.tag, name: a.name } : null,
       port: portOf(game.state),
-      // Recién liberada: a salvo de bloqueos e invasiones hasta entonces
+      // Recién liberada: a salvo de bloqueos e invasiones desde `shieldFrom` hasta `shield`
       shield: game.state.shieldUntil || null,
+      shieldFrom: game.state.shieldFrom ?? 0,
     };
   }
 
@@ -765,6 +766,16 @@ export class WorldServer {
     const game = this.games.get(info.by) ?? null;
     const mission = game?.state.missions.find((m) => m.id === info.mission && m.type === kind && m.phase === 'estacionada') ?? null;
     return { kind, info, game, mission };
+  }
+
+  /**
+   * Lleva al instante `t` a quien bloquea u ocupa la ciudad de `ownerId`, antes de que otra flota
+   * mire si sigue ahí o si la ciudad ya está protegida: así cuenta el orden de los hechos y no el
+   * orden en que el servidor procesa las partidas. (Si es la propia partida, `#advance` lo ignora.)
+   */
+  settlePort(ownerId, t) {
+    const st = this.stationAt(ownerId);
+    if (st?.mission) st.game.update(t);
   }
 
   /** Se acaba un bloqueo o una ocupación en la isla `islandId`. Devuelve el tributo que se llevan. */

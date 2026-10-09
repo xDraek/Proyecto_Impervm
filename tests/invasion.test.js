@@ -59,10 +59,12 @@ test('el tributo se aparta y el saqueo lo manda a casa', async () => {
   assert.ok(B.state.resources.oro < before.oro, 'se llevan parte de su almacén');
   const convoy = A.state.missions.find((x) => x.type === 'tributo');
   assert.ok(convoy, 'sale un convoy hacia la capital');
+  assert.equal(A.fleetsAtSea(), A.state.missions.length - 1, 'el convoy no ocupa hueco de flota');
   const oro = A.state.resources.oro;
+  const sent = convoy.cargo.oro;
+  assert.ok(sent > 0, 'el convoy lleva oro');
   env.until(convoy.back);
-  assert.ok(A.state.resources.oro > oro, 'el botín llega a casa');
-  assert.equal(A.fleetsAtSea(), A.state.missions.filter((x) => x.type !== 'tributo').length);
+  assert.ok(A.state.resources.oro >= oro + sent, 'el botín llega a casa');
 });
 
 test('desde la ciudad ocupada se lanzan ataques que vuelven a ella', async () => {
@@ -97,9 +99,13 @@ test('si se pierde la ciudad ocupada, la flota sigue hasta casa', async () => {
 test('retirar la ocupación se lleva el tributo pendiente', async () => {
   const { env, A, B, m } = await invaded();
   env.advance(3 * HOUR);
+  // Ya llevaban el botín del asalto: el tributo apartado se suma a eso
+  const carried = m.cargo.madera ?? 0;
+  const owed = Math.floor(B.state.occupied.owed.madera);
+  assert.ok(owed > 0, 'hay tributo apartado');
   assert.equal(A.recall(m.id).ok, true);
   assert.equal(B.state.occupied, null);
-  assert.ok((m.cargo.madera ?? 0) > 0);
+  assert.ok(m.cargo.madera >= carried + owed, 'el tributo apartado se suma a la carga');
 });
 
 test('el dueño puede echar a los invasores y recupera el tributo', async () => {
