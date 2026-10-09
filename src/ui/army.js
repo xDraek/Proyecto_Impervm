@@ -1,7 +1,7 @@
 import { LAND_UNITS, MISSION_TYPES, SHIP_UNITS, UNITS } from '../game/data.js';
 import { playerCombat } from '../game/rules.js';
 import { unitIcon } from '../scene/portraits.js';
-import { escapeHtml, fmtNum, unitList } from './format.js';
+import { bag, escapeHtml, fmtNum, unitList } from './format.js';
 
 // Ventana del ejército: todo lo militar de un vistazo (tropas y barcos en casa,
 // flotas en el mar, almirante, mercenarios y lo que se está entrenando).
@@ -34,6 +34,13 @@ function unitGrid(game, ids, empty, recruitIn) {
     : `<p class="muted small">${empty} <button class="link small" data-select="${recruitIn}">Ir al ${recruitIn === 'cuartel' ? 'cuartel' : 'puerto'} →</button></p>`;
 }
 
+/** Qué lleva una flota: sus unidades y, si trae algo, la carga (los convoyes del saqueo no llevan unidades propias). */
+function fleetLoad(m) {
+  const cargo = Object.values(m.cargo ?? {}).some((n) => n > 0) ? `📦 ${bag(m.cargo)}` : '';
+  if (m.type === 'tributo') return `🚢 Barcos requisados${cargo ? ` · ${cargo}` : ''}`;
+  return [unitList(m.units), cargo].filter(Boolean).join(' · ');
+}
+
 function fleetRows(game) {
   if (!game.missions.length) return '<p class="muted small">No tienes flotas en el mar.</p>';
   return game.missions
@@ -63,7 +70,7 @@ function fleetRows(game) {
         button = `<button class="primary small" data-action="plunder" data-mission="${m.id}" data-ready-at="${m.plunderAt ?? 0}" ${(m.plunderAt ?? 0) <= game.now() ? '' : 'disabled'}>💰 Saquear</button>${button}`;
       }
       return `<div class="fleet-line" data-select="${m.target}">
-        <div><b>${what}${m.hero ? ' 🎖️' : ''}</b><div class="muted small">${unitList(m.units)}</div></div>
+        <div><b>${what}${m.hero ? ' 🎖️' : ''}</b><div class="muted small">${fleetLoad(m)}</div></div>
         <div class="fleet-when"><span class="small">${when}</span>${button}</div>
       </div>`;
     })
@@ -100,7 +107,7 @@ export function armyHtml(game) {
 
   return `<div class="modal-card wide army-modal">
     <div class="panel-head"><span class="panel-icon">⚔️</span><div><h3>Ejército</h3><div class="panel-lvl">Tus tropas, tus barcos y tus flotas</div></div>
-      <button class="icon-btn" data-action="close-modal" title="Cerrar">✕</button></div>
+      <button class="icon-btn help-btn" data-guide="unidades" title="Qué es esto (guía)">?</button><button class="icon-btn" data-action="close-modal" title="Cerrar">✕</button></div>
     <div class="army-stats">
       <div><b>${fmtNum(home.atk)}</b><span>⚔️ Ataque en casa</span></div>
       <div><b>${fmtNum(home.hp)}</b><span>❤️ Vida en casa</span></div>

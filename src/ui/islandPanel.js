@@ -304,7 +304,7 @@ function fleetForm(hud, game, view) {
     })
     .join('');
   const warHint = enemyCity
-    ? `<p class="hint small">🦅 <b>Invadir</b>: si tus tropas desembarcan y acaban con su ejército, se quedan ocupando la ciudad (${OCCUPATION.hours} h como mucho): te llevas tributo, saqueas su almacén y atacas desde allí. ⛓️ <b>Bloquear</b>: solo barcos de guerra; si vencen a su flota, cierran su puerto ${BLOCKADE.hours} h como mucho.</p>`
+    ? `<p class="hint small">🦅 <b>Invadir</b>: si tus tropas desembarcan y acaban con su ejército, se quedan ocupando la ciudad (${OCCUPATION.hours} h como mucho): te llevas tributo, saqueas su almacén y atacas desde allí. ⛓️ <b>Bloquear</b>: solo barcos de guerra; si vencen a su flota, cierran su puerto ${BLOCKADE.hours} h como mucho. <button class="link" data-action="guide" data-topic="invasiones">📖 Más en la guía</button></p>`
     : '';
   const cargoForm = types.includes('transporte')
     ? `<h4>Recursos para transportar</h4><div class="payload">${RESOURCE_KEYS.map(
@@ -433,6 +433,16 @@ function islandArt(game, view) {
   return url ? `<div class="building-art island-art"><img src="${url}" alt="" draggable="false" /></div>` : '';
 }
 
+/** Tema de la guía que explica esta isla. */
+function islandGuide(view) {
+  if (view.colonized) return 'colonias';
+  if (view.type === 'jugador') return view.port?.by != null ? 'invasiones' : 'jugadores';
+  if (view.type === 'brumas') return 'expediciones';
+  if (view.type === 'ciudadela' || view.type === 'continente' || view.land) return 'continentes';
+  if (view.type === 'libre') return 'colonias';
+  return 'archipielago';
+}
+
 export function islandPanel(hud, id) {
   const game = hud.game;
   const view = game.island(id);
@@ -450,6 +460,7 @@ export function islandPanel(hud, id) {
         <h3>${escapeHtml(view.name)}</h3>
         <div class="panel-lvl">${sub} · a ${fmtNum(view.dist)} leguas</div>
       </div>
+      <button class="icon-btn help-btn" data-action="guide" data-topic="${islandGuide(view)}" title="Qué es esto (guía)">?</button>
       <button class="icon-btn" data-action="close" title="Cerrar">✕</button>
     </div>
     ${islandArt(game, view)}

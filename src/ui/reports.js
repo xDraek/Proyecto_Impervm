@@ -171,7 +171,7 @@ export function reportsHtml(reports) {
     : '<p class="muted">Todavía no hay informes. Explora el archipiélago o espera a los piratas.</p>';
   return `<div class="modal-card">
     <div class="panel-head"><span class="panel-icon">📜</span><div><h3>Informes</h3><div class="panel-lvl">Combates, exploraciones y colonias</div></div>
-    <button class="icon-btn" data-action="close-modal" title="Cerrar">✕</button></div>
+    <button class="icon-btn help-btn" data-guide="combate" title="Cómo se combate (guía)">?</button><button class="icon-btn" data-action="close-modal" title="Cerrar">✕</button></div>
     <div class="reports">${items}</div>
   </div>`;
 }

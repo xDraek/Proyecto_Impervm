@@ -10,9 +10,9 @@ export const SOCIAL_MODALS = ['alliance', 'mail', 'profile', 'daily', 'welcome',
 // Alianza, correo y mercado del archipiélago: lo que se habla con otros
 // jugadores. Los datos llegan del servidor aparte del estado de la partida.
 
-const head = (icon, title, sub) => `
+const head = (icon, title, sub, guide = '') => `
   <div class="panel-head"><span class="panel-icon">${icon}</span><div><h3>${title}</h3><div class="panel-lvl">${sub}</div></div>
-  <button class="icon-btn" data-action="close-modal" title="Cerrar">✕</button></div>`;
+  ${guide ? `<button class="icon-btn help-btn" data-guide="${guide}" title="Qué es esto (guía)">?</button>` : ''}<button class="icon-btn" data-action="close-modal" title="Cerrar">✕</button></div>`;
 
 const resOptions = (sel) => RESOURCE_KEYS.map((r) => `<option value="${r}" ${r === sel ? 'selected' : ''}>${RESOURCES[r].icon} ${RESOURCES[r].name}</option>`).join('');
 
@@ -83,7 +83,7 @@ export class Social {
         ? `<p class="desc">${escapeHtml(a.description)}</p>`
         : '';
     return `<div class="modal-card">
-      ${head('🤝', `${escapeHtml(a.name)} <span class="tag">[${escapeHtml(a.tag)}]</span>`, `${a.members.length} miembros · ${fmtNum(a.points)} puntos`)}
+      ${head('🤝', `${escapeHtml(a.name)} <span class="tag">[${escapeHtml(a.tag)}]</span>`, `${a.members.length} miembros · ${fmtNum(a.points)} puntos`, 'alianzas')}
       <div class="tabs small-tabs">
         <button data-action="ally-tab" data-tab="members" class="${this.allianceTab === 'members' ? 'active' : ''}">👥 Miembros</button>
         <button data-action="ally-tab" data-tab="forum" class="${this.allianceTab === 'forum' ? 'active' : ''}">🗂️ Foro${this.game.forumUnread ? ` (${this.game.forumUnread})` : ''}</button>
@@ -225,7 +225,7 @@ export class Social {
       )
       .join('');
     return `<div class="modal-card">
-      ${head('🤝', 'Alianzas', 'Juntos sois más fuertes: no os atacáis y tenéis chat propio')}
+      ${head('🤝', 'Alianzas', 'Juntos sois más fuertes: no os atacáis y tenéis chat propio', 'alianzas')}
       <p class="muted small">En las alianzas con solicitud, el líder o un oficial tiene que aceptarte. Puedes pedir entrar en varias a la vez.</p>
       <h4>Fundar una alianza</h4>
       <form class="inline-form" data-form="create">
@@ -323,7 +323,7 @@ export class Social {
     this.hud.showModal(
       'profile',
       `<div class="modal-card">
-        ${head(p.banner?.emblem ?? '👤', `${escapeHtml(p.name)}${p.alliance ? ` <span class="tag">[${escapeHtml(p.alliance.tag)}]</span>` : ''}`, `${p.title ? `«${escapeHtml(p.title)}» · ` : ''}${p.online ? '🟢 En línea' : 'Desconectado'} · en el archipiélago desde ${new Date(p.joined).toLocaleDateString('es-ES')}`)}
+        ${head(p.banner?.emblem ?? '👤', `${escapeHtml(p.name)}${p.alliance ? ` <span class="tag">[${escapeHtml(p.alliance.tag)}]</span>` : ''}`, `${p.title ? `«${escapeHtml(p.title)}» · ` : ''}${p.online ? '🟢 En línea' : 'Desconectado'} · en el archipiélago desde ${new Date(p.joined).toLocaleDateString('es-ES')}`, 'perfil')}
         <div class="stat-grid">
           <div><b>${p.rank ?? '—'}</b><span>puesto</span></div>
           <div><b>${fmtNum(p.points)}</b><span>puntos</span></div>
@@ -395,7 +395,7 @@ export class Social {
     this.hud.showModal(
       'daily',
       `<div class="modal-card">
-        ${head('🎁', 'Regalo diario', d.available ? `Racha de ${d.streak} ${d.streak === 1 ? 'día' : 'días'}. ¡Vuelve mañana para seguirla!` : 'Ya lo has recogido hoy. Vuelve mañana.')}
+        ${head('🎁', 'Regalo diario', d.available ? `Racha de ${d.streak} ${d.streak === 1 ? 'día' : 'días'}. ¡Vuelve mañana para seguirla!` : 'Ya lo has recogido hoy. Vuelve mañana.', 'objetivos')}
         <ol class="daily">${days}</ol>
         <p class="muted small">Las cantidades crecen con el nivel de tu ayuntamiento. Si te saltas un día, la racha vuelve a empezar.</p>
         ${d.available ? `<button class="primary" data-action="claim-daily">Recoger ${bag(Object.fromEntries(Object.entries(d.reward).filter(([k]) => k !== 'favor')))}${d.reward.favor ? ` · 🙏 ${d.reward.favor}` : ''}</button>` : ''}
@@ -414,6 +414,7 @@ export class Social {
           <li><span>🗺️</span><div><b>Explora el mapa</b> (tecla M). Con un puerto y botes descubrirás bárbaros, ruinas, tierras libres… y a tus vecinos.</div></li>
           <li><span>🛡️</span><div><b>Tienes protección de novato</b> hasta los 100 puntos: nadie te atacará. Aprovecha para prepararte, que después llegan piratas y vecinos con hambre.</div></li>
           <li><span>🤝</span><div><b>Únete a una alianza</b> o funda la tuya: os defenderéis, comerciaréis y tendréis chat propio.</div></li>
+          <li><span>📖</span><div><b>¿Dudas?</b> La <button class="link" data-action="welcome-guide">guía del juego</button> lo explica todo (tecla <kbd>?</kbd>), y cada panel tiene su botón <b>?</b> con lo que hace falta saber.</div></li>
         </ol>
         <button class="primary" data-action="welcome-done">¡A jugar!</button>
       </div>`,
@@ -444,7 +445,7 @@ export class Social {
         ${st.reason ? `<p class="hint">${escapeHtml(st.reason)}${wait}</p>` : ''}
         <div class="modal-actions"><button class="primary auto" data-action="vacation-start" ${st.reason ? 'disabled' : ''}>🏖️ Irme de vacaciones</button></div>`;
     }
-    this.hud.showModal('vacation', `<div class="modal-card narrow">${head('🏖️', 'Modo vacaciones', st.active ? 'Tu isla descansa' : 'Para cuando no puedas jugar')}${body}</div>`);
+    this.hud.showModal('vacation', `<div class="modal-card narrow">${head('🏖️', 'Modo vacaciones', st.active ? 'Tu isla descansa' : 'Para cuando no puedas jugar', 'vacaciones')}${body}</div>`);
   }
 
   async openPassword() {
@@ -452,7 +453,7 @@ export class Social {
     this.hud.showModal(
       'password',
       `<div class="modal-card narrow">
-        ${head('🔑', 'Cuenta y contraseña', escapeHtml(this.game.username))}
+        ${head('🔑', 'Cuenta y contraseña', escapeHtml(this.game.username), 'cuenta')}
         <h4>🔑 Contraseña</h4>
         <form class="stack" data-form="password">
           <input type="password" name="current" placeholder="Contraseña actual" autocomplete="current-password" required />
@@ -524,7 +525,7 @@ export class Social {
     this.hud.showModal(
       'friends',
       `<div class="modal-card narrow friends-modal">
-        ${head('👥', 'Amigos', data.friends.length ? `${online} de ${data.friends.length} conectados` : 'Añade a otros capitanes por su nombre')}
+        ${head('👥', 'Amigos', data.friends.length ? `${online} de ${data.friends.length} conectados` : 'Añade a otros capitanes por su nombre', 'alianzas')}
         <form class="friend-add" data-form="friend-add">
           <input type="text" name="name" placeholder="Nombre del jugador" maxlength="20" autocomplete="off" required />
           <button class="primary small">Añadir</button>
@@ -744,10 +745,15 @@ export class Social {
         return true;
       }
       case 'welcome-done':
+      case 'welcome-guide':
         try {
           localStorage.setItem(`imperium.welcome.${this.game.userId}`, '1');
         } catch {
           // sin almacenamiento
+        }
+        if (action === 'welcome-guide') {
+          this.hud.openGuide('inicio');
+          return true;
         }
         this.hud.closeModal();
         if (this.game.dailyStatus().available) this.openDaily();

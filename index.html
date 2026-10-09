@@ -78,19 +78,34 @@
       </header>
       <div id="menu" class="menu" hidden>
         <div class="menu-user"></div>
-        <label><input type="checkbox" name="sound" /> 🔊 Sonido</label>
-        <label><input type="checkbox" name="music" /> 🎵 Música</label>
-        <label class="volume" title="Volumen de la música"><span>🔈</span><input type="range" name="music-volume" min="0" max="100" step="1" aria-label="Volumen de la música" /><span class="volume-pct" data-for="music-volume"></span></label>
-        <label class="volume volume-solo" title="Volumen del mar, las gaviotas y la lluvia"><span>🌊 Ambiente</span><input type="range" name="ambient-volume" min="0" max="100" step="1" aria-label="Volumen del sonido ambiente" /><span class="volume-pct" data-for="ambient-volume"></span></label>
-        <label><input type="checkbox" name="labels" /> 🏷️ Nombres de los edificios siempre</label>
-        <label><input type="checkbox" name="daynight" /> 🌗 Día y noche</label>
-        <label><input type="checkbox" name="quality" /> ✨ Gráficos de alta calidad</label>
-        <label><input type="checkbox" name="notify" /> 🔔 Avisos del navegador</label>
-        <button class="ghost small" data-action="profile-me">👤 Mi perfil</button>
-        <button class="ghost small" data-action="guide">📖 Guía del juego</button>
-        <button class="ghost small" data-action="vacation">🏖️ Modo vacaciones</button>
-        <button class="ghost small" data-action="password">🔑 Cuenta y contraseña</button>
-        <button class="ghost small" data-action="logout">Cerrar sesión</button>
+        <div class="menu-group">
+          <h5>Sonido</h5>
+          <label class="menu-row"><input type="checkbox" name="sound" /> <span>🔊 Efectos de sonido</span></label>
+          <div class="menu-row volume">
+            <label><input type="checkbox" name="music" /> <span>🎵 Música</span></label>
+            <input type="range" name="music-volume" min="0" max="100" step="1" aria-label="Volumen de la música" />
+            <span class="volume-pct" data-for="music-volume"></span>
+          </div>
+          <div class="menu-row volume" title="El mar, las gaviotas y la lluvia">
+            <label class="volume-name"><span>🌊 Ambiente</span></label>
+            <input type="range" name="ambient-volume" min="0" max="100" step="1" aria-label="Volumen del sonido ambiente" />
+            <span class="volume-pct" data-for="ambient-volume"></span>
+          </div>
+        </div>
+        <div class="menu-group">
+          <h5>Pantalla y avisos</h5>
+          <label class="menu-row"><input type="checkbox" name="quality" /> <span>✨ Gráficos de alta calidad</span></label>
+          <label class="menu-row"><input type="checkbox" name="daynight" /> <span>🌗 Día y noche</span></label>
+          <label class="menu-row"><input type="checkbox" name="labels" /> <span>🏷️ Ver siempre los nombres</span></label>
+          <label class="menu-row"><input type="checkbox" name="notify" /> <span>🔔 Avisos del navegador</span></label>
+        </div>
+        <nav class="menu-links">
+          <button type="button" data-action="profile-me"><span>👤 Mi perfil</span></button>
+          <button type="button" data-action="guide"><span>📖 Guía del juego</span><kbd>?</kbd></button>
+          <button type="button" data-action="vacation"><span>🏖️ Modo vacaciones</span></button>
+          <button type="button" data-action="password"><span>🔑 Cuenta y contraseña</span></button>
+          <button type="button" data-action="logout" class="menu-logout"><span>🚪 Cerrar sesión</span></button>
+        </nav>
       </div>
       <div id="banners">
         <div id="offline" hidden>📡 Sin conexión con el servidor. Reintentando…</div>

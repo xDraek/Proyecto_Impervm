@@ -239,12 +239,16 @@ function startGame(game) {
   }
 
   window.addEventListener('keydown', (e) => {
+    // Escape también cierra la ventana aunque estés escribiendo en ella (el buscador de la guía…)
+    if (e.key === 'Escape' && e.target.closest?.('#modal')) return hud.closeModal();
     if (e.target.matches?.('input, select, textarea')) return;
     if (e.ctrlKey || e.metaKey || e.altKey) return;
     const shortcut = SHORTCUTS[Number(e.key) - 1];
     if (shortcut) document.getElementById(shortcut)?.click();
     if (e.key === 'Escape') {
-      if (!document.getElementById('modal').hidden) hud.closeModal();
+      const menu = document.getElementById('menu');
+      if (!menu.hidden) menu.hidden = true;
+      else if (!document.getElementById('modal').hidden) hud.closeModal();
       else select(null);
     }
     if (e.key === 'm' || e.key === 'M') setView(world.view === 'isla' ? 'mapa' : 'isla');

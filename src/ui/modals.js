@@ -3,9 +3,9 @@ import { bag, escapeHtml, fmtNum } from './format.js';
 
 // Ventanas de misiones y de clasificación.
 
-const head = (icon, title, sub) => `
+const head = (icon, title, sub, guide = '') => `
   <div class="panel-head"><span class="panel-icon">${icon}</span><div><h3>${title}</h3><div class="panel-lvl">${sub}</div></div>
-  <button class="icon-btn" data-action="close-modal" title="Cerrar">✕</button></div>`;
+  ${guide ? `<button class="icon-btn help-btn" data-guide="${guide}" title="Qué es esto (guía)">?</button>` : ''}<button class="icon-btn" data-action="close-modal" title="Cerrar">✕</button></div>`;
 
 function rewardHtml(reward) {
   const { favor, ...rest } = reward;
@@ -30,7 +30,7 @@ export function questsHtml(game) {
         .join('')
     : '<p class="muted">¡Has completado todas las misiones! Tu nombre se cantará en los puertos de todo el archipiélago.</p>';
   return `<div class="modal-card">
-    ${head('📋', 'Misiones', `${doneCount} de ${QUESTS.length} completadas`)}
+    ${head('📋', 'Misiones', `${doneCount} de ${QUESTS.length} completadas`, 'objetivos')}
     ${tasksHtml(game)}
     <h4>Misiones</h4>
     <div class="quests">${items}</div>
@@ -146,7 +146,7 @@ export function rankingHtml({ top, military = [], raiders = [], me, total, allia
     table = `<table class="ranking"><thead><tr><th>#</th><th>Imperio</th><th>Puntos</th><th></th></tr></thead><tbody>${top.map(row).join('')}${mine}</tbody></table>`;
   }
   return `<div class="modal-card narrow">
-    ${head('🏆', 'Clasificación', `${fmtNum(total)} imperios · ${cat.sub}`)}
+    ${head('🏆', 'Clasificación', `${fmtNum(total)} imperios · ${cat.sub}`, 'competicion')}
     ${tabs}${table}
   </div>`;
 }
