@@ -470,44 +470,145 @@ function sparks(x, y, z, speed) {
   return g;
 }
 
+/** Tronco cortado con las caras claras de la sierra en los extremos (largo en el eje X). */
+function cutLog(len, r, x, y, z, rotY = 0) {
+  const g = new THREE.Group();
+  const bark = mesh(new THREE.CylinderGeometry(r, r * 1.04, len, 8), r > 0.13 ? '#6e4a2a' : C.wood);
+  bark.rotation.z = Math.PI / 2;
+  g.add(bark);
+  for (const sx of [-1, 1]) {
+    const face = mesh(new THREE.CylinderGeometry(r * 0.92, r * 0.92, 0.012, 8), '#e2c48c');
+    face.rotation.z = Math.PI / 2;
+    face.position.x = sx * (len / 2 + 0.004);
+    g.add(face);
+    const ring = mesh(new THREE.CylinderGeometry(r * 0.45, r * 0.45, 0.014, 8), '#c9a066');
+    ring.rotation.z = Math.PI / 2;
+    ring.position.x = sx * (len / 2 + 0.006);
+    g.add(ring);
+  }
+  g.position.set(x, y + r, z);
+  g.rotation.y = rotY;
+  return g;
+}
+
+/** Pila de troncos en pirámide (rows filas de abajo arriba). */
+function logPile(x, z, rotY, len = 1.3, rows = 3, r = 0.15) {
+  const g = new THREE.Group();
+  for (let row = 0; row < rows; row++) {
+    const n = rows - row + 1;
+    for (let k = 0; k < n; k++) g.add(cutLog(len + (k % 2) * 0.08, r, 0, row * r * 1.7, (k - (n - 1) / 2) * r * 2.02));
+  }
+  g.position.set(x, 0, z);
+  g.rotation.y = rotY;
+  return g;
+}
+
+/** Pila de tablones aserrados, cruzados en capas para que se aireen. */
+function plankStack(x, z, rotY, layers = 4) {
+  const g = new THREE.Group();
+  for (let l = 0; l < layers; l++) {
+    const across = l % 2 === 1;
+    for (let k = 0; k < (across ? 3 : 5); k++) {
+      const off = (k - (across ? 1 : 2)) * (across ? 0.42 : 0.17);
+      g.add(across ? box(0.07, 0.06, 0.95, '#c79a5e', off, l * 0.065, 0) : box(1.1, 0.06, 0.15, '#d4a96b', 0, l * 0.065, off));
+    }
+  }
+  g.position.set(x, 0, z);
+  g.rotation.y = rotY;
+  return g;
+}
+
+/**
+ * Aserradero de madera: un gran cobertizo abierto de vigas y postes con tejado de teja, apoyado
+ * en un muro y una torre de piedra; dentro, la rueda que mueve la sierra y la mesa de corte; fuera,
+ * pilas de troncos y de tablones, una cerca de varas y la carreta de bueyes cargada.
+ */
 function aserradero(level) {
   const g = new THREE.Group();
-  g.add(box(2.2, 1.2, 1.7, C.wood, -0.4, 0, -0.4));
-  g.add(gableRoof(2.6, 0.9, 2.0, C.woodDark, -0.4, 1.2, -0.4));
-  g.add(box(0.45, 0.75, 0.05, C.dark, -0.4, 0, 0.47));
-  g.add(box(0.35, 0.3, 0.05, C.dark, -1.1, 0.55, 0.47, WINDOW_GLOW));
-
-  // Mesa de sierra con disco giratorio
-  g.add(box(1.3, 0.5, 0.55, C.woodLight, 1.1, 0, 0.8));
+  // Suelo de serrín
+  g.add(cyl(2.0, 2.1, 0.03, 16, '#c9a978', 0, 0, 0));
+  // Muro trasero y torre de piedra en un extremo
+  g.add(box(2.9, 1.2, 0.3, C.stone, -0.2, 0, -1.25));
+  g.add(box(0.75, 2.0, 0.75, C.stone, -1.5, 0, -1.05), box(0.85, 0.12, 0.85, C.stoneDark, -1.5, 2.0, -1.05));
+  g.add(box(0.25, 0.32, 0.05, C.dark, -1.5, 1.35, -0.66, WINDOW_GLOW));
+  g.add(hipRoof(0.95, 0.95, 0.42, C.roofRed, -1.5, 2.1, -1.05));
+  // Cobertizo: postes, vigas y tejado de teja a dos aguas (abierto por delante y los lados)
+  const posts = [[-1.05, -0.95], [0.25, -0.95], [1.4, -0.95], [-1.05, 0.55], [0.25, 0.55], [1.4, 0.55]];
+  for (const [px, pz] of posts) g.add(box(0.14, 1.35, 0.14, C.woodDark, px, 0, pz));
+  for (const pz of [-0.95, 0.55]) g.add(box(2.7, 0.14, 0.16, C.wood, 0.17, 1.35, pz));
+  for (const px of [-1.05, 0.25, 1.4]) g.add(box(0.14, 0.14, 1.66, C.wood, px, 1.35, -0.2));
+  // Tornapuntas en los postes delanteros
+  for (const px of [-1.05, 0.25, 1.4]) {
+    for (const sx of [-1, 1]) {
+      const brace = box(0.06, 0.45, 0.06, C.woodDark, px + sx * 0.16, 1.05, 0.55);
+      brace.rotation.z = sx * 0.75;
+      g.add(brace);
+    }
+  }
+  const roof = gableRoof(3.2, 0.7, 2.15, C.roofRed, 0.17, 1.49, -0.2);
+  roof.rotation.y = Math.PI / 2;
+  g.add(roof);
+  // Rueda que mueve la sierra (gira), con sus radios, bajo el cobertizo
+  const wheel = new THREE.Group();
+  wheel.position.set(-0.45, 0.62, -0.55);
+  const rim = mesh(new THREE.TorusGeometry(0.5, 0.05, 6, 16), C.woodDark);
+  wheel.add(rim);
+  for (let k = 0; k < 8; k++) {
+    const spoke = box(0.04, 0.96, 0.04, C.wood, 0, -0.48, 0);
+    spoke.rotation.z = (k / 8) * Math.PI;
+    spoke.position.set(0, 0, 0);
+    wheel.add(spoke);
+  }
+  wheel.add(cyl(0.08, 0.08, 0.2, 8, C.woodDark, 0, -0.1, 0));
+  wheel.userData.spin = { axis: 'z', speed: 1.2 };
+  g.add(wheel);
+  g.add(box(0.1, 0.65, 0.1, C.woodDark, -0.45, 0, -0.8), box(0.1, 0.65, 0.1, C.woodDark, -0.45, 0, -0.3));
+  // Mesa de corte con el disco de la sierra y un tronco a medio cortar
+  g.add(box(1.25, 0.5, 0.5, C.woodLight, 0.7, 0, -0.2));
   const pivot = new THREE.Group();
-  pivot.position.set(1.1, 0.72, 0.8);
-  const saw = mesh(new THREE.CylinderGeometry(0.42, 0.42, 0.04, 16), '#c9ced6', { metalness: 0.6, roughness: 0.35 });
+  pivot.position.set(0.7, 0.72, -0.2);
+  const saw = mesh(new THREE.CylinderGeometry(0.36, 0.36, 0.03, 16), '#c9ced6', { metalness: 0.6, roughness: 0.35 });
   saw.rotation.x = Math.PI / 2;
   saw.userData.spin = { axis: 'y', speed: 6 };
   pivot.add(saw);
   g.add(pivot);
-  g.add(log(1.2, 0.14, 1.1, 0.5, 0.8));
-
+  g.add(cutLog(1.1, 0.13, 0.85, 0.5, -0.2));
+  // Pilas de troncos y de tablones en el patio (más con el nivel)
   const piles = [
-    [-1.6, 1.2, 0.3],
-    [0.6, -1.3, 0],
-    [1.6, -0.6, 1.2],
-    [-1.8, -1.5, 0.5],
-    [0.2, 1.7, -0.2],
-    [1.7, 0.4, 1.5],
+    () => logPile(-1.4, 1.3, 0.2, 1.4, 3),
+    () => plankStack(1.25, 1.25, -0.3, 5),
+    () => logPile(2.0, -0.4, Math.PI / 2 + 0.15, 1.2, 2),
+    () => plankStack(-0.15, 1.55, 0.1, 4),
+    () => logPile(-2.15, 0.05, Math.PI / 2, 1.2, 2, 0.13),
+    () => plankStack(2.05, 0.9, 0.9, 6),
   ];
-  const n = Math.min(piles.length, 1 + Math.floor(level / 2));
-  for (let i = 0; i < n; i++) {
-    const [x, z, rot] = piles[i];
-    const pile = new THREE.Group();
-    pile.add(log(1.2, 0.15, 0, 0, -0.16), log(1.2, 0.15, 0, 0, 0.16), log(1.2, 0.15, 0, 0.26, 0));
-    pile.position.set(x, 0, z);
-    pile.rotation.y = rot;
-    g.add(pile);
+  const n = Math.min(piles.length, 2 + Math.floor(level / 2));
+  for (let i = 0; i < n; i++) g.add(piles[i]());
+  // Cerca de varas a un lado del patio
+  for (let k = 0; k < 5; k++) g.add(box(0.06, 0.5, 0.06, C.woodDark, -2.3 + k * 0.45, 0, 1.95));
+  for (const y of [0.18, 0.4]) g.add(box(1.9, 0.05, 0.04, C.wood, -1.4, y, 1.95));
+  // Carreta de bueyes cargada de troncos
+  const cart = new THREE.Group();
+  cart.add(box(0.9, 0.08, 0.5, C.wood, 0, 0.25, 0), box(0.05, 0.05, 0.7, C.woodDark, 0, 0.22, 0.55));
+  for (const sx of [-1, 1]) {
+    const wh = mesh(new THREE.CylinderGeometry(0.2, 0.2, 0.05, 10), C.woodDark);
+    wh.rotation.z = Math.PI / 2;
+    wh.position.set(sx * 0.48, 0.2, 0);
+    cart.add(wh);
   }
-  // Leñador partiendo troncos junto a la sierra
-  g.add(box(0.3, 0.25, 0.3, C.woodLight, 0.2, 0, 1.55));
-  g.add(worker('hacha', -0.25, 1.55, 0.2, 1.55, { color: '#6b8f3a', speed: 3.5, base: 0.25 }));
+  cart.add(cutLog(0.95, 0.08, 0, 0.33, -0.1), cutLog(0.95, 0.08, 0, 0.33, 0.1), cutLog(0.95, 0.08, 0, 0.47, 0));
+  const ox = new THREE.Group();
+  ox.add(box(0.3, 0.3, 0.6, '#8a6a4a', 0, 0.22, 0), box(0.2, 0.2, 0.22, '#7a5a3a', 0, 0.36, 0.38));
+  for (const [lx, lz] of [[-0.1, -0.2], [0.1, -0.2], [-0.1, 0.2], [0.1, 0.2]]) ox.add(box(0.06, 0.22, 0.06, '#5e3b1c', lx, 0, lz));
+  ox.position.set(0, 0, 1.15);
+  cart.add(ox);
+  cart.position.set(2.0, 0, -1.55);
+  cart.rotation.y = -0.4;
+  if (level >= 4) g.add(cart);
+  // Leñador partiendo troncos y un aserrador en la mesa
+  g.add(box(0.3, 0.25, 0.3, C.woodLight, 0.35, 0, 1.0));
+  g.add(worker('hacha', -0.1, 1.0, 0.35, 1.0, { color: '#6b8f3a', speed: 3.5, base: 0.25 }));
+  g.add(worker('pico', 0.75, 0.35, 0.75, -0.2, { color: '#8a5a3a', speed: 2.6, phase: 1.3, base: 0.5, amp: 0.35 }));
   return g;
 }
 
@@ -1786,8 +1887,8 @@ function astillero(level) {
 const FACTORIES = { ayuntamiento, aserradero, cantera, granja, mina, fundicion, mercado, almacen, academia, templo, cuartel, puerto, muralla, coloso, taberna, forja, torre, faro, astillero };
 
 // Los que no tienen sitio alrededor (están en la costa, sobre rocas o rodean la isla)
-// Sin enlosado delante: los del mar, la muralla, el coloso y la granja (que está en el campo)
-const NO_ADORN = new Set(['puerto', 'muralla', 'faro', 'astillero', 'coloso', 'granja']);
+// Sin enlosado delante: los del mar, la muralla, el coloso, la granja y el aserradero (son de campo)
+const NO_ADORN = new Set(['puerto', 'muralla', 'faro', 'astillero', 'coloso', 'granja', 'aserradero']);
 
 /**
  * Escalones de prosperidad comunes a todos los edificios: con el nivel ganan un enlosado
