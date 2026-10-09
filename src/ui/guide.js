@@ -9,6 +9,8 @@ import {
   CONTEST_DAYS,
   CONTEST_PRIZES,
   DIPLOMACY,
+  FEATS,
+  FEAT_THEMES,
   HERO,
   HERO_SKILLS,
   HORDE,
@@ -47,6 +49,8 @@ import { bag, escapeHtml, fmtDec, fmtNum } from './format.js';
 // ── Piezas para escribir los temas ───────────────────────────────────────────
 
 const pct = (x) => `${Math.round(x * 100)} %`;
+/** Porcentaje con un decimal si hace falta: «0,5 %». */
+const pct1 = (x) => `${String(Math.round(x * 1000) / 10).replace('.', ',')} %`;
 const tip = (html) => `<p class="guide-tip">💡 ${html}</p>`;
 const warn = (html) => `<p class="guide-warn">⚠️ ${html}</p>`;
 const see = (id, text) => `<button type="button" class="link guide-link" data-guide="${id}">${text}</button>`;
@@ -174,9 +178,31 @@ function relicsTable() {
     ['Reliquia', 'Rareza', 'Efecto', 'Se vende por'],
     Object.values(RELICS).map((r) => {
       const rar = RELIC_RARITY[r.rarity];
-      return [`${r.icon} <b>${r.name}</b>`, `<span class="guide-rarity" style="--rar:${rar.color}">${rar.name}</span>`, r.text, `🪙 ${fmtNum(rar.sell)}`];
+      const only = r.source ? ` <span class="muted small">(solo en ${FEAT_THEMES[r.source]?.name ?? 'una gesta'})</span>` : '';
+      return [`${r.icon} <b>${r.name}</b>`, `<span class="guide-rarity" style="--rar:${rar.color}">${rar.name}</span>`, `${r.text}${only}`, `🪙 ${fmtNum(rar.sell)}`];
     }),
   );
+}
+
+/** La coraza: qué parte del daño pasa según los imperios efectivos. */
+function featCoopTable() {
+  const num = (x) => String(x).replace('.', ',');
+  return table(
+    ['Imperios efectivos', 'Daño que atraviesa la coraza'],
+    FEATS.coop.map(([n, k], i) => [`${i === 0 ? 'hasta ' : ''}${num(n)}`, k ? `<b>${pct(k)}</b>` : 'nada']),
+  );
+}
+
+/** Las fases de cada gesta: dónde se lucha, contra qué y cuánta gloria da. */
+function featPhasesTable() {
+  return Object.values(FEAT_THEMES)
+    .map((th) =>
+      table(
+        ['Fase', 'Enemigo', 'Cómo', 'Gloria'],
+        th.phases.map((p, i) => [`${i + 1}. <b>${p.name}</b>`, unitName(p.unit), p.text, fmtNum(p.glory)]),
+      ),
+    )
+    .join('');
 }
 
 function eventsTable() {
@@ -444,7 +470,9 @@ const TOPICS = {
       ${wondersTable()}
       <p class="muted small">Recursos aportados en total para cada nivel: ${WONDER_LEVELS.map((n) => fmtNum(n)).join(' · ')}.</p>
       <h5>Hordas bárbaras 🔥</h5>
-      <p>Cada pocos días desembarca una horda en los continentes con colonias, más grande cuantos más colonos haya. Durante <b>${HORDE.warnHours} h</b> cualquiera puede atacarla (es lo único que se puede atacar en un continente). Si cae, el botín (${bag(HORDE.reward)}) se reparte según los bárbaros que abatió cada uno, y el mejor puede llevarse una reliquia. Si nadie la detiene, las colonias del continente <b>no producen en ${HORDE.ravageHours} h</b>.</p>`,
+      <p>Cada pocos días desembarca una horda en los continentes con colonias, más grande cuantos más colonos haya. Durante <b>${HORDE.warnHours} h</b> cualquiera puede atacarla (es lo único que se puede atacar en un continente). Si cae, el botín (${bag(HORDE.reward)}) se reparte según los bárbaros que abatió cada uno, y el mejor puede llevarse una reliquia. Si nadie la detiene, las colonias del continente <b>no producen en ${HORDE.ravageHours} h</b>.</p>
+      <h5>Gestas 🌋</h5>
+      <p>De vez en cuando despierta en un continente un enemigo de leyenda que solo cae si combaten juntos los imperios cercanos: ver ${see('gestas', 'Gestas de la Liga')}.</p>`,
   },
 
   jugadores: {
@@ -516,6 +544,63 @@ const TOPICS = {
     ])}`,
   },
 
+  gestas: {
+    icon: '🌋',
+    title: 'Gestas de la Liga',
+    body: () => {
+      const R = FEATS.reward;
+      const P = FEATS.perjury;
+      const th = Object.values(FEAT_THEMES)[0];
+      const T = th.tune;
+      const bands = ['🥉 Bronce', '🥈 Plata', '🥇 Oro'];
+      return `<p>Cada ${FEATS.periodDays} días de juego, más o menos, despierta un enemigo de leyenda en algunos continentes: <b>${th.name}</b> ${th.icon}. Ningún imperio puede vencerlo solo, ni siquiera el más grande: hay que combatir <b>juntos</b>. No es para ganar la partida: es una hazaña con un buen botín para todos los que luchan.</p>
+      <h5>1. Convocatoria y juramento</h5>
+      ${list([
+        `Empieza con <b>${FEATS.omenHours} h de presagios</b>. En cada continente se convoca a los imperios más cercanos (a menos de ${fmtNum(FEATS.radius)} leguas; si faltan, hasta ${fmtNum(FEATS.radiusMax)}): de ${FEATS.minConvoked} a ${FEATS.maxConvoked} por continente.`,
+        `Te convocan si has jugado en las últimas ${FEATS.seenHours} h, tienes al menos ${fmtNum(FEATS.minPoints)} puntos y ${FEATS.minDays} días de juego, y no estás de vacaciones ni eres perjuro. Te llega un aviso arriba y un informe.`,
+        '<b>Jura la gesta</b> desde el panel del continente. Al jurar se anota tu poder: el enemigo se hace a la medida de todos los que juran (y nadie cuenta más que todos los demás juntos, para que un imperio enorme no lo haga imposible para el resto).',
+        `Solo emerge si han jurado al menos <b>${FEATS.minPledges} imperios</b> y suman al menos ${String(FEATS.minEffective).replace('.', ',')} imperios efectivos (ver la coraza). Si no, vuelve a dormirse y nadie pierde nada.`,
+        `El juramento sigue abierto las primeras ${FEATS.pledgeCloseHours} h de lucha, pero quien llega tarde lo hace más fuerte.`,
+      ])}
+      <h5>2. La lucha por oleadas</h5>
+      ${list([
+        `La lucha dura <b>${FEATS.hours} h</b>, con una <b>oleada cada ${FEATS.waveHours} h</b>.`,
+        'Manda tu flota al continente con la misión <b>Atacar</b>: espera frente a la costa y combate en la siguiente oleada junto a <b>todas las flotas que esperan</b>, como un solo ejército. Después vuelve a casa con lo que quede. Solo puedes tener una flota a la vez en cada gesta, y tu almirante no va.',
+        `Si en una oleada no combate nadie (o la coraza no deja pasar nada), el enemigo se rehace un ${pct(FEATS.regrow)}.`,
+        'Mientras hay una gesta en un continente, allí no llegan hordas.',
+      ])}
+      ${featPhasesTable()}
+      <p class="muted small">Las cabezas entran en furia cuando quedan ${T.furyAt}: pegan un ${pct(T.fury - 1)} más y escupen lava. El enemigo se mide con lo que juran todos: más sierpes si hay muchos barcos, más gigantes y cabezas más duras si hay mucha tierra.</p>
+      <h5>3. La coraza 🛡️</h5>
+      <p>El daño que le hacéis depende de cuántos <b>imperios efectivos</b> combaten en la oleada: (suma de fuerzas)² ÷ suma de los cuadrados. Cuatro imperios iguales son 4; uno muy grande con tres pequeños, poco más de 1. Así lo que cuenta es que combatan muchos a la vez, no uno solo enorme.</p>
+      ${featCoopTable()}
+      ${tip('En el panel del continente ves cuántas flotas esperan ya la próxima oleada y cuánto dejaría pasar la coraza. Poneos de acuerdo en el chat para llegar a la misma oleada.')}
+      <h5>4. Gloria y premios</h5>
+      ${list([
+        `La <b>gloria</b> se gana por los hijos que abate cada oleada (cada fase vale lo que dice la tabla), repartida según la fuerza que pone cada uno.`,
+        `<b>Tramos</b>: según la parte de tu fuerza que hayas llevado (contando todas tus oleadas) y con al menos el ${pct1(R.minGlory)} de la gloria: ${bands.map((b, i) => `${b} (${pct(R.effort[i])} → <b>${R.hours[i]} h</b> de tu producción)`).join(', ')}. Nunca más de ${R.riskCap} veces lo que arriesgaste en barcos y tropas.`,
+        `<b>Bote común</b>: ${R.pot} h de la producción de todos los juramentados, repartido por gloria (nadie se lleva más del ${pct(R.potCap)}).`,
+        `<b>Bendición del Olimpo</b> (Plata y Oro): +${pct(R.blessing)} de producción durante ${R.blessingHours} h.`,
+        `<b>Heridos</b>: al acabar vuelven a casa el ${pct(R.wounded[0])} de tus caídos si se gana y el ${pct(R.wounded[1])} si se pierde.`,
+        `⚡ <b>Azote de ${th.enemy}</b> (más gloria): +${pct(R.topBonus - 1)} de botín personal y una reliquia legendaria. 🦁 <b>Corazón de león</b> (quien más esfuerzo ha puesto, con al menos el ${pct1(R.heartMinGlory)} de la gloria): otra legendaria. El 2.º y el 3.º en gloria se llevan una épica o legendaria; los demás, una probabilidad (${R.relicChance.map(pct).join(' / ')} según su tramo).`,
+        `Hay reliquias que solo salen en esta gesta: ${th.relics.map((id) => `${RELICS[id].icon} ${RELICS[id].name}`).join(' y ')}.`,
+        'Los premios se pagan en lo que produces (y algo de oro y cristal), así que valen lo mismo para un imperio pequeño que para uno grande.',
+      ])}
+      <h5>5. Resultados</h5>
+      ${list([
+        '<b>Victoria</b>: cae la última fase. Todo el premio.',
+        `<b>Victoria a medias</b>: se acaba el tiempo y le queda como mucho el ${pct(R.half)} de la vida. La mitad del premio.`,
+        `<b>Derrota</b>: solo el bote de las fases vencidas (${R.phasePot.map(pct).join(' y ')} del bote) y los heridos.`,
+        `<b>Nivel del continente</b>: si cae en menos de 24 h, la próxima vez será un ${pct(FEATS.tierStep)} más duro y dará un ${pct(FEATS.rewardStep)} más; si gana el enemigo, baja (entre ${FEATS.tiers[0]} y +${FEATS.tiers[1]}).`,
+      ])}
+      <h5>Juramento y tregua</h5>
+      ${list([
+        `🌫️ <b>Perjuro</b>: si juras y a las ${FEATS.perjuryHours} h de lucha no has combatido ni tienes flota en camino, los dioses cubren tu isla de ceniza (−${pct(P.ash)} de producción durante ${P.hours} h) y no podrás jurar otra gesta en ${P.days} días.`,
+        `🕊️ <b>Tregua sagrada</b>: los que juran la misma gesta no se pueden atacar, espiar, sabotear, bloquear ni invadir desde que emerge el enemigo hasta ${FEATS.truceAfterHours} h después de acabar, salvo si sus alianzas están en guerra.`,
+      ])}`;
+    },
+  },
+
   templo: {
     icon: '🛕',
     title: 'Templo y poderes',
@@ -526,7 +611,7 @@ const TOPICS = {
   reliquias: {
     icon: '🏺',
     title: 'Reliquias',
-    body: () => `<p>Objetos míticos que aparecen en expediciones, ruinas, conquistas de ciudades bárbaras, hordas y en la guarida del Kraken. Equipa hasta <b>${RELIC_SLOTS}</b> desde el ayuntamiento; las demás se pueden vender por oro.</p>
+    body: () => `<p>Objetos míticos que aparecen en expediciones, ruinas, conquistas de ciudades bárbaras, hordas, gestas y en la guarida del Kraken. Equipa hasta <b>${RELIC_SLOTS}</b> desde el ayuntamiento; las demás se pueden vender por oro.</p>
       ${relicsTable()}`,
   },
   eventos: {
@@ -605,7 +690,7 @@ const CHAPTERS = [
   { title: 'Economía', topics: ['recursos', 'trabajadores', 'edificios', 'investigacion', 'comercio'] },
   { title: 'Ejército', topics: ['unidades', 'combate', 'defensa', 'almirante', 'mercenarios'] },
   { title: 'El mar', topics: ['flotas', 'archipielago', 'expediciones', 'colonias', 'continentes'] },
-  { title: 'Otros jugadores', topics: ['jugadores', 'espionaje', 'bloqueos', 'invasiones', 'alianzas'] },
+  { title: 'Otros jugadores', topics: ['jugadores', 'espionaje', 'bloqueos', 'invasiones', 'alianzas', 'gestas'] },
   { title: 'Más', topics: ['templo', 'reliquias', 'eventos', 'visitantes', 'competicion', 'perfil', 'vacaciones', 'cuenta', 'atajos'] },
 ];
 

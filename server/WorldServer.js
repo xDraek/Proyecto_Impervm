@@ -1,8 +1,9 @@
 import { clock, universe } from '../src/config.js';
 import { RESOURCES } from '../src/game/data.js';
-import { assault, battle, count, hasCombat, splitForces } from '../src/game/combat.js';
+import { assault, battle, combineGroups, count, hasCombat, shareSurvivors, splitForces } from '../src/game/combat.js';
+import { bossLeft, capByRest, effectiveEmpires, featAt, featBoss, featCoop, featHours, featRewards, forceOf, pledgeEmpires, rewardBag, splitWar, unitsValue } from '../src/game/feats.js';
 import { Game, newState } from '../src/game/Game.js';
-import { ACHIEVEMENTS, CONTEST_CATEGORIES, CONTEST_DAYS, CONTEST_PRIZES, HORDE, WONDERS } from '../src/game/data.js';
+import { ACHIEVEMENTS, CONTEST_CATEGORIES, CONTEST_DAYS, CONTEST_PRIZES, FEATS, FEAT_THEMES, HORDE, WONDERS } from '../src/game/data.js';
 import { playerCombat, wonderLevel, wonderOf, worldEventAt } from '../src/game/rules.js';
 import { footprint, freshIslandState, generateContinent, generateSector, homeIsland, sectorCenter, sectorVertices } from '../src/game/world.js';
 import { createHash, randomBytes } from 'node:crypto';
@@ -33,6 +34,24 @@ const cleanEmail = (email) => String(email ?? '').trim().toLowerCase();
 const ALLIANCE_RE = /^[\p{L}\p{N}_ .'-]{3,30}$/u;
 // Flotas que avisan al llegar a tu ciudad
 const HOSTILE = new Set(['atacar', 'invadir', 'bloquear']);
+
+/** Une la batalla en el mar (`sea`) y la de tierra (`land`) de una misma oleada en un solo resultado. */
+function joinBattles(sea, land) {
+  const add = (a, b) => {
+    const out = { ...a };
+    for (const [u, n] of Object.entries(b ?? {})) out[u] = (out[u] ?? 0) + n;
+    return out;
+  };
+  return {
+    ...land,
+    rounds: (sea.rounds ?? 0) + (land.rounds ?? 0),
+    att: { start: sea.att.start, left: land.att.left, lost: add(sea.att.lost, land.att.lost) },
+    def: { start: { ...sea.def.start, ...land.def.start }, left: { ...sea.def.left, ...land.def.left }, lost: { ...sea.def.lost, ...land.def.lost } },
+    naval: sea.naval,
+    drowned: add(sea.drowned, land.drowned),
+    seaWon: true,
+  };
+}
 
 /** Quién bloquea el puerto u ocupa la ciudad (para quien la mira desde fuera). */
 function portOf(state) {
@@ -518,6 +537,15 @@ export class WorldServer {
       const cont = this.islands.get(land);
       const rt = this.islandStates.get(land);
       if (!cont || !rt) continue;
+      // Mientras hay una gesta en el continente no llegan hordas (y la próxima espera a que acabe)
+      if (rt.feat && rt.feat.stage !== 'fin' && !rt.horde) {
+        const after = rt.feat.end + this.#hoursMs(24);
+        if (!rt.nextHorde || rt.nextHorde < after) {
+          rt.nextHorde = after;
+          this.touch(land);
+        }
+        continue;
+      }
       if (!rt.horde) {
         if (!rt.nextHorde) {
           rt.nextHorde = now + this.#between(HORDE.firstHours);
@@ -584,6 +612,521 @@ export class WorldServer {
     this.announce(`🏆 ¡La horda de ${cont.name} ha sido derrotada! Más bárbaros abatidos: ${names}`);
     rt.horde = null;
     rt.nextHorde = t + this.#between(HORDE.gapHours);
+    this.touch(id);
+    this.mapCache = null;
+  }
+
+  // ── Gestas de la Liga ──────────────────────────────────────────────────────
+  // Eventos cooperativos puntuales (data.js: FEATS y FEAT_THEMES; reglas puras en
+  // src/game/feats.js). El calendario convoca a los imperios cercanos a un
+  // continente; los que juran combaten en oleadas que se resuelven aquí, en el
+  // tick, con la hora exacta de cada una (no según el orden de las partidas).
+
+  /** Convoca las gestas del calendario y hace avanzar las que están en marcha. */
+  #updateFeats(now) {
+    this.meta.featSites ??= [];
+    const cyc = featAt(now);
+    // Se convoca al empezar los presagios (si el servidor estaba parado, mientras quede al menos la mitad)
+    if (now >= cyc.omen && now < (cyc.omen + cyc.start) / 2 && this.meta.featCycle !== cyc.k) {
+      this.meta.featCycle = cyc.k;
+      this.#summonFeats(cyc, now);
+    }
+    for (const id of [...this.meta.featSites]) {
+      const f = this.islandStates.get(id)?.feat;
+      if (f) this.#runFeat(id, now);
+      // Acabada y pasada la tregua, ya no hay nada que vigilar
+      if (!f || (f.stage === 'fin' && now >= (f.truceUntil ?? f.end))) this.meta.featSites = this.meta.featSites.filter((x) => x !== id);
+    }
+  }
+
+  /** Si un jugador puede ser convocado: activo, con algo de recorrido y sin perjurio. */
+  #featCandidate(game, now) {
+    const s = game.state;
+    if (s.vacation || game.isProtected() || game.score() < FEATS.minPoints) return false;
+    if ((s.history?.length ?? 0) < FEATS.minDays) return false;
+    if ((s.perjuryUntil ?? 0) > now) return false;
+    return Date.now() - (s.lastSeen ?? 0) <= FEATS.seenHours * 3_600_000;
+  }
+
+  /**
+   * Al empezar los presagios de un ciclo: en cada continente libre se convoca a los imperios
+   * cercanos (primero donde más hay), sin repetir a nadie.
+   */
+  #summonFeats(cyc, now) {
+    let pool = [...this.games.values()].filter((g) => this.#featCandidate(g, now));
+    const homeOf = (g) => this.islands.get(g.state.home);
+    const sites = new Map();
+    const busy = (c) => {
+      const rt = this.islandStates.get(c.id);
+      return !rt || rt.horde || (rt.feat && rt.feat.stage !== 'fin');
+    };
+    for (const radius of [FEATS.radius, FEATS.radiusMax]) {
+      let free = [...this.islands.values()].filter((c) => c.type === 'continente' && !sites.has(c.id) && !busy(c));
+      while (pool.length >= FEATS.minConvoked && free.length) {
+        let best = null;
+        for (const c of free) {
+          const near = pool
+            .map((g) => ({ g, d: Math.hypot(homeOf(g).x - c.x, homeOf(g).z - c.z) }))
+            .filter((x) => x.d <= radius)
+            .sort((a, b) => a.d - b.d);
+          if (!best || near.length > best.near.length) best = { c, near };
+        }
+        if (!best || best.near.length < FEATS.minConvoked) break;
+        const chosen = best.near.slice(0, FEATS.maxConvoked).map((x) => x.g);
+        sites.set(best.c.id, chosen);
+        pool = pool.filter((g) => !chosen.includes(g));
+        free = free.filter((c) => c !== best.c);
+      }
+    }
+    for (const [site, games] of sites) this.startFeat(site, { ...cyc, players: games.map((g) => g.userId) }, now);
+    for (const g of pool) {
+      g.receiveNews(null, `${FEAT_THEMES[cyc.theme].icon} ${FEAT_THEMES[cyc.theme].enemy} despierta en el archipiélago, pero esta vez no hay ninguna gesta cerca de tu ciudad`, 'info');
+      this.pendingPush.add(g.userId);
+    }
+    if (sites.size) {
+      const t = FEAT_THEMES[cyc.theme];
+      const names = [...sites.keys()].map((id) => this.islands.get(id)?.name).join(', ');
+      this.announce(`${t.icon} ${t.name}: presagios en ${names}. Los imperios cercanos están convocados a la gesta.`);
+    }
+  }
+
+  /**
+   * Empieza una gesta en el continente `site` con los jugadores `players` convocados. La usa el
+   * calendario y también la moderación (y las pruebas). Devuelve si ha podido.
+   */
+  startFeat(site, { theme = Object.keys(FEAT_THEMES)[0], k = null, omen, start, end, players = [] }, now = clock.now()) {
+    const isl = this.islands.get(site);
+    const rt = this.islandStates.get(site);
+    if (isl?.type !== 'continente' || !rt || rt.horde || (rt.feat && rt.feat.stage !== 'fin')) return false;
+    omen ??= now;
+    start ??= omen + Math.round(featHours(FEATS.omenHours));
+    end ??= start + Math.round(featHours(FEATS.hours));
+    // Cada sitio tiene su propio desfase de oleadas (reparte la carga y los husos horarios)
+    let h = 0;
+    for (const ch of String(site)) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+    const waveMs = Math.round(featHours(FEATS.waveHours));
+    rt.feat = {
+      k: k ?? `m${start}`,
+      theme,
+      stage: 'presagio',
+      omen,
+      start,
+      end,
+      nextWave: start + (h % 997) / 997 * waveMs,
+      tier: rt.featTier ?? 0,
+      convoked: [...players],
+      pledged: {},
+      names: {},
+      boss: null,
+      glory: {},
+      brought: {},
+      risk: {},
+      fallen: {},
+      waves: [],
+      perjurers: [],
+      perjuryDone: false,
+      result: null,
+      truceUntil: end,
+    };
+    rt.feat.nextWave = Math.round(rt.feat.nextWave);
+    if (rt.nextHorde) rt.nextHorde = Math.max(rt.nextHorde, end + this.#hoursMs(24));
+    for (const uid of players) {
+      const g = this.games.get(uid);
+      if (!g) continue;
+      g.update(now);
+      g.featSummoned({ k: rt.feat.k, site, theme, siteName: isl.name }, now);
+      this.pendingPush.add(uid);
+    }
+    this.meta.featSites = [...new Set([...(this.meta.featSites ?? []), site])];
+    this.touch(site);
+    this.mapCache = null;
+    return true;
+  }
+
+  /** Moderación: lanza ya una gesta en el continente más cercano a quien la pide (o en el que se nombre). */
+  adminStartFeat(adminId, { site = null, omenMinutes = null } = {}) {
+    if (!this.isAdmin(adminId)) throw new UserError('Solo para moderadores.');
+    const me = this.islands.get(this.games.get(adminId)?.state.home) ?? { x: 0, z: 0 };
+    const free = [...this.islands.values()].filter((c) => c.type === 'continente' && (!site || c.id === site || c.name === site));
+    free.sort((a, b) => Math.hypot(a.x - me.x, a.z - me.z) - Math.hypot(b.x - me.x, b.z - me.z));
+    const cont = free.find((c) => {
+      const rt = this.islandStates.get(c.id);
+      return rt && !rt.horde && !(rt.feat && rt.feat.stage !== 'fin');
+    });
+    if (!cont) throw new UserError('No hay ningún continente libre para la gesta.');
+    const now = clock.now();
+    const players = [...this.games.values()]
+      .filter((g) => !g.state.vacation)
+      .map((g) => ({ g, d: Math.hypot(this.islands.get(g.state.home).x - cont.x, this.islands.get(g.state.home).z - cont.z) }))
+      .filter((x) => x.d <= FEATS.radiusMax)
+      .sort((a, b) => a.d - b.d)
+      .slice(0, FEATS.maxConvoked)
+      .map((x) => x.g.userId);
+    const omen = now;
+    const start = omen + Math.round(omenMinutes != null ? (Math.max(1, Number(omenMinutes) || 1) * 60_000) / universe.speed : featHours(FEATS.omenHours));
+    this.startFeat(cont.id, { omen, start, players }, now);
+    this.announce(`${FEAT_THEMES.tifon.icon} Los moderadores despiertan una gesta en ${cont.name}`);
+    return { site: cont.id, name: cont.name, players: players.length };
+  }
+
+  /** Un jugador jura la gesta del continente `site`. `snap`: { name, at, power, prod, mix }. */
+  pledgeFeat(uid, site, snap, t) {
+    const f = this.islandStates.get(site)?.feat;
+    if (!f || f.stage === 'fin') return { ok: false, reason: 'No hay ninguna gesta en ese continente.' };
+    if (!f.convoked.includes(uid)) return { ok: false, reason: 'No te han convocado a esta gesta.' };
+    if (f.pledged[uid]) return { ok: false, reason: 'Ya has jurado esta gesta.' };
+    if (f.perjurers.includes(uid)) return { ok: false, reason: 'Rompiste tu juramento: ya no puedes volver a jurar esta gesta.' };
+    if (t >= f.start + featHours(FEATS.pledgeCloseHours)) return { ok: false, reason: 'El juramento ya está cerrado: la lucha va muy avanzada.' };
+    const { AM, HM, AL, HL, f: force } = snap.power;
+    f.pledged[uid] = { name: snap.name, at: t, P: { AM, HM, AL, HL }, f: force, prod: snap.prod, mix: snap.mix };
+    f.names[uid] = snap.name;
+    // Jurar con la lucha empezada endurece al enemigo
+    if (f.boss) this.#rebaseFeat(f);
+    this.touch(site);
+    for (const id of Object.keys(f.pledged)) this.pendingPush.add(Number(id));
+    return { ok: true, k: f.k, theme: f.theme };
+  }
+
+  /** Llega una flota a la gesta: puede esperar a la oleada si su dueño la juró y aún no ha acabado. */
+  featArrive(site, uid, t) {
+    const f = this.islandStates.get(site)?.feat;
+    const theme = f ? FEAT_THEMES[f.theme] : null;
+    if (!f || f.stage === 'fin' || t >= f.end) return { ok: false, reason: 'La gesta ya ha terminado. La flota vuelve a casa.' };
+    if (!f.pledged[uid]) return { ok: false, reason: 'No juraste esta gesta: tu flota se da la vuelta.' };
+    return { ok: true, icon: theme.icon, enemy: theme.enemy };
+  }
+
+  /** Tregua sagrada: los que juraron la misma gesta no se pueden atacar desde que emerge el enemigo hasta unas horas después (salvo en guerra). */
+  truce(a, b, t) {
+    if (a === b || this.relation(a, b) === 'guerra') return false;
+    for (const id of this.meta.featSites ?? []) {
+      const f = this.islandStates.get(id)?.feat;
+      if (!f?.emergedAt || t < f.emergedAt || t >= (f.truceUntil ?? f.end)) continue;
+      if (f.pledged[a] && f.pledged[b]) return true;
+    }
+    return false;
+  }
+
+  /** Con quién tiene tregua ahora un jugador (para el navegador). */
+  #truceWith(uid, t) {
+    const out = new Set();
+    for (const id of this.meta.featSites ?? []) {
+      const f = this.islandStates.get(id)?.feat;
+      if (!f?.emergedAt || t < f.emergedAt || t >= (f.truceUntil ?? f.end) || !f.pledged[uid]) continue;
+      for (const other of Object.keys(f.pledged)) if (Number(other) !== uid && this.relation(uid, Number(other)) !== 'guerra') out.add(Number(other));
+    }
+    return [...out];
+  }
+
+  /** Hace avanzar una gesta hasta `now`, suceso a suceso y en orden: emerger, oleadas, perjuros y final. */
+  #runFeat(id, now) {
+    const rt = this.islandStates.get(id);
+    const f = rt.feat;
+    const perjuryAt = f.start + Math.round(featHours(FEATS.perjuryHours));
+    for (let guard = 0; guard < 200 && f.stage !== 'fin'; guard++) {
+      const events = [];
+      const { start, end, nextWave } = f;
+      if (!f.boss) events.push([start, 0, () => this.#emergeFeat(id, start)]);
+      else {
+        if (nextWave <= end) events.push([nextWave, 1, () => this.#featWave(id, nextWave)]);
+        if (!f.perjuryDone) events.push([perjuryAt, 2, () => this.#purgePerjurers(id, perjuryAt)]);
+        events.push([end, 3, () => this.#finishFeat(id, end)]);
+      }
+      events.sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+      const ev = events[0];
+      if (!ev || ev[0] > now) break;
+      if (ev[1] === 1) f.nextWave = nextWave + Math.round(featHours(FEATS.waveHours));
+      ev[2]();
+    }
+  }
+
+  /** Empieza la lucha: si han jurado bastantes imperios, emerge el enemigo a la medida de su poder. */
+  #emergeFeat(id, t) {
+    const rt = this.islandStates.get(id);
+    const f = rt.feat;
+    const theme = FEAT_THEMES[f.theme];
+    const name = this.islands.get(id)?.name ?? '';
+    const pledged = Object.values(f.pledged);
+    const powers = pledged.map((p) => ({ ...p.P, f: p.f }));
+    if (pledged.length < FEATS.minPledges || pledgeEmpires(powers) < FEATS.minEffective) {
+      f.stage = 'fin';
+      f.result = 'dormido';
+      f.truceUntil = t;
+      this.#releaseFeatFleets(id, t, `${theme.icon} ${theme.enemy} vuelve a dormirse: tu flota vuelve a casa`);
+      for (const uid of f.convoked) {
+        this.games.get(uid)?.receiveNews(null, `${theme.icon} No se juntaron bastantes imperios y ${theme.enemy} vuelve a dormirse en ${name}. Nadie pierde nada.`, 'info');
+        this.pendingPush.add(uid);
+      }
+      this.touch(id);
+      return;
+    }
+    const boss = featBoss(f.theme, capByRest(powers), f.tier);
+    f.boss = { ...boss, phase: 0, full: Object.fromEntries(theme.phases.map((p) => [p.unit, boss[p.unit]])) };
+    f.stage = 'lucha';
+    f.emergedAt = t;
+    this.announce(`${theme.icon} ¡${theme.enemy} emerge en ${name}! ${pledged.length} imperios han jurado combatirlo.`);
+    for (const uid of Object.keys(f.pledged)) {
+      this.games.get(Number(uid))?.receiveNews(null, `${theme.icon} ¡${theme.enemy} emerge en ${name}! La primera oleada, en cuanto lleguen las flotas.`, 'error');
+      this.pendingPush.add(Number(uid));
+    }
+    this.touch(id);
+  }
+
+  /** Las flotas que esperan en la gesta `id` desde antes de `tw` (y de jugadores que la juraron). */
+  #featFleets(id, tw) {
+    const f = this.islandStates.get(id).feat;
+    const out = [];
+    for (const [uid, game] of this.games) {
+      if (!f.pledged[uid]) continue;
+      for (const m of game.state.missions) if (m.feat === id && m.phase === 'estacionada' && (m.waitSince ?? Infinity) <= tw) out.push({ uid, game, m });
+    }
+    return out;
+  }
+
+  /** Una oleada: las flotas que esperan combaten juntas contra la fase del enemigo. */
+  #featWave(id, tw) {
+    const rt = this.islandStates.get(id);
+    const f = rt.feat;
+    const boss = f.boss;
+    const theme = FEAT_THEMES[f.theme];
+    const phases = theme.phases;
+    const T = theme.tune;
+    const name = this.islands.get(id)?.name ?? '';
+    const groups = this.#featFleets(id, tw).map((x) => {
+      const c = playerCombat(x.game.state);
+      return { ...x, units: { ...x.m.units }, atkMul: c.atkMul, hpMul: c.hpMul };
+    });
+    const forces = groups.map((g) => forceOf(g.units, g.atkMul, g.hpMul));
+    // Cada jugador cuenta una vez, aunque traiga varias flotas
+    const byPlayer = {};
+    groups.forEach((g, i) => (byPlayer[g.uid] = (byPlayer[g.uid] ?? 0) + forces[i]));
+    const N = effectiveEmpires(Object.values(byPlayer));
+    const coop = featCoop(N);
+    const wave = { t: tw, players: Object.keys(byPlayer).length, N: Math.round(N * 100) / 100, coop: Math.round(coop * 100) / 100, phase: boss.phase, killed: 0 };
+    const fmtN = String(wave.N).replace('.', ',');
+
+    if (!groups.length || coop <= 0) {
+      // Sin combate el enemigo se rehace un poco
+      const unit = phases[boss.phase].unit;
+      boss[unit] = Math.min(boss.full[unit], boss[unit] + Math.ceil(FEATS.regrow * boss.full[unit]));
+      for (const g of groups) {
+        g.game.receiveNews(null, `${theme.icon} La coraza de ${theme.enemy} no cede: en la oleada solo había ${fmtN} imperios efectivos. Hacen falta más (tu flota sigue esperando).`, 'error');
+        this.pendingPush.add(g.uid);
+      }
+      f.waves = [...f.waves, wave].slice(-16);
+      this.touch(id);
+      return;
+    }
+
+    const army = combineGroups(groups);
+    let units = army.units;
+    const glory = groups.map(() => 0);
+    const kills = groups.map(() => 0);
+    const credit = (amount, killed, weights) => {
+      const total = weights.reduce((a, b) => a + b, 0);
+      weights.forEach((w, i) => {
+        const k = total ? w / total : 1 / weights.length;
+        glory[i] += amount * k;
+        kills[i] += killed * k;
+      });
+    };
+    let main = null;
+    const lines = [];
+
+    // Fase I: en el mar (solo cuentan los barcos de guerra). Si se gana, se desembarca en la misma oleada
+    let landNow = boss.phase >= 1;
+    if (boss.phase === 0) {
+      const r = assault({ units, atkMul: army.atkMul, hpMul: army.hpMul }, { units: { sierpe: boss.sierpe }, atkMul: 1, hpMul: 1 / coop });
+      const killed = boss.sierpe - (r.def.left.sierpe ?? 0);
+      boss.sierpe -= killed;
+      credit((killed / boss.full.sierpe) * phases[0].glory, killed, groups.map((g) => forceOf(splitWar(g.units).sea, g.atkMul, g.hpMul)));
+      wave.killed += killed;
+      lines.push(`En el mar abatís ${killed} ${killed === 1 ? 'sierpe' : 'sierpes'}${boss.sierpe ? ` (quedan ${boss.sierpe})` : ': el mar es vuestro'}.`);
+      units = r.att.left;
+      main = r;
+      if (boss.sierpe <= 0) {
+        boss.phase = 1;
+        landNow = r.landed;
+      }
+    }
+    // Fases en tierra: gigantes y después las cabezas
+    if (landNow && boss.phase >= 1 && boss.phase < phases.length) {
+      const now = shareSurvivors(groups.map((g) => g.units), units);
+      const unit = phases[boss.phase].unit;
+      const fury = unit === 'cabeza' && boss.cabeza <= T.furyAt;
+      const def =
+        unit === 'cabeza'
+          ? { units: { cabeza: boss.cabeza }, atkMul: boss.headAtk * (fury ? T.fury : 1), hpMul: boss.headHp / coop, extraAtk: fury ? boss.lava : 0 }
+          : { units: { [unit]: boss[unit] }, atkMul: 1, hpMul: 1 / coop };
+      const r = assault({ units, atkMul: army.atkMul, hpMul: army.hpMul }, def);
+      const killed = boss[unit] - (r.def.left[unit] ?? 0);
+      boss[unit] -= killed;
+      const weights = now.map((u, i) => forceOf(splitWar(u).land, groups[i].atkMul, groups[i].hpMul) + 0.25 * forceOf(splitWar(u).sea, groups[i].atkMul, groups[i].hpMul));
+      credit((killed / boss.full[unit]) * phases[boss.phase].glory, killed, weights);
+      wave.killed += killed;
+      const what = unit === 'cabeza' ? (killed === 1 ? 'cabeza' : 'cabezas') : killed === 1 ? 'gigante' : 'gigantes';
+      lines.push(`${r.landed ? 'En tierra' : 'No llegáis a desembarcar:'} abatís ${killed} ${what}${boss[unit] ? ` (quedan ${boss[unit]})` : ''}${fury ? ' contra su furia' : ''}.`);
+      units = r.att.left;
+      // Si en la misma oleada se luchó en el mar y en tierra, el informe lleva las dos batallas
+      main = main ? joinBattles(main, r) : r;
+      if (boss[unit] <= 0) boss.phase += 1;
+    }
+
+    // Cada uno se lleva sus supervivientes, su gloria y su informe
+    const lefts = shareSurvivors(groups.map((g) => g.units), units);
+    groups.forEach((g, i) => {
+      const uid = g.uid;
+      const left = lefts[i];
+      const lost = {};
+      for (const [u, n] of Object.entries(g.units)) if (n - (left[u] ?? 0) > 0) lost[u] = n - (left[u] ?? 0);
+      f.glory[uid] = (f.glory[uid] ?? 0) + glory[i];
+      f.brought[uid] = (f.brought[uid] ?? 0) + forces[i];
+      f.risk[uid] = (f.risk[uid] ?? 0) + unitsValue(splitWar(g.units).sea) + unitsValue(splitWar(g.units).land);
+      const fallen = (f.fallen[uid] ??= {});
+      for (const [u, n] of Object.entries(lost)) fallen[u] = (fallen[u] ?? 0) + n;
+      const phaseName = phases[Math.min(wave.phase, phases.length - 1)].name;
+      const report = {
+        t: tw,
+        kind: 'gesta',
+        icon: theme.icon,
+        island: id,
+        islandName: name,
+        outcome: wave.killed ? 'victoria' : 'derrota',
+        enemy: theme.enemy,
+        title: `Oleada contra ${theme.enemy}: ${phaseName}`,
+        text: `${groups.length > 1 ? `Combatís ${Object.keys(byPlayer).length} imperios juntos` : 'Combates'} (${fmtN} imperios efectivos: el ${Math.round(coop * 100)} % de vuestro daño atraviesa su coraza). ${lines.join(' ')} Tu gloria: +${Math.round(glory[i])}.`,
+      };
+      g.game.settleFeat(g.m, { left, lost, kills: Math.round(kills[i]), report, result: main }, tw);
+      this.pendingPush.add(uid);
+    });
+    f.waves = [...f.waves, wave].slice(-16);
+    this.touch(id);
+    if (boss.phase >= phases.length) this.#finishFeat(id, tw, 'victoria');
+    else if (wave.phase !== boss.phase) this.announce(`${theme.icon} ${name}: cae la fase «${phases[wave.phase].name}» de ${theme.enemy}. Empieza «${phases[boss.phase].name}».`);
+  }
+
+  /** Con el enemigo ya fuera, recalcula su tamaño con el poder de los que quedan jurados. */
+  #rebaseFeat(f) {
+    const powers = Object.values(f.pledged).map((p) => ({ ...p.P, f: p.f }));
+    if (!f.boss || !powers.length) return;
+    const nb = featBoss(f.theme, capByRest(powers), f.tier);
+    FEAT_THEMES[f.theme].phases.forEach((p, i) => {
+      const u = p.unit;
+      if (i < f.boss.phase || u === 'cabeza') return;
+      if (i === f.boss.phase) f.boss[u] = Math.max(1, Math.round((f.boss[u] * nb[u]) / f.boss.full[u]));
+      else f.boss[u] = nb[u];
+      f.boss.full[u] = nb[u];
+    });
+    f.boss.headHp = nb.headHp;
+    f.boss.headAtk = nb.headAtk;
+    f.boss.lava = nb.lava;
+  }
+
+  /** A las tantas horas de lucha, quien juró y no ha combatido (ni tiene flota en camino) es perjuro. */
+  #purgePerjurers(id, t) {
+    const f = this.islandStates.get(id).feat;
+    f.perjuryDone = true;
+    const theme = FEAT_THEMES[f.theme];
+    const siteName = this.islands.get(id)?.name ?? '';
+    const out = Object.keys(f.pledged).filter((uid) => {
+      if ((f.brought[uid] ?? 0) > 0) return false;
+      const g = this.games.get(Number(uid));
+      return !g?.state.missions.some((m) => m.target === id && m.phase !== 'vuelta');
+    });
+    if (!out.length) return;
+    for (const uid of out) {
+      delete f.pledged[uid];
+      f.perjurers.push(Number(uid));
+      const g = this.games.get(Number(uid));
+      if (!g) continue;
+      g.update(t);
+      g.featPerjury({ themeName: theme.name, siteName }, t);
+      this.pendingPush.add(Number(uid));
+    }
+    // Sin ellos el enemigo es más pequeño
+    this.#rebaseFeat(f);
+    this.touch(id);
+  }
+
+  /** Las flotas que esperaban en la gesta vuelven a casa. */
+  #releaseFeatFleets(id, t, text) {
+    for (const [uid, game] of this.games) {
+      for (const m of game.state.missions) {
+        if (m.feat !== id || m.phase !== 'estacionada') continue;
+        game.featRelease(m, t, text);
+        this.pendingPush.add(uid);
+      }
+    }
+  }
+
+  /** Se acaba la gesta: victoria, victoria a medias o derrota; se paga a cada uno y cambia el nivel del sitio. */
+  #finishFeat(id, t, result = null) {
+    const rt = this.islandStates.get(id);
+    const f = rt.feat;
+    if (f.stage === 'fin') return;
+    const theme = FEAT_THEMES[f.theme];
+    const name = this.islands.get(id)?.name ?? '';
+    const R = FEATS.reward;
+    result ??= bossLeft(f.theme, f.boss) <= R.half ? 'media' : 'derrota';
+    // Los perjuros se apartan antes de pagar (si la lucha ha durado lo bastante)
+    if (!f.perjuryDone && t - f.start >= featHours(FEATS.perjuryHours)) this.#purgePerjurers(id, t);
+    f.stage = 'fin';
+    f.result = result;
+    f.finishedAt = t;
+    f.truceUntil = t + Math.round(featHours(FEATS.truceAfterHours));
+    this.#releaseFeatFleets(id, t, `${theme.icon} La gesta de ${name} ha terminado: tu flota vuelve a casa`);
+
+    const won = result !== 'derrota';
+    const players = {};
+    for (const [uid, p] of Object.entries(f.pledged)) players[uid] = { prod: p.prod, f: p.f, brought: f.brought[uid] ?? 0, glory: f.glory[uid] ?? 0, risk: f.risk[uid] ?? 0 };
+    const rewards = featRewards(players, { result, phasesWon: Math.min(f.boss?.phase ?? 0, theme.phases.length - 1), tier: f.tier });
+    const bands = ['Bronce', 'Plata', 'Oro'];
+    let topName = null;
+    let heartName = null;
+    for (const [uid, r] of Object.entries(rewards)) {
+      const game = this.games.get(Number(uid));
+      if (!game) continue;
+      game.update(t);
+      const back = R.wounded[won ? 0 : 1];
+      const wounded = Object.fromEntries(Object.entries(f.fallen[uid] ?? {}).map(([u, n]) => [u, Math.floor(n * back)]).filter(([, n]) => n > 0));
+      const bag = rewardBag(r.value, f.pledged[uid].mix);
+      if (r.top) topName = f.pledged[uid].name;
+      if (r.heart) heartName = f.pledged[uid].name;
+      const title = { victoria: `¡${theme.enemy} ha caído!`, media: `${theme.enemy} huye malherido`, derrota: `${theme.enemy} resiste` }[result];
+      const parts = [
+        r.band >= 0 ? `Tramo ${bands[r.band]}: trajiste el ${Math.round(r.effort * 100)} % de tu fuerza y ganaste el ${Math.round(r.share * 100)} % de la gloria.` : 'No llegaste a ningún tramo de premio: hace falta combatir más.',
+        r.top ? `⚡ Eres el Azote de ${theme.enemy}: quien más gloria ha ganado.` : '',
+        r.heart ? '🦁 Corazón de león: nadie se ha esforzado más que tú.' : '',
+        r.blessing ? `La bendición del Olimpo te da +${Math.round(R.blessing * 100)} % de producción durante ${r.blessing} h.` : '',
+        Object.keys(wounded).length ? `Vuelven ${Object.values(wounded).reduce((a, b) => a + b, 0)} heridos de los que cayeron.` : '',
+      ];
+      game.receiveFeatReward(
+        {
+          bag,
+          blessingHours: r.blessing,
+          wounded,
+          relic: r.relic,
+          theme: f.theme,
+          top: r.top,
+          heart: r.heart,
+          won,
+          report: { t, kind: 'gesta', island: id, islandName: name, outcome: won ? 'victoria' : 'derrota', enemy: theme.enemy, title, text: parts.filter(Boolean).join(' '), loot: bag },
+        },
+        t,
+      );
+      this.pendingPush.add(Number(uid));
+    }
+    // El sitio sube si se gana pronto y baja si se pierde
+    const [lo, hi] = FEATS.tiers;
+    if (result === 'victoria' && t - (f.emergedAt ?? f.start) <= featHours(24)) rt.featTier = Math.min(hi, (rt.featTier ?? 0) + 1);
+    if (result === 'derrota') rt.featTier = Math.max(lo, (rt.featTier ?? 0) - 1);
+    this.meta.featHall = [{ k: f.k, site: id, siteName: name, theme: f.theme, result, t, players: Object.keys(f.pledged).length, top: topName, heart: heartName }, ...(this.meta.featHall ?? [])].slice(0, 12);
+    const msg = {
+      victoria: `${theme.icon} ¡${theme.enemy} ha caído en ${name}!${topName ? ` Azote: ${topName}.` : ''}${heartName ? ` Corazón de león: ${heartName}.` : ''}`,
+      media: `${theme.icon} ${theme.enemy} huye malherido de ${name}: victoria a medias.`,
+      derrota: `${theme.icon} ${theme.enemy} resiste en ${name}: la gesta ha fracasado.`,
+    }[result];
+    this.announce(msg);
     this.touch(id);
     this.mapCache = null;
   }
@@ -979,6 +1522,7 @@ export class WorldServer {
     }
     if (this.meta.contest && Date.now() >= this.meta.contest.end) this.#finishContest();
     this.#updateHordes(now);
+    this.#updateFeats(now);
     this.#checkStations(now);
     // Enlaces de correo caducados (cada diez minutos)
     if (Date.now() - (this.tokenSweep ?? 0) > 600_000) {
@@ -1035,12 +1579,14 @@ export class WorldServer {
       const land = this.islands.get(c.id)?.land;
       if (land) ids.add(land);
     }
+    // Y el continente de la gesta a la que te han convocado (puede quedar lejos)
+    if (game.state.feat?.site) ids.add(game.state.feat.site);
     const islands = [...ids].map((id) => this.islands.get(id)).filter(Boolean);
     const states = {};
     const players = {};
     for (const isl of islands) {
       const rt = this.islandStates.get(isl.id);
-      if (rt) states[isl.id] = rt;
+      if (rt) states[isl.id] = rt.feat ? { ...rt, feat: this.#publicFeat(rt.feat, userId, isl.id) } : rt;
       for (const uid of [isl.owner, rt?.colonizedBy]) {
         if (uid != null && !players[uid]) players[uid] = { ...this.playerInfo(uid), rel: this.relation(userId, uid) };
       }
@@ -1067,7 +1613,35 @@ export class WorldServer {
       traffic: this.#traffic(userId, game.state.home),
       support: this.supportersAt(game.state.home, userId).map(({ game: g, mission }) => ({ from: g.name, units: mission.units })),
       owed: this.#owedTo(game),
+      truce: this.#truceWith(userId, now),
     };
+  }
+
+  /** Lo que ven los demás de una gesta: sin el poder ni la producción de cada juramentado. */
+  #publicFeat(f, userId, site) {
+    const mine = f.pledged[userId];
+    const pledged = Object.fromEntries(Object.entries(f.pledged).map(([uid, p]) => [uid, { name: p.name }]));
+    if (mine) pledged[userId] = { name: mine.name, f: mine.f };
+    const { risk, fallen, brought, ...rest } = f;
+    return { ...rest, pledged, brought: brought[userId] != null ? { [userId]: brought[userId] } : {}, waiting: f.stage === 'lucha' ? this.#featWaiting(site) : null };
+  }
+
+  /** Quién espera ya la próxima oleada y cuánto dejaría pasar la coraza (se calcula como mucho cada pocos segundos). */
+  #featWaiting(site) {
+    this.featWaitCache ??= new Map();
+    const hit = this.featWaitCache.get(site);
+    if (hit && Date.now() - hit.at < 3000) return hit.value;
+    const byPlayer = {};
+    let fleets = 0;
+    for (const { uid, game, m } of this.#featFleets(site, Infinity)) {
+      const c = playerCombat(game.state);
+      byPlayer[uid] = (byPlayer[uid] ?? 0) + forceOf(m.units, c.atkMul, c.hpMul);
+      fleets++;
+    }
+    const N = effectiveEmpires(Object.values(byPlayer));
+    const value = { fleets, players: Object.keys(byPlayer).length, N: Math.round(N * 100) / 100, coop: Math.round(featCoop(N) * 100) / 100 };
+    this.featWaitCache.set(site, { at: Date.now(), value });
+    return value;
   }
 
   /** Tributo apartado en cada ciudad que ocupa este jugador (id de la misión → recursos). */

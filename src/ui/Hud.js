@@ -1,9 +1,9 @@
 import { play } from '../audio.js';
 import { clock, universe } from '../config.js';
-import { BUILDINGS, BUILDING_KEYS, ISLAND_TYPES, MISSION_TYPES, PLAYER_UNITS, POWERS, RESEARCH, RESOURCES, RESOURCE_KEYS, UNITS, VISITORS } from '../game/data.js';
+import { BUILDINGS, BUILDING_KEYS, FEATS, ISLAND_TYPES, MISSION_TYPES, PLAYER_UNITS, POWERS, RESEARCH, RESOURCES, RESOURCE_KEYS, UNITS, VISITORS } from '../game/data.js';
 import { HOUR_MS, canAfford, multiplyCost, upcomingWorldEvents } from '../game/rules.js';
 import { api } from '../net/api.js';
-import { armyHtml, armySummary } from './army.js';
+import { armyHtml, armySummary, featWait } from './army.js';
 import { buildingPanel } from './buildingPanel.js';
 import { bag, costItems, escapeHtml, fmtNum, fmtTime, unitList } from './format.js';
 import { fleetFor, islandPanel, readFleet, readPayload, readOpts } from './islandPanel.js';
@@ -800,6 +800,13 @@ export class Hud {
       case 'plunder':
         await this.#run(btn, () => game.plunder(Number(btn.dataset.mission)), null, 'coins');
         break;
+      case 'pledge-feat': {
+        const site = btn.dataset.site;
+        const f = game.island(site)?.feat;
+        if (!confirm(`¿Jurar combatir a ${f?.enemy ?? 'la bestia'}? Si juras y no traes ninguna flota, serás perjuro: ceniza en tu producción y unos días sin poder jurar otra gesta.`)) break;
+        await this.#run(btn, () => game.pledgeFeat(site), null, 'magic');
+        break;
+      }
       case 'break-port':
         if (!confirm(game.state.occupied ? '¿Atacar a los invasores con todo lo que tienes en casa?' : '¿Atacar la flota que bloquea tu puerto con tus barcos de guerra?')) break;
         await this.#run(btn, () => game.breakPort(), null, 'sail');
@@ -889,8 +896,23 @@ export class Hud {
       const start = until - (p.duration * HOUR_MS) / universe.speed;
       rows.push(row({ icon: p.icon, title: p.name, start, end: until, select: 'templo' }));
     }
+    // Efectos de las gestas: la bendición del Olimpo y la ceniza del perjuro
+    for (const [id, icon, title, hours] of [
+      ['olimpo', '✨', `Bendición del Olimpo · +${Math.round(FEATS.reward.blessing * 100)} %`, FEATS.reward.blessingHours],
+      ['ceniza', '🌫️', `Ceniza del perjuro · −${Math.round(FEATS.perjury.ash * 100)} %`, FEATS.perjury.hours],
+    ]) {
+      const until = game.buffUntil(id);
+      if (until) rows.push(row({ icon, title, start: until - (hours * HOUR_MS) / universe.speed, end: until }));
+    }
     for (const m of game.missions) {
       const t = MISSION_TYPES[m.type];
+      const feat = m.feat != null && m.phase === 'estacionada' ? featWait(game, m) : null;
+      if (feat) {
+        rows.push(`<div class="dock-row" data-select="${m.target}">
+          <div class="q-title"><span>${feat.icon} Esperando a ${escapeHtml(feat.enemy)}</span><span class="q-time" data-until="${feat.until}"></span></div>
+          <button class="ghost small" data-action="recall" data-mission="${m.id}">Retirar</button></div>`);
+        continue;
+      }
       if (m.phase === 'estacionada') {
         const what = { invadir: '🦅 Ocupando', bloquear: '⛓️ Bloqueando' }[m.type] ?? '🛡️ Defendiendo';
         const until = m.until ? `<span class="q-time" data-until="${m.until}"></span>` : `<span class="muted small">${unitList(m.units)}</span>`;
@@ -962,12 +984,13 @@ export class Hud {
     const hordes = [...lands].map((id) => ({ id, isl: this.game.world.island(id), h: this.game.world.islandState(id)?.horde })).filter((x) => x.h && x.isl);
     const s = this.game.state;
     const port = s.occupied ?? s.blockade;
-    this.alert.hidden = !raid && !incoming.length && !hordes.length && !port;
+    const feat = this.#featCall();
+    this.alert.hidden = !raid && !incoming.length && !hordes.length && !port && !feat;
     if (this.alert.hidden) {
       this.cache.alert = '';
       return;
     }
-    this.alertTarget = port ? 'puerto' : !raid && !incoming.length ? hordes[0].id : 'muralla';
+    this.alertTarget = port ? 'puerto' : raid || incoming.length ? 'muralla' : hordes.length ? hordes[0].id : feat.site;
     const lines = [];
     if (s.occupied) lines.push(`<div><b>🦅 ¡${escapeHtml(port.name)} ocupa tu ciudad!</b> Se llevan parte de lo que produces · se irán en <span data-until="${port.until}"></span></div>`);
     else if (s.blockade) lines.push(`<div><b>⛓️ ¡${escapeHtml(port.name)} bloquea tu puerto!</b> No zarpa ni entra nadie · como mucho <span data-until="${port.until}"></span></div>`);
@@ -975,6 +998,7 @@ export class Hud {
       const left = Object.values(x.h.garrison).reduce((a, b) => a + b, 0);
       lines.push(`<div><b>🔥 ¡Horda en ${escapeHtml(x.isl.name)}!</b> ${fmtNum(left)} bárbaros · arrasará tus colonias en <span data-until="${x.h.deadline}"></span></div>`);
     }
+    if (feat) lines.push(`<div><b>${feat.icon} ${escapeHtml(feat.title)}</b> ${feat.text} <span data-until="${feat.until}"></span></div>`);
     if (raid) lines.push(`<div><b>¡Piratas a la vista!</b> Llegan en <span data-until="${raid.arrival}"></span> · ${unitList(raid.army)}</div>`);
     for (const m of incoming.slice(0, 3)) {
       const what = { invadir: 'Invasión', bloquear: 'Bloqueo' }[m.type] ?? 'Ataque';
@@ -984,10 +1008,25 @@ export class Hud {
       ? 'Pulsa para ver tu puerto y echarlos, o pide tropas de apoyo a tu alianza'
       : raid || incoming.length
         ? 'Defiende con tropas en casa, la muralla y la Égida del templo'
-        : 'Pulsa para ver la horda y mandar tus tropas contra ella';
-    const html = `<span class="alert-icon">${s.occupied ? '🦅' : s.blockade ? '⛓️' : incoming.length ? '⚔️' : raid ? '🏴‍☠️' : '🔥'}</span>
+        : hordes.length
+          ? 'Pulsa para ver la horda y mandar tus tropas contra ella'
+          : 'Pulsa para ver la gesta en su continente';
+    const html = `<span class="alert-icon">${s.occupied ? '🦅' : s.blockade ? '⛓️' : incoming.length ? '⚔️' : raid ? '🏴‍☠️' : hordes.length ? '🔥' : feat.icon}</span>
       <div>${lines.join('')}<div class="small">${tip}</div></div>`;
     this.#setHtml(this.alert, 'alert', html);
+  }
+
+  /** La gesta a la que te han convocado, si te toca hacer algo: jurar o mandar tu flota. */
+  #featCall() {
+    const f = this.game.featInfo();
+    if (!f || (f.stage !== 'presagio' && f.stage !== 'lucha')) return null;
+    const name = f.name;
+    if (!f.pledged) {
+      if (!f.convoked || !f.pledgeOpen) return null;
+      return { site: f.site, icon: f.icon, title: `¡${f.enemy} despierta en ${name}!`, text: f.stage === 'presagio' ? 'Estás convocado: jura la gesta · emerge en' : 'Aún puedes jurar la gesta · próxima oleada en', until: f.stage === 'presagio' ? f.start : f.nextWave };
+    }
+    if (this.game.state.missions.some((m) => m.target === f.site && m.phase !== 'vuelta')) return null;
+    return { site: f.site, icon: f.icon, title: `${f.enemy} en ${name}`, text: f.stage === 'presagio' ? 'Has jurado: manda tu flota · emerge en' : 'Has jurado y tu flota no está: mándala · próxima oleada en', until: f.stage === 'presagio' ? f.start : f.nextWave };
   }
 
   #renderVisitor() {

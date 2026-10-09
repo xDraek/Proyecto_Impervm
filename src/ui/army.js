@@ -1,4 +1,4 @@
-import { LAND_UNITS, MISSION_TYPES, SHIP_UNITS, UNITS } from '../game/data.js';
+import { FEAT_THEMES, LAND_UNITS, MISSION_TYPES, SHIP_UNITS, UNITS } from '../game/data.js';
 import { playerCombat } from '../game/rules.js';
 import { unitIcon } from '../scene/portraits.js';
 import { bag, escapeHtml, fmtNum, unitList } from './format.js';
@@ -51,7 +51,11 @@ function fleetRows(game) {
       let when = '';
       let button = '';
       const from = m.fromName ? ` <span class="muted small">desde ${escapeHtml(m.fromName)}</span>` : '';
-      if (m.phase === 'estacionada') {
+      const feat = m.feat != null && m.phase === 'estacionada' ? featWait(game, m) : null;
+      if (feat) {
+        what = `${feat.icon} Esperando a ${feat.enemy} en ${target}`;
+        when = `${feat.label} en <span data-until="${feat.until}"></span>`;
+      } else if (m.phase === 'estacionada') {
         what = `${{ invadir: '🦅 Ocupando', bloquear: '⛓️ Bloqueando' }[m.type] ?? '🛡️ Defendiendo'} ${target}`;
         if (m.until) when = `termina en <span data-until="${m.until}"></span>`;
       } else if (m.type === 'tributo') {
@@ -140,4 +144,13 @@ export function armySummary(game) {
     <span class="army-summary-title">⚔️ Ejército</span>
     <span class="army-summary-counts"><span>🛡️ ${fmtNum(land)}</span><span>⚓ ${fmtNum(ships)}</span>${fleets ? `<span class="sea">⛵ ${fleets}</span>` : ''}</span>
   </button>`;
+}
+
+/** Una flota que espera en una gesta: contra quién y cuándo combate (`label`, `until`). */
+export function featWait(game, m) {
+  const f = game.world.islandState(m.feat)?.feat;
+  const theme = FEAT_THEMES[f?.theme];
+  if (!f || !theme) return null;
+  const fight = f.stage === 'lucha';
+  return { icon: theme.icon, enemy: theme.enemy, label: fight ? 'combate' : 'emerge', until: fight ? f.nextWave : f.start };
 }

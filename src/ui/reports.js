@@ -4,7 +4,7 @@ import { bag, escapeHtml, fmtAgo, fmtNum, unitList } from './format.js';
 
 // Informes de combate, exploración y colonias.
 
-const KIND_ICON = { reliquia: '🏺', ataque: '⚔️', defensa: '🏴‍☠️', exploracion: '🔭', colonia: '🚩', expedicion: '🧭', visita: '🧳', victoria: '🗽', ocupacion: '🦅' };
+const KIND_ICON = { reliquia: '🏺', ataque: '⚔️', defensa: '🏴‍☠️', exploracion: '🔭', colonia: '🚩', expedicion: '🧭', visita: '🧳', victoria: '🗽', ocupacion: '🦅', gesta: '🌋' };
 
 function sideTable(title, side) {
   const rows = Object.entries(side.start)
@@ -22,7 +22,7 @@ function sideTable(title, side) {
 function sideTitles(r) {
   // En los asaltos piratas (y emboscadas de expedición) los piratas atacan
   const defending = r.kind === 'defensa' || r.defending;
-  const attTitle = defending ? (r.enemy ? escapeHtml(r.enemy) : 'Piratas') : 'Tu ejército';
+  const attTitle = defending ? (r.enemy ? escapeHtml(r.enemy) : 'Piratas') : r.kind === 'gesta' ? 'La Liga' : 'Tu ejército';
   const defTitle = defending ? (r.kind === 'defensa' ? 'Tus defensores' : 'Tu flota') : r.enemy ? escapeHtml(r.enemy) : 'Defensores';
   return { attTitle, defTitle };
 }

@@ -36,6 +36,7 @@ export class ClientGame extends Game {
     this.state = snap.state;
     this.incoming = snap.incoming ?? [];
     this.world.joints = snap.joint ?? [];
+    this.world.truces = new Set(snap.truce ?? []);
     this.traffic = snap.traffic ?? [];
     this.support = snap.support ?? [];
     this.owed = snap.owed ?? {};
@@ -203,6 +204,10 @@ export class ClientGame extends Game {
 
   breakPort() {
     return this.#act('breakPort');
+  }
+
+  pledgeFeat(site) {
+    return this.#act('pledgeFeat', site);
   }
 
   claimQuest(id) {

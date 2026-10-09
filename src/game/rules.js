@@ -4,6 +4,7 @@ import {
   BUILDINGS,
   COLONY,
   COLONY_COST,
+  FEATS,
   OCCUPATION,
   PLAYER_UNITS,
   RESEARCH,
@@ -245,7 +246,7 @@ export function upcomingWorldEvents(t, n = 4) {
   return out;
 }
 
-function hash01(seed, n) {
+export function hash01(seed, n) {
   let h = (Math.imul(seed ^ 0x9e3779b9, 0x85ebca6b) + Math.imul(n, 0xc2b2ae35)) >>> 0;
   h = Math.imul(h ^ (h >>> 16), 0x7feb352d);
   h = Math.imul(h ^ (h >>> 15), 0x846ca68b);
@@ -276,10 +277,15 @@ export function payPerHour(state) {
   return total * universe.speed;
 }
 
-/** Multiplicador de toda la producción: Coloso y Cosecha abundante. */
+/**
+ * Multiplicador de toda la producción: Coloso, Cosecha abundante y, de las gestas, la bendición
+ * del Olimpo (a quien vence) y la ceniza (a quien jura y no combate).
+ */
 export function productionBonus(state, t = state.lastUpdate) {
   let k = 1 + 0.05 * lvl(state, 'coloso');
   if ((state.buffs?.cosecha ?? 0) > t) k *= 1.25;
+  if ((state.buffs?.olimpo ?? 0) > t) k *= 1 + FEATS.reward.blessing;
+  if ((state.buffs?.ceniza ?? 0) > t) k *= 1 - FEATS.perjury.ash;
   return k;
 }
 

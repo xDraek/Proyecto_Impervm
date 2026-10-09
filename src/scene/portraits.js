@@ -172,8 +172,8 @@ export function warmPortraits(jobs) {
   idle(step);
 }
 
-/** Las tropas y barcos que tienen modelo propio (el Kraken no cabe en un retrato). */
-const NO_MODEL = new Set(['kraken']);
+/** Las tropas y barcos sin modelo propio: se enseña su emoji (el Kraken no cabe en un retrato, y los hijos de Tifón no tienen modelo). */
+const NO_MODEL = new Set(['kraken', 'sierpe', 'gigante', 'cabeza']);
 
 /** URL del retrato de una tropa o barco, o null si no tiene. */
 export function unitPortrait(id) {

@@ -497,6 +497,10 @@ export const UNITS = {
   pirata: { name: 'Pirata', icon: '🏴‍☠️', kind: 'tierra', npc: true, atk: 11, hp: 17 },
   corsario: { name: 'Barco corsario', icon: '⛵', kind: 'barco', npc: true, atk: 20, hp: 50 },
   kraken: { name: 'Kraken', icon: '🐙', kind: 'barco', npc: true, atk: 260, hp: 2600 },
+  // Los hijos de Tifón (gestas): su número y sus multiplicadores dependen de quién les plante cara
+  sierpe: { name: 'Sierpe marina', icon: '🐍', kind: 'barco', npc: true, atk: 14, hp: 300 },
+  gigante: { name: 'Gigante', icon: '🗿', kind: 'tierra', npc: true, atk: 12, hp: 400 },
+  cabeza: { name: 'Cabeza de Tifón', icon: '🐲', kind: 'tierra', npc: true, atk: 100, hp: 1000 },
 };
 
 export const UNIT_KEYS = Object.keys(UNITS);
@@ -876,6 +880,9 @@ export const RELICS = {
   yelmo: { name: 'Yelmo de Hades', icon: '⛑️', rarity: 'epica', stat: 'sigilo', value: 0.5, text: 'Tus espías se dejan ver la mitad de veces' },
   mascara: { name: 'Máscara del Minotauro', icon: '🐂', rarity: 'legendaria', stat: 'ataque', value: 0.12, text: '+12 % de ataque de tus tropas' },
   vellocino: { name: 'Vellocino de oro', icon: '🐏', rarity: 'legendaria', stat: 'oro', value: 0.3, text: '+30 % de oro' },
+  // Solo se ganan en las gestas (`source`): no salen en ningún otro sitio
+  rayozeus: { name: 'Rayo de Zeus', icon: '⚡', rarity: 'legendaria', stat: 'ataque', value: 0.1, text: '+10 % de ataque de tus tropas', source: 'tifon' },
+  escama: { name: 'Escama de Tifón', icon: '🐉', rarity: 'epica', stat: 'defensa', value: 0.1, text: '+10 % de vida de tus tropas', source: 'tifon' },
 };
 export const RELIC_SLOTS = 3;
 export const RELIC_RARITY = {
@@ -936,6 +943,10 @@ export const ACHIEVEMENTS = [
   { id: 'imperio', icon: '🏛️', name: 'Imperio', text: 'Llega a 10.000 puntos', check: (g) => g.score() >= 10000 },
   { id: 'kraken', icon: '🐙', name: 'Matador del Kraken', text: 'Derrota al Kraken', check: (g) => g.stats.kraken >= 1 },
   { id: 'leyenda', icon: '🗽', name: 'Coloso de oro', text: 'Lleva el Coloso a nivel 10', check: (g) => g.level('coloso') >= 10 },
+  { id: 'titanes', icon: '🌋', name: 'Matador de titanes', text: 'Vence en una gesta', check: (g) => (g.stats.feats ?? 0) >= 1 },
+  { id: 'liga', icon: '🏛️', name: 'Héroe de la Liga', text: 'Vence en 5 gestas', check: (g) => (g.stats.feats ?? 0) >= 5 },
+  { id: 'azote', icon: '⚡', name: 'Azote de Tifón', text: 'Sé quien más gloria gana en una gesta', check: (g) => (g.stats.featTop ?? 0) >= 1 },
+  { id: 'corazon', icon: '🦁', name: 'Corazón de león', text: 'Sé quien más se esfuerza en una gesta', check: (g) => (g.stats.featHeart ?? 0) >= 1 },
 ];
 
 // ── Almirante (héroe) ────────────────────────────────────────────────────────
@@ -1019,4 +1030,78 @@ export const VISITORS = {
   mercenarios: { name: 'Mercenarios', icon: '🗡️' },
   peregrinos: { name: 'Peregrinos', icon: '🕯️' },
   naufragio: { name: 'Restos de un naufragio', icon: '🛟' },
+};
+
+// ── Gestas de la Liga ────────────────────────────────────────────────────────
+// Eventos cooperativos puntuales (src/game/feats.js y WorldServer.#updateFeats).
+// Cada `periodDays` días aparece un enemigo mítico junto a un continente; los
+// imperios cercanos son convocados y pueden jurar combatirlo. Durante la lucha se
+// le ataca en oleadas fijas cada `waveHours` horas: las flotas que esperan allí
+// combaten juntas, y solo hacen daño si son varias (la coraza, `coop`).
+// Las horas son de juego (se dividen por la velocidad del universo).
+
+export const FEATS = {
+  periodDays: 12,
+  offsetHours: 48, // el ciclo empieza desplazado entre 0 y esto
+  omenHours: 24, // presagios: convocatoria y juramento
+  hours: 48, // lucha
+  waveHours: 3,
+  pledgeCloseHours: 12, // ya en la lucha, hasta cuándo se puede jurar
+  perjuryHours: 24, // si a esta hora de la lucha no has combatido, eres perjuro
+  truceAfterHours: 6, // la tregua entre juramentados dura lo que la lucha y esto más
+  radius: 900, // leguas desde tu capital al continente para ser convocado
+  radiusMax: 1300, // segunda pasada si no hay bastantes
+  minConvoked: 4,
+  maxConvoked: 16,
+  minPledges: 3,
+  minEffective: 2.5, // «imperios efectivos» del juramento para que el enemigo emerja
+  minPoints: 300,
+  minDays: 5, // días de juego (fotos de la historia) para que te convoquen
+  seenHours: 48, // visto hace como mucho esto
+  // Coraza: daño que hace la oleada según los imperios efectivos que combaten (se interpola)
+  coop: [
+    [1.5, 0],
+    [2, 0.4],
+    [3, 0.75],
+    [4, 1],
+  ],
+  regrow: 0.05, // lo que recupera el enemigo de la fase en una oleada sin combate
+  tierStep: 0.15, // dificultad por nivel del sitio
+  rewardStep: 0.1, // premio por nivel del sitio
+  tiers: [-2, 6],
+  reward: {
+    hours: [3, 5, 7], // botín personal en horas de tu producción: bronce, plata, oro
+    effort: [0.25, 0.6, 1], // esfuerzo (fuerza traída / tu fuerza al jurar) para cada tramo
+    minGlory: 0.005, // parte mínima de la gloria para cobrar
+    pot: 3, // bote común: horas de la producción de todos los juramentados
+    potCap: 0.4, // como mucho esta parte del bote para uno
+    riskCap: 3, // el botín personal no pasa de esto por lo que arriesgaste
+    wounded: [0.25, 0.1], // bajas que vuelven heridas: al ganar y al perder
+    blessing: 0.1, // +10 % de producción (plata y oro)
+    blessingHours: 24,
+    half: 0.4, // victoria a medias si al enemigo le queda esto o menos de vida
+    heartMinGlory: 0.015, // para «Corazón de león» hace falta esta parte de la gloria
+    relicChance: [0.05, 0.12, 0.25],
+    topBonus: 1.25, // botín del que más gloria gana
+    phasePot: [0.1, 0.15], // parte del bote que se gana al vencer cada fase (si al final se pierde)
+  },
+  perjury: { ash: 0.1, hours: 24, days: 14 },
+};
+
+/** Temas de gesta: el enemigo, sus fases y lo que da. */
+export const FEAT_THEMES = {
+  tifon: {
+    name: 'El despertar de Tifón',
+    enemy: 'Tifón',
+    icon: '🌋',
+    text: 'Tifón, padre de los monstruos, rompe sus cadenas bajo el mar. Ningún imperio puede vencerlo solo.',
+    phases: [
+      { unit: 'sierpe', name: 'El mar hierve', text: 'Sierpes marinas: solo cuentan los barcos de guerra. Si ganáis el mar, desembarcáis en la misma oleada.', glory: 200 },
+      { unit: 'gigante', name: 'Los hijos de Gea', text: 'Gigantes en tierra: tropas de tierra con el apoyo de los barcos.', glory: 300 },
+      { unit: 'cabeza', name: 'Las cien cabezas', text: 'Cien cabezas que no se curan. Cuando quedan la mitad, entran en furia.', glory: 500 },
+    ],
+    // Cuántos hijos echa según el poder jurado (ver featBoss)
+    tune: { sierpes: 2.2, gigantes: 2.0, headHp: 6, headAtk: 0.045, heads: 100, furyAt: 50, fury: 1.3, lava: 0.015 },
+    relics: ['rayozeus', 'escama'],
+  },
 };

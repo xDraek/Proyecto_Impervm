@@ -15,6 +15,8 @@ import {
   HERO,
   HOSTILE_MISSIONS,
   HERO_SKILLS,
+  FEATS,
+  FEAT_THEMES,
   ISLAND_TYPES,
   MERCENARIES,
   MERCENARY_HOURS,
@@ -42,7 +44,8 @@ import {
   WONDER_RESOURCES,
   WORK,
 } from './data.js';
-import { assault, battle, count, hasCombat, keepAboard, seatsOf, splitForces } from './combat.js';
+import { featHours, featPower, featProd } from './feats.js';
+import { assault, attackOf, battle, combineGroups, count, hasCombat, keepAboard, seatsOf, shareSurvivors, splitBag, splitForces } from './combat.js';
 import {
   HOUR_MS,
   buildSeconds,
@@ -80,7 +83,7 @@ import {
   navalDefense,
 } from './rules.js';
 
-export const SAVE_VERSION = 5;
+export const SAVE_VERSION = 6;
 const MAX_REPORTS = 40;
 const MAX_NOTES = 30;
 
@@ -129,7 +132,7 @@ export function newState({ now = clock.now(), home, name }) {
     notes: [],
     favor: 0,
     buffs: {},
-    stats: { spent: 0, victories: 0, raidsRepelled: 0, expeditions: 0, powers: 0, treasures: 0, kraken: 0, pvpWins: 0, trades: 0, transports: 0, kills: 0, loot: 0, conquests: 0, donated: 0, contestWins: 0, trained: 0, explorations: 0, exchanges: 0, upgrades: 0, researched: 0, sabotages: 0 },
+    stats: { spent: 0, victories: 0, raidsRepelled: 0, expeditions: 0, powers: 0, treasures: 0, kraken: 0, pvpWins: 0, trades: 0, transports: 0, kills: 0, loot: 0, conquests: 0, donated: 0, contestWins: 0, trained: 0, explorations: 0, exchanges: 0, upgrades: 0, researched: 0, sabotages: 0, feats: 0, featTop: 0, featHeart: 0 },
     daily: { last: null, streak: 0, best: 0 },
     hero: null,
     quests: { claimed: [] },
@@ -144,6 +147,9 @@ export function newState({ now = clock.now(), home, name }) {
     shieldFrom: 0,
     shieldUntil: 0,
     hits: [],
+    // Gesta a la que te han convocado ({ k, site, theme, pledgedAt, result }) y hasta cuándo no puedes jurar por perjuro
+    feat: null,
+    perjuryUntil: 0,
     startedAt: now,
     seq: 1,
     lastUpdate: now,
@@ -802,7 +808,7 @@ export class Game extends EventTarget {
   }
 
   /** Una reliquia que aún no tienes, de la rareza que toque (o su valor en oro si ya las tienes todas). */
-  #findRelic(t, where, weights) {
+  #findRelic(t, where, weights, theme = null) {
     const owned = new Set((this.state.relics ?? []).map((r) => r.id));
     let roll = Math.random() * Object.values(weights).reduce((a, b) => a + b, 0);
     let rarity = 'rara';
@@ -812,8 +818,10 @@ export class Game extends EventTarget {
         break;
       }
     }
-    const free = Object.keys(RELICS).filter((id) => !owned.has(id));
-    const pool = free.filter((id) => RELICS[id].rarity === rarity);
+    // Las reliquias de una gesta solo salen en ella (y allí, antes que las demás)
+    const free = Object.keys(RELICS).filter((id) => !owned.has(id) && (!RELICS[id].source || RELICS[id].source === theme));
+    const own = free.filter((id) => RELICS[id].rarity === rarity && RELICS[id].source === theme);
+    const pool = own.length ? own : free.filter((id) => RELICS[id].rarity === rarity);
     const id = (pool.length ? pool : free)[Math.floor(Math.random() * (pool.length || free.length))];
     if (!id) {
       this.#gain({ oro: RELIC_RARITY[rarity].sell });
@@ -885,6 +893,7 @@ export class Game extends EventTarget {
       return view;
     }
     if (isl.type === 'continente') {
+      view.feat = rt?.feat ? this.#featView(rt.feat, t) : null;
       const h = rt?.horde;
       view.horde = h
         ? {
@@ -1092,8 +1101,15 @@ export class Game extends EventTarget {
       if (!hasCombat(splitForces(rest).land)) reason ||= `Deja al menos una unidad de tierra ocupando ${base.targetName}.`;
     } else if (s.occupied) reason ||= `${s.occupied.name} ocupa tu ciudad: sus tropas no dejan zarpar a nadie.`;
     else if (s.blockade) reason ||= `${s.blockade.name} bloquea tu puerto: no puede zarpar ningún barco.`;
-    // Un continente solo se ataca cuando hay una horda bárbara en él
-    if (isl.type === 'continente' && !(type === 'atacar' && rt?.horde)) reason ||= rt?.horde ? 'Contra la horda solo se puede atacar.' : 'Es un continente: elige una de sus ciudades o tierras.';
+    // Un continente solo se ataca cuando hay una horda bárbara o una gesta en él
+    const feat = rt?.feat && (rt.feat.stage === 'presagio' || rt.feat.stage === 'lucha') ? rt.feat : null;
+    if (isl.type === 'continente' && feat) {
+      if (type !== 'atacar') reason ||= `Contra ${FEAT_THEMES[feat.theme].enemy} solo se puede atacar.`;
+      else if (!feat.pledged?.[this.userId]) reason ||= feat.convoked?.includes(this.userId) ? 'Jura primero la gesta desde el panel del continente.' : 'No te han convocado a esta gesta.';
+      else if (s.missions.some((m) => m.target === target && m.phase !== 'vuelta')) reason ||= 'Ya tienes una flota de camino o esperando: espera a que combata en la oleada.';
+      else if (this.now() + seconds * 1000 >= feat.end) reason ||= 'Tu flota no llegaría antes de que acabe la gesta.';
+      if (withHero) reason ||= 'Tu almirante no va a las gestas: se queda defendiendo la capital.';
+    } else if (isl.type === 'continente' && !(type === 'atacar' && rt?.horde)) reason ||= rt?.horde ? 'Contra la horda solo se puede atacar.' : 'Es un continente: elige una de sus ciudades o tierras.';
     if (opts.join) {
       if (type !== 'atacar') reason ||= 'Solo te puedes unir a un ataque.';
       else if (!joint || joint.target !== target) reason ||= 'Ese ataque ya no está en camino.';
@@ -1114,6 +1130,10 @@ export class Game extends EventTarget {
     else if (used > capacity) reason ||= `Faltan plazas en los barcos: ${used}/${capacity}.`;
 
     let load = null;
+    // Tregua sagrada entre los que juraron la misma gesta (salvo en guerra)
+    if (isl.type === 'jugador' && ['explorar', 'sabotaje', 'atacar', 'invadir', 'bloquear'].includes(type) && this.world.truce?.(this.userId, isl.owner, this.now())) {
+      reason ||= `Tregua sagrada: ${view.ownerName} y tú habéis jurado la misma gesta. No os podéis atacar ni espiar hasta unas horas después de que acabe.`;
+    }
     if (isl.type === 'jugador') {
       if (type === 'explorar') {
         if (Object.keys(sent).some((id) => !UNITS[id].explorer)) reason ||= 'Para espiar envía solo botes exploradores.';
@@ -1375,6 +1395,153 @@ export class Game extends EventTarget {
     this.state.visitor = null;
     this.#scheduleVisit(now);
     return this.#done();
+  }
+
+  // ── Gestas de la Liga ──────────────────────────────────────────────────────
+
+  /** La gesta a la que te han convocado (la vista de su continente), o null. */
+  featInfo(now = this.now()) {
+    const site = this.state.feat?.site;
+    const rt = site ? this.world.islandState(site) : null;
+    if (!rt?.feat || rt.feat.k !== this.state.feat.k) return null;
+    return { site, name: this.world.island(site)?.name ?? '', ...this.#featView(rt.feat, now) };
+  }
+
+  /** Lo que ve un jugador de la gesta de un continente. */
+  #featView(f, t) {
+    const theme = FEAT_THEMES[f.theme];
+    const me = f.pledged?.[this.userId] ?? null;
+    const totalGlory = Object.values(f.glory ?? {}).reduce((a, b) => a + b, 0);
+    const top = Object.entries(f.glory ?? {})
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 5)
+      .map(([uid, g]) => ({ name: f.pledged?.[uid]?.name ?? f.names?.[uid] ?? '¿?', share: totalGlory ? g / totalGlory : 0, me: Number(uid) === this.userId }));
+    return {
+      k: f.k,
+      theme: f.theme,
+      themeName: theme.name,
+      enemy: theme.enemy,
+      icon: theme.icon,
+      stage: f.stage,
+      omen: f.omen,
+      start: f.start,
+      end: f.end,
+      nextWave: f.stage === 'lucha' ? f.nextWave : f.start,
+      result: f.result ?? null,
+      tier: f.tier ?? 0,
+      boss: f.boss,
+      phases: theme.phases,
+      convoked: !!f.convoked?.includes(this.userId),
+      convokedCount: f.convoked?.length ?? 0,
+      pledged: !!me,
+      pledgedCount: Object.keys(f.pledged ?? {}).length,
+      pledgeOpen: f.stage === 'presagio' || (f.stage === 'lucha' && t < f.start + featHours(FEATS.pledgeCloseHours)),
+      myGlory: totalGlory ? (f.glory?.[this.userId] ?? 0) / totalGlory : 0,
+      myEffort: me?.f ? (f.brought?.[this.userId] ?? 0) / me.f : 0,
+      waves: f.waves ?? [],
+      waiting: f.waiting ?? null,
+      truceUntil: f.truceUntil ?? null,
+      top,
+    };
+  }
+
+  /** Juras combatir en la gesta del continente `site`: queda anotado tu poder y tu producción. */
+  pledgeFeat(site, now = this.now()) {
+    this.#advance(now);
+    const s = this.state;
+    if (s.vacation) return this.#fail('De vacaciones no puedes jurar una gesta.');
+    if ((s.perjuryUntil ?? 0) > now) return this.#fail('Rompiste tu juramento en la última gesta: aún no puedes volver a jurar.');
+    if (this.isProtected()) return this.#fail(`Con menos de ${NEWBIE_POINTS} puntos aún no puedes jurar gestas.`);
+    const power = featPower(s);
+    if (!(power.f > 0)) return this.#fail('Necesitas un ejército para jurar una gesta.');
+    const prod = featProd(s, now);
+    const res = this.world.pledgeFeat?.(this.userId, site, { name: s.name, at: now, power, prod: prod.value, mix: prod.mix }, now);
+    if (!res?.ok) return this.#fail(res?.reason ?? 'No se puede jurar ahora.');
+    s.feat = { ...(s.feat ?? {}), k: res.k, site, theme: res.theme, pledgedAt: now };
+    this.#note(`${FEAT_THEMES[res.theme].icon} Has jurado combatir a ${FEAT_THEMES[res.theme].enemy}`, 'success');
+    return this.#done();
+  }
+
+  /** El mundo te convoca a una gesta (o te avisa de que no hay ninguna cerca). */
+  featSummoned(info, t) {
+    this.state.feat = info ? { k: info.k, site: info.site, theme: info.theme } : null;
+    if (info) {
+      const theme = FEAT_THEMES[info.theme];
+      this.#report({ t, kind: 'gesta', island: info.site, islandName: info.siteName, title: `${theme.icon} ${theme.name}`, text: `${theme.text} Los imperios cercanos estáis convocados en ${info.siteName}: jura la gesta desde el panel del continente y manda tu flota antes de cada oleada.` });
+      this.#note(`${theme.icon} ¡${theme.enemy} despierta en ${info.siteName}! Estás convocado a la gesta`, 'info');
+    }
+    this.#dirty = true;
+  }
+
+  /** Tu flota llega al continente de la gesta: espera allí a la próxima oleada. */
+  #arriveFeat(m, isl, t) {
+    const res = this.world.featArrive?.(isl.id, this.userId, t);
+    if (!res?.ok) {
+      this.#report({ t, kind: 'gesta', island: isl.id, islandName: isl.name, title: `Nada que hacer en ${isl.name}`, text: res?.reason ?? 'La gesta ya ha terminado. La flota vuelve a casa.' });
+      return;
+    }
+    m.phase = 'estacionada';
+    m.feat = isl.id;
+    m.waitSince = t;
+    m.stationedAt = t;
+    this.#note(`${res.icon} Tu flota espera a ${res.enemy} frente a ${isl.name}: combatirá en la próxima oleada`, 'info');
+  }
+
+  /** Tu flota ha combatido en una oleada: vuelve a casa con los que queden. */
+  settleFeat(m, { left, lost, kills = 0, report, result }, t) {
+    m.units = clean(left);
+    this.#mercsLost(lost ?? {});
+    this.state.stats.kills += kills;
+    if (report) this.#report(result ? { ...report, battle: pick(result) } : report);
+    if (report) this.#note(`${report.icon ?? '🌋'} ${report.title}`, report.outcome === 'derrota' ? 'error' : 'success');
+    this.#dirty = true;
+    if (count(m.units) > 0) {
+      m.phase = 'vuelta';
+      m.turn = t;
+      m.back = t + (m.arrive - m.depart);
+    } else {
+      this.state.missions = this.state.missions.filter((x) => x !== m);
+    }
+  }
+
+  /** Se acaba la gesta: las flotas que esperaban vuelven a casa sin combatir. */
+  featRelease(m, t, text) {
+    if (m.phase !== 'estacionada' || m.feat == null) return;
+    m.phase = 'vuelta';
+    m.turn = t;
+    m.back = t + (m.arrive - m.depart);
+    if (text) this.#note(text, 'info');
+    this.#dirty = true;
+  }
+
+  /** Juraste y no combatiste: ceniza en tu producción y un tiempo sin poder jurar. */
+  featPerjury({ themeName, siteName }, t) {
+    const P = FEATS.perjury;
+    this.state.buffs.ceniza = Math.max(this.state.buffs.ceniza ?? 0, t + featHours(P.hours));
+    this.state.perjuryUntil = t + featHours(P.days * 24);
+    this.#report({ t, kind: 'gesta', outcome: 'derrota', islandName: siteName, title: 'Perjuro', text: `Juraste combatir en ${themeName} y no has llevado ni un barco. Los dioses cubren tu isla de ceniza: −${Math.round(P.ash * 100)} % de producción durante ${P.hours} h, y no podrás jurar otra gesta en ${P.days} días.` });
+    this.#note(`🌫️ Perjuro: −${Math.round(P.ash * 100)} % de producción durante ${P.hours} h`, 'error');
+    this.#dirty = true;
+  }
+
+  /** Lo que ganas (o recuperas) al acabar una gesta. */
+  receiveFeatReward({ bag, blessingHours = 0, wounded, relic, theme, top, heart, won, report }, t) {
+    const s = this.state;
+    this.#gain(bag);
+    if (blessingHours > 0) s.buffs.olimpo = Math.max(s.buffs.olimpo ?? 0, t + featHours(blessingHours));
+    for (const [id, n] of Object.entries(wounded ?? {})) if (n > 0 && s.units[id] != null) s.units[id] += n;
+    if (won) s.stats.feats = (s.stats.feats ?? 0) + 1;
+    if (top) s.stats.featTop = (s.stats.featTop ?? 0) + 1;
+    if (heart) s.stats.featHeart = (s.stats.featHeart ?? 0) + 1;
+    if (s.feat) s.feat.result = report?.outcome ?? null;
+    if (report) this.#report(report);
+    if (report) this.#note(`${FEAT_THEMES[theme]?.icon ?? '🌋'} ${report.title}${fmtBag(bag) ? ` · ${fmtBag(bag)}` : ''}`, won ? 'success' : 'error');
+    if (relic) {
+      const where = `entre los restos de ${FEAT_THEMES[theme]?.enemy ?? 'la bestia'}`;
+      if (relic.chance == null) this.#findRelic(t, where, relic, theme);
+      else if (Math.random() < relic.chance) this.#findRelic(t, where, relic.weights, theme);
+    }
+    this.#dirty = true;
   }
 
   // ── Llamadas del mundo (otros jugadores) ───────────────────────────────────
@@ -1829,7 +1996,11 @@ export class Game extends EventTarget {
       else if (m.type === 'bloquear') this.#arriveBlockade(m, isl, t);
       else this.#arrivePlayerAttack(m, isl, t);
     } else if (m.type === 'explorar') this.#arriveExplore(m, isl, t);
-    else if (m.type === 'atacar') isl.type === 'continente' ? this.#arriveHorde(m, isl, t) : this.#arriveAttack(m, isl, t);
+    else if (m.type === 'atacar') {
+      if (isl.type !== 'continente') this.#arriveAttack(m, isl, t);
+      else if (this.world.islandState(isl.id)?.feat?.stage && this.world.islandState(isl.id).feat.stage !== 'fin') this.#arriveFeat(m, isl, t);
+      else this.#arriveHorde(m, isl, t);
+    }
     else if (m.type === 'colonizar') this.#arriveColonize(m, isl, t);
     else if (m.type === 'conquistar') this.#arriveConquer(m, isl, t);
     else if (m.type === 'expedicion') this.#arriveExpedition(m, isl, t);
@@ -1896,7 +2067,7 @@ export class Game extends EventTarget {
   #arriveSabotage(m, isl, t) {
     const owner = this.world.playerInfo(isl.owner)?.name ?? isl.name;
     const rel = this.world.relation?.(this.userId, isl.owner);
-    const res = rel === 'aliado' || rel === 'pacto' ? null : this.world.sabotage?.(isl.owner, { attackerName: this.state.name, stealth: relicBonus(this.state, 'sigilo') }, t);
+    const res = rel === 'aliado' || rel === 'pacto' || this.world.truce?.(this.userId, isl.owner, t) ? null : this.world.sabotage?.(isl.owner, { attackerName: this.state.name, stealth: relicBonus(this.state, 'sigilo') }, t);
     if (!res) {
       this.#report({ t, kind: 'exploracion', island: isl.id, islandName: isl.name, title: `Sabotaje cancelado en ${isl.name}`, text: 'Los saboteadores no han podido (o no debían) acercarse. Vuelven a casa.' });
       return;
@@ -1957,7 +2128,8 @@ export class Game extends EventTarget {
   #arriveHorde(m, isl, t) {
     const rt = this.world.islandState(isl.id);
     const h = rt?.horde;
-    if (!h || !count(h.garrison)) {
+    // Si llega cuando ya ha vencido el plazo, la horda ya ha arrasado (aunque el servidor aún no lo haya anotado)
+    if (!h || !count(h.garrison) || t >= h.deadline) {
       this.#report({ t, kind: 'ataque', island: isl.id, islandName: isl.name, title: `La horda ya no está en ${isl.name}`, text: 'Cuando llegó tu flota ya no quedaba nadie. Vuelve a casa.' });
       return;
     }
@@ -1997,7 +2169,7 @@ export class Game extends EventTarget {
   }
 
   #arriveSpy(m, isl, t) {
-    const info = this.world.spyPlayer?.(isl.owner, t);
+    const info = this.world.truce?.(this.userId, isl.owner, t) ? null : this.world.spyPlayer?.(isl.owner, t);
     if (!info) {
       this.#report({ t, kind: 'exploracion', island: isl.id, islandName: isl.name, title: `Sin noticias de ${isl.name}`, text: 'El bote no ha podido acercarse.' });
       return;
@@ -2054,8 +2226,11 @@ export class Game extends EventTarget {
     const away = this.world.playerInfo?.(isl.owner)?.vacation;
     const port = this.world.playerInfo?.(isl.owner)?.port;
     const taken = port?.kind === 'invadir';
-    if (rel === 'aliado' || rel === 'pacto' || away || taken) {
-      const why = taken
+    const truce = this.world.truce?.(this.userId, isl.owner, t);
+    if (rel === 'aliado' || rel === 'pacto' || away || taken || truce) {
+      const why = truce
+        ? 'Habéis jurado la misma gesta: los dioses imponen una tregua sagrada y tu flota se da la vuelta.'
+        : taken
         ? port.by === this.userId
           ? 'Ya ocupas esa ciudad: tu flota se da la vuelta.'
           : `${port.name} ha ocupado la ciudad antes de que llegaras: tu flota se da la vuelta.`
@@ -2077,21 +2252,16 @@ export class Game extends EventTarget {
       { units: { ...m.units }, atkMul: atkMul + hero.atk, hpMul },
       ...allies.map((a) => ({ units: { ...a.mission.units }, atkMul: a.combat.atkMul, hpMul: a.combat.hpMul, ally: a })),
     ];
-    const combined = {};
-    let size = 0;
-    let atkSum = 0;
-    let hpSum = 0;
-    for (const g of groups) {
-      const n = count(g.units);
-      size += n;
-      atkSum += g.atkMul * n;
-      hpSum += g.hpMul * n;
-      for (const [id, k] of Object.entries(g.units)) combined[id] = (combined[id] ?? 0) + k;
-    }
+    // Un solo ejército con los multiplicadores ponderados por lo que aporta cada uno
+    const army = combineGroups(groups);
+    const size = count(army.units);
+    // El mérito de las bajas, según el ataque que trae cada uno
+    const shares = groups.map(attackOf);
+    const shareSum = shares.reduce((a, b) => a + b, 0) || 1;
     const names = allies.map((a) => a.name);
     const res = this.world.attackPlayer?.(
       isl.owner,
-      { attackerId: this.userId, attackerName: names.length ? `${[this.state.name, ...names].slice(0, -1).join(', ')} y ${names.at(-1)}` : this.state.name, joint: names.length > 0, units: combined, atkMul: atkSum / size, hpMul: hpSum / size, cargoMul, islandName: this.homeIsland?.name },
+      { attackerId: this.userId, attackerName: names.length ? `${[this.state.name, ...names].slice(0, -1).join(', ')} y ${names.at(-1)}` : this.state.name, joint: names.length > 0, units: army.units, atkMul: army.atkMul, hpMul: army.hpMul, cargoMul, islandName: this.homeIsland?.name },
       t,
     );
     if (!res) {
@@ -2112,7 +2282,7 @@ export class Game extends EventTarget {
     m.units = lefts[0];
     for (const [r, n] of Object.entries(loots[0])) m.cargo[r] = (m.cargo[r] ?? 0) + n;
     if (m.hero) this.#heroXp(result.def.lost, t);
-    this.state.stats.kills += Math.round((killed * count(groups[0].units)) / size);
+    this.state.stats.kills += Math.round((killed * shares[0]) / shareSum);
     this.state.stats.loot += count(loots[0]);
     if (outcome === 'victoria') {
       this.state.stats.victories++;
@@ -2144,7 +2314,7 @@ export class Game extends EventTarget {
       a.settle({
         left: lefts[i + 1],
         loot: loots[i + 1],
-        kills: Math.round((killed * count(g.units)) / size),
+        kills: Math.round((killed * shares[i + 1]) / shareSum),
         won: outcome === 'victoria',
         report: {
           t,
@@ -2202,7 +2372,8 @@ export class Game extends EventTarget {
     const rel = this.world.relation?.(this.userId, isl.owner);
     const port = info?.port;
     const why =
-      rel === 'aliado' ? 'Ahora sois aliados: tu flota se da la vuelta.'
+      this.world.truce?.(this.userId, isl.owner, t) ? 'Habéis jurado la misma gesta: los dioses imponen una tregua sagrada y tu flota se da la vuelta.'
+      : rel === 'aliado' ? 'Ahora sois aliados: tu flota se da la vuelta.'
       : rel === 'pacto' ? 'Vuestras alianzas han firmado un pacto de no agresión: tu flota se da la vuelta.'
       : info?.vacation ? `${info.name} se ha ido de vacaciones: su puerto no se puede bloquear.`
       : port?.kind === 'invadir' ? `${port.name} ha ocupado la ciudad: su puerto ya está en otras manos.`
@@ -2889,46 +3060,6 @@ function phaseText(result) {
   if (drowned) parts.push(`Se ahogan ${drowned} soldados que ya no cabían en los barcos.`);
   if (result.seaWon && !result.landed && result.winner !== 'att') parts.push('No lleváis tropas de tierra para desembarcar.');
   return parts.join(' ');
-}
-
-/**
- * Reparte los supervivientes de un bando formado por varios grupos: cada uno
- * conserva la misma fracción de cada tipo; lo que sobra por redondeo, para el primero que lo tenga.
- */
-function shareSurvivors(groups, left) {
-  const start = {};
-  for (const g of groups) for (const [id, n] of Object.entries(g)) start[id] = (start[id] ?? 0) + n;
-  const out = groups.map(() => ({}));
-  for (const [id, total] of Object.entries(start)) {
-    const frac = (left[id] ?? 0) / total;
-    let given = 0;
-    groups.forEach((g, i) => {
-      const n = Math.floor((g[id] ?? 0) * frac);
-      out[i][id] = n;
-      given += n;
-    });
-    const owner = groups.findIndex((g) => (g[id] ?? 0) > 0);
-    out[owner][id] += (left[id] ?? 0) - given;
-  }
-  return out.map((o) => Object.fromEntries(Object.entries(o).filter(([, n]) => n > 0)));
-}
-
-/** Reparte un botín según unos pesos (la bodega que le queda a cada uno). */
-function splitBag(bagIn, weights) {
-  const total = weights.reduce((a, b) => a + b, 0);
-  const out = weights.map(() => ({}));
-  if (!total) return out;
-  for (const [res, n] of Object.entries(bagIn ?? {})) {
-    let given = 0;
-    weights.forEach((w, i) => {
-      const k = Math.floor((n * w) / total);
-      if (k) out[i][res] = k;
-      given += k;
-    });
-    const first = weights.findIndex((w) => w > 0);
-    if (n - given > 0) out[first][res] = (out[first][res] ?? 0) + n - given;
-  }
-  return out;
 }
 
 /** Si una ciudad está protegida en el instante `t` (su escudo va de `from` a `until`). */

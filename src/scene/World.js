@@ -2288,7 +2288,9 @@ export class World {
       } else if (view.colonized) status = `🚩 Tu colonia · Nv ${view.colony?.level ?? 1}${view.colony?.upgradeEnd ? ' 🔨' : ''}`;
       else if (view.colonizedBy != null) status = `🚩 Colonia de ${view.colonistName}`;
       else if (view.explored && view.tier) status += ` · Nv ${view.tier}`;
-      if (view.type === 'continente') status = view.horde ? `🔥 ¡Horda! ${view.horde.left} bárbaros` : `🗺️ Continente · maravilla nivel ${view.wonder?.level ?? 0}`;
+      const feat = view.type === 'continente' && (view.feat?.stage === 'presagio' || view.feat?.stage === 'lucha') ? view.feat : null;
+      if (feat) status = feat.stage === 'lucha' ? `${feat.icon} ¡${feat.enemy}! ${feat.pledgedCount} imperios en lucha` : `${feat.icon} Presagios de ${feat.enemy}`;
+      else if (view.type === 'continente') status = view.horde ? `🔥 ¡Horda! ${view.horde.left} bárbaros` : `🗺️ Continente · maravilla nivel ${view.wonder?.level ?? 0}`;
       if (port) status += port.kind === 'invadir' ? ` · 🦅 Ocupada${port.by === this.game.userId ? ' por ti' : ''}` : ` · ⛓️ Bloqueada${port.by === this.game.userId ? ' por ti' : ''}`;
       else if (view.shield) status += ' · 🛡️ Recién liberada';
       if (view.inbound.length) status += ' · ⛵';
@@ -2296,10 +2298,10 @@ export class World {
       entry.el.classList.toggle('colony', !!view.colonized);
       entry.el.classList.toggle('ally', !!ally);
       entry.el.classList.toggle('pact', view.relation === 'pacto');
-      entry.el.classList.toggle('war', view.relation === 'guerra' || (view.type === 'continente' && !!view.horde));
+      entry.el.classList.toggle('war', view.relation === 'guerra' || (view.type === 'continente' && (!!view.horde || !!feat)));
       entry.el.classList.toggle('sieged', !!port);
       // Lo que más importa al jugador se queda con la etiqueta entera cuando no caben todas
-      entry.prio = view.type === 'continente' && view.horde ? 400 : view.colonized ? 350 : view.type === 'jugador' ? 300 : view.type === 'continente' ? 250 : view.explored ? 100 : 0;
+      entry.prio = feat || (view.type === 'continente' && view.horde) ? 400 : view.colonized ? 350 : view.type === 'jugador' ? 300 : view.type === 'continente' ? 250 : view.explored ? 100 : 0;
       entry.el.classList.toggle('player', view.type === 'jugador');
       entry.el.classList.toggle('unknown', !view.explored);
     }

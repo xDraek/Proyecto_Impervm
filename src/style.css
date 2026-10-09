@@ -4862,3 +4862,45 @@ kbd {
   box-shadow: none;
   color: var(--parch-ink);
 }
+
+/* Gesta de la Liga en un continente (bronce y lava) */
+.feat-box {
+  padding: 10px 12px;
+  margin-bottom: 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(240, 150, 60, 0.65);
+  background: linear-gradient(180deg, rgba(140, 50, 10, 0.22), rgba(60, 20, 10, 0.12));
+}
+
+.feat-box.done {
+  border-color: rgba(200, 170, 110, 0.45);
+  background: rgba(80, 60, 30, 0.14);
+}
+
+.feat-box h4 {
+  margin-top: 0;
+  color: #ffb066;
+}
+
+.feat-phases {
+  list-style: none;
+  margin: 8px 0;
+  padding: 0;
+}
+
+.feat-phase {
+  margin-bottom: 6px;
+}
+
+.feat-phase.done {
+  opacity: 0.55;
+}
+
+.feat-phase.next {
+  opacity: 0.75;
+}
+
+.feat-phase.now span {
+  font-weight: 600;
+  color: #ffb066;
+}

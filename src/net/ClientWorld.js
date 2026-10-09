@@ -7,6 +7,7 @@ export class ClientWorld {
     this.states = {};
     this.players = {};
     this.joints = [];
+    this.truces = new Set();
     this.version = 0;
   }
 
@@ -41,6 +42,11 @@ export class ClientWorld {
   /** Un ataque de tu alianza al que te puedes unir (lo manda el servidor en cada estado). */
   jointAttack(key) {
     return this.joints.find((j) => j.key === key) ?? null;
+  }
+
+  /** Tregua sagrada de una gesta con otro jugador (la lista la manda el servidor en cada estado). */
+  truce(_me, other) {
+    return this.truces.has(Number(other));
   }
 
   sameAlliance(me, other) {

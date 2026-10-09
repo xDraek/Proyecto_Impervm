@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { BLOCKADE, COLONY, ISLAND_TYPES, MISSION_TYPES, OCCUPATION, OUTPOST_MISSIONS, PLAYER_UNITS, PROTECTION, RESOURCES, RESOURCE_KEYS, UNITS, WONDERS, WONDER_LEVELS, WONDER_RESOURCES } from '../game/data.js';
+import { BLOCKADE, COLONY, FEATS, ISLAND_TYPES, MISSION_TYPES, OCCUPATION, OUTPOST_MISSIONS, PLAYER_UNITS, PROTECTION, RESOURCES, RESOURCE_KEYS, UNITS, WONDERS, WONDER_LEVELS, WONDER_RESOURCES } from '../game/data.js';
 import { colonyUpgrade, colonyYield } from '../game/rules.js';
 import { NEWBIE_POINTS } from '../game/Game.js';
 import { createIslandBase, createIslandFeature, islandLook } from '../scene/islands.js';
@@ -128,10 +128,85 @@ function continentSection(game, view) {
       return `<li data-select="${escapeHtml(s.id)}"><span><b>${escapeHtml(s.name)}</b><div class="muted small">${what}</div></span><span class="muted small">›</span></li>`;
     })
     .join('');
-  return `${hordeSection(view)}<p class="desc">Un pequeño continente entre los sectores del archipiélago. Tierra adentro hay ciudades bárbaras bien defendidas y valles fértiles donde fundar colonias.</p>
+  return `${featSection(game, view)}${hordeSection(view)}<p class="desc">Un pequeño continente entre los sectores del archipiélago. Tierra adentro hay ciudades bárbaras bien defendidas y valles fértiles donde fundar colonias.</p>
     <ul class="mini-list site-list">${rows}</ul>
     ${wonderSection(game, view)}`;
 }
+
+/** Si la gesta del continente está en marcha (presagios o lucha). */
+export const featActive = (feat) => !!feat && (feat.stage === 'presagio' || feat.stage === 'lucha');
+
+/** Una gesta de la Liga en el continente: etapa, fases del enemigo, coraza, juramento y gloria. */
+function featSection(game, view) {
+  const f = view.feat;
+  if (!f) return '';
+  const pct = (n) => `${Math.round(n * 100)} %`;
+  const head = `<h4>${f.icon} ${escapeHtml(f.themeName)}</h4>`;
+  const more = '<p class="small"><button class="link" data-action="guide" data-topic="gestas">📖 Cómo funcionan las gestas</button></p>';
+  if (f.stage === 'fin') {
+    const text = {
+      victoria: `¡${f.enemy} ha caído! Los premios ya están repartidos (míralos en tus informes 📜).`,
+      media: `${f.enemy} huyó malherido: victoria a medias, con la mitad de los premios.`,
+      derrota: `${f.enemy} resistió. Los que combatieron recuperan parte de sus caídos y el continente se vuelve un poco más fácil para la próxima vez.`,
+      dormido: `No se juntaron bastantes imperios y ${f.enemy} volvió a dormirse. Nadie perdió nada.`,
+    }[f.result];
+    const truce = f.truceUntil && f.pledged ? `<div class="info-row"><span>🕊️ Tregua sagrada</span><b class="q-time" data-until="${f.truceUntil}"></b></div>` : '';
+    return `<div class="feat-box done">${head}<p class="desc small">${text ?? ''}</p>${truce}${more}</div>`;
+  }
+  const myFleet = game.state.missions.find((m) => m.target === view.id && m.phase !== 'vuelta');
+  const rows = [];
+  if (f.stage === 'presagio') rows.push(`<div class="info-row"><span>Emerge en</span><b class="q-time" data-until="${f.start}"></b></div>`);
+  else {
+    rows.push(`<div class="info-row"><span>Próxima oleada</span><b class="q-time" data-until="${f.nextWave}"></b></div>`);
+    rows.push(`<div class="info-row"><span>Termina en</span><b class="q-time" data-until="${f.end}"></b></div>`);
+  }
+  rows.push(`<div class="info-row"><span>Juramentos</span><b>${f.pledgedCount} de ${f.convokedCount} convocados</b></div>`);
+  if (f.tier) rows.push(`<div class="info-row"><span>Nivel del sitio</span><b class="${f.tier > 0 ? 'down' : 'up'}">${f.tier > 0 ? '+' : ''}${f.tier} · enemigo ${f.tier > 0 ? 'más duro' : 'más blando'}, premios ${f.tier > 0 ? 'mayores' : 'menores'}</b></div>`);
+
+  // Las fases del enemigo (cuando ya ha emergido)
+  let phases = '';
+  if (f.boss) {
+    phases = f.phases
+      .map((p, i) => {
+        const full = f.boss.full?.[p.unit] ?? 0;
+        const left = i < f.boss.phase ? 0 : (f.boss[p.unit] ?? full);
+        const state = i < f.boss.phase ? 'done' : i === f.boss.phase ? 'now' : 'next';
+        const w = full ? Math.round((left / full) * 100) : 0;
+        return `<li class="feat-phase ${state}"><div class="info-row"><span>${i + 1}. ${escapeHtml(p.name)}</span><b>${i < f.boss.phase ? '✓' : `${fmtNum(left)} / ${fmtNum(full)}`}</b></div><div class="progress horde-bar"><i style="width:${w}%"></i></div></li>`;
+      })
+      .join('');
+    phases = `<ol class="feat-phases">${phases}</ol>`;
+  }
+  // La coraza: cuántos imperios esperan ya la próxima oleada
+  let armor = '';
+  const wt = f.waiting;
+  if (f.stage === 'lucha' && wt) {
+    armor = wt.fleets
+      ? `<p class="hint small ${wt.coop > 0 ? '' : 'warn'}">🛡️ Esperan la oleada ${wt.fleets} ${wt.fleets === 1 ? 'flota' : 'flotas'} de ${wt.players} ${wt.players === 1 ? 'imperio' : 'imperios'}: cuentan como ${String(wt.N).replace('.', ',')} imperios efectivos y su coraza deja pasar el ${pct(wt.coop)} del daño.${wt.coop > 0 ? '' : ` Hacen falta más de ${String(FEATS.coop[0][0]).replace('.', ',')}.`}</p>`
+      : `<p class="hint small warn">🛡️ Aún no espera ninguna flota la próxima oleada. Su coraza solo cede si combaten varios imperios a la vez.</p>`;
+  }
+  // Tu juramento y tu flota
+  let mine = '';
+  if (f.pledged) {
+    const fleet = !myFleet
+      ? f.stage === 'lucha'
+        ? '<p class="hint warn small">Tu flota no está aquí: mándala abajo (misión Atacar) antes de la próxima oleada.</p>'
+        : '<p class="hint small">Manda tu flota abajo (misión Atacar): esperará frente a la costa hasta la primera oleada.</p>'
+      : myFleet.phase === 'ida'
+        ? `<p class="hint ok small">⛵ Tu flota llega en <span class="q-time" data-until="${myFleet.arrive}"></span>${f.stage === 'lucha' && myFleet.arrive > f.nextWave ? ': después de la próxima oleada, así que combatirá en la siguiente' : ' y esperará a la oleada'}.</p>`
+        : '<p class="hint ok small">⚓ Tu flota espera frente a la costa: combatirá en la próxima oleada.</p>';
+    mine = `<p class="hint ok small">⚔️ Has jurado esta gesta${f.stage === 'lucha' ? ` · tu gloria: ${pct(f.myGlory)} · trajiste el ${pct(f.myEffort)} de tu fuerza` : ''}.</p>${fleet}`;
+  } else if (f.convoked && f.pledgeOpen) {
+    mine = `<p class="desc small">Estás convocado. Al jurar se anota tu poder (el enemigo crece con el de todos) y te comprometes a combatir: quien jura y no trae ni un barco en ${FEATS.perjuryHours} h es perjuro.</p>
+      <button class="primary wide" data-action="pledge-feat" data-site="${escapeHtml(view.id)}">${f.icon} Jurar la gesta</button>`;
+  } else if (f.convoked) mine = '<p class="muted small">El juramento ya está cerrado.</p>';
+  else mine = '<p class="muted small">No estás convocado a esta gesta: solo los imperios cercanos al continente.</p>';
+  const top = f.top.length ? `<h5>Más gloria</h5><ol class="mini-rank contest-list">${f.top.map((x) => `<li class="${x.me ? 'me' : ''}"><span>${escapeHtml(x.name)}</span><b>${pct(x.share)}</b></li>`).join('')}</ol>` : '';
+  const intro = f.stage === 'presagio' ? `<p class="desc small">${escapeHtml(FEAT_INTRO)}</p>` : '';
+  return `<div class="feat-box">${head}${intro}${rows.join('')}${phases}${armor}${mine}${top}${more}</div>`;
+}
+
+const FEAT_INTRO = 'Un enemigo de leyenda despierta. Solo cae si varios imperios combaten juntos: lucha por oleadas cada pocas horas, en el mar y en tierra. Si cae, todos los que combatieron se reparten un botín a la medida de lo que producen.';
 
 /** Una horda bárbara en el continente: cuánto le queda, cuándo ataca y quién la está mermando. */
 function hordeSection(view) {
@@ -257,7 +332,8 @@ export function poolFor(game, from) {
 }
 
 function fleetForm(hud, game, view) {
-  if (view.type === 'continente' && !view.horde) return '';
+  const feat = view.type === 'continente' && featActive(view.feat) ? view.feat : null;
+  if (view.type === 'continente' && !view.horde && !feat?.pledged) return '';
   if (game.level('puerto') < 1) return '<div class="section"><h4>Enviar flota</h4><p class="desc">Construye un puerto en tu isla para poder zarpar.</p></div>';
   // Origen: tu capital o una ciudad que ocupas
   const outposts = outpostsFor(game, view.id);
@@ -293,7 +369,7 @@ function fleetForm(hud, game, view) {
   else if (view.type !== 'continente') types.push('explorar');
   // Sin explorar, lo único que se puede hacer es mandar un bote a mirar
   const known = view.explored;
-  const hostile = known && (['barbaros', 'ciudadela', 'piratas', 'kraken', 'jugador'].includes(view.type) || (view.type === 'continente' && !!view.horde));
+  const hostile = known && (['barbaros', 'ciudadela', 'piratas', 'kraken', 'jugador'].includes(view.type) || (view.type === 'continente' && (!!view.horde || !!feat)));
   if (view.type !== 'brumas' && view.colonizedBy == null && hostile) types.push('atacar');
   const enemyCity = known && view.type === 'jugador' && !(view.alliance && view.alliance.id === game.alliance?.id);
   if (enemyCity) types.push('invadir', 'bloquear', 'sabotaje');
@@ -334,7 +410,8 @@ function fleetForm(hud, game, view) {
     ${colony}
     <div class="mission-buttons">${buttons}</div>
     ${warHint}
-    ${hostile ? '<button class="ghost wide sim-btn" data-action="simulate">🎲 Simular el combate</button>' : ''}
+    ${feat ? `<p class="hint small">${feat.icon} Manda barcos de guerra para la primera fase (en el mar) y tropas de tierra para las siguientes. Tu flota espera frente a la costa y combate en la siguiente oleada junto a las de los demás.</p>` : ''}
+    ${hostile && !feat ? '<button class="ghost wide sim-btn" data-action="simulate">🎲 Simular el combate</button>' : ''}
     <div class="hint warn" data-fleet-reason></div>
   </div>`;
 }
@@ -445,6 +522,7 @@ function islandGuide(view) {
   if (view.colonized) return 'colonias';
   if (view.type === 'jugador') return view.port?.by != null ? 'invasiones' : 'jugadores';
   if (view.type === 'brumas') return 'expediciones';
+  if (view.type === 'continente' && featActive(view.feat)) return 'gestas';
   if (view.type === 'ciudadela' || view.type === 'continente' || view.land) return 'continentes';
   if (view.type === 'libre') return 'colonias';
   return 'archipielago';

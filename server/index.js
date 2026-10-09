@@ -98,6 +98,7 @@ const ACTIONS = {
   recall: (g, [id]) => g.recall(int(id)),
   plunder: (g, [id]) => (int(id) >= 0 ? g.plunder(int(id)) : bad()),
   breakPort: (g) => g.breakPort(),
+  pledgeFeat: (g, [site]) => (typeof site === 'string' && site.length < 40 ? g.pledgeFeat(site) : bad()),
   claimQuest: (g, [id]) => (typeof id === 'string' ? g.claimQuest(id) : bad()),
   claimDaily: (g) => g.claimDaily(),
   claimTask: (g, [id]) => (typeof id === 'string' ? g.claimTask(id) : bad()),
@@ -327,6 +328,11 @@ async function api(req, res, url) {
       else if (sub === 'delete-chat') world.deleteChat(uid, body.id);
       else if (sub === 'broadcast') world.broadcast(uid, body.text);
       else if (sub === 'reset') return send(res, 200, { password: await world.adminResetPassword(uid, body.name) });
+      else if (sub === 'feat') {
+        const site = typeof body.site === 'string' && body.site.length < 40 ? body.site : null;
+        const omenMinutes = Number.isFinite(body.omenMinutes) && body.omenMinutes > 0 ? Math.min(body.omenMinutes, 24 * 60) : null;
+        return send(res, 200, world.adminStartFeat(uid, { site, omenMinutes }));
+      }
       else return send(res, 404, { error: 'No existe.' });
       return send(res, 200, { ok: true });
     }
