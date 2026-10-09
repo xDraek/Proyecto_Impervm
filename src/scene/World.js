@@ -909,14 +909,10 @@ export class World {
     const nearBusy = (a, w) => busy.some((b) => Math.abs(((a - b + 540) % 360) - 180) < w);
     for (const a of [GATE_ANGLE + 52, GATE_ANGLE + 200, GATE_ANGLE + 255]) {
       if (nearBusy(a, 14)) continue;
-      const hut = new THREE.Group();
-      hut.add(box(1.4, 0.9, 1.1, C.woodLight));
-      hut.add(gableRoof(1.6, 0.6, 1.3, '#9c7a4a', 0, 0.9, 0));
-      hut.add(box(0.35, 0.55, 0.05, C.woodDark, 0, 0, 0.56));
-      for (const x of [-0.5, 0.5]) hut.add(cyl(0.06, 0.06, 1.0, 5, C.woodDark, x, -0.6, -0.6));
-      const hp = polar(this.coast(a) + 1.9, a, BEACH_Y);
-      place(hut, hp, THREE.MathUtils.degToRad(a) + Math.PI);
-      onSand(hp, 1.3);
+      const hp = polar(this.coast(a) + 1.0, a, BEACH_Y);
+      // La puerta y el porche miran al mar
+      place(fishermansHut(), hp, THREE.MathUtils.degToRad(a));
+      onSand(hp, 1.7);
     }
     // Embarcaderos de pesca con su barca amarrada
     for (const a of [GATE_ANGLE + 128, GATE_ANGLE + 300]) {
@@ -2659,6 +2655,55 @@ function dryingNet() {
     lump.position.set(0.25 + k * 0.08, 0.05, 0.28 + (k % 2) * 0.08);
     lump.scale.y = 0.45;
     g.add(lump);
+  }
+  return g;
+}
+
+/**
+ * Caseta de pescadores como las de las islas: cubo encalado sobre un zócalo de piedra, azotea con
+ * pretil, puerta y ventanuco azules mirando al mar, porche de cañizo con banco y mesa, remos
+ * apoyados en la pared, cestos con la pesca y una cuerda con pescado secándose.
+ * El frente (puerta y porche) mira a +Z.
+ */
+function fishermansHut() {
+  const g = new THREE.Group();
+  const blue = '#2c5ea8';
+  g.add(box(1.4, 0.1, 1.05, C.stone, 0, 0, 0));
+  g.add(box(1.3, 0.85, 0.95, C.white, 0, 0.1, 0));
+  g.add(box(1.34, 0.08, 0.99, C.wall, 0, 0.95, 0), box(1.2, 0.02, 0.85, '#d9c7a4', 0, 1.0, 0));
+  // Puerta y ventanuco azules con marco de piedra
+  g.add(box(0.4, 0.62, 0.04, C.stone, -0.25, 0.1, 0.48), box(0.3, 0.56, 0.05, blue, -0.25, 0.1, 0.485));
+  g.add(box(0.26, 0.24, 0.04, C.stone, 0.35, 0.45, 0.48), box(0.18, 0.16, 0.05, blue, 0.35, 0.49, 0.485));
+  // Porche de cañizo sobre cuatro palos, con banco y mesa
+  for (const [x, z] of [[-0.6, 0.52], [0.6, 0.52], [-0.6, 1.0], [0.6, 1.0]]) g.add(box(0.05, 0.85, 0.05, C.woodDark, x, 0, z));
+  const reeds = box(1.35, 0.04, 0.6, '#cdb27a', 0, 0.85, 0.78);
+  reeds.rotation.x = -0.08;
+  g.add(reeds);
+  for (let k = 0; k < 6; k++) g.add(box(0.02, 0.05, 0.6, '#a88a52', -0.6 + k * 0.24, 0.87, 0.78));
+  g.add(box(0.7, 0.05, 0.2, C.woodLight, 0.15, 0.25, 0.65), box(0.05, 0.25, 0.18, C.woodDark, -0.15, 0, 0.65), box(0.05, 0.25, 0.18, C.woodDark, 0.45, 0, 0.65));
+  g.add(box(0.36, 0.05, 0.3, C.woodLight, 0.25, 0.42, 0.88), box(0.05, 0.42, 0.05, C.woodDark, 0.25, 0, 0.88));
+  // Remos apoyados en la pared
+  for (const x of [0.62, 0.72]) {
+    const oar = box(0.03, 1.0, 0.03, C.woodLight, 0, 0, 0);
+    oar.position.set(x, 0.5, 0.15);
+    oar.rotation.z = 0.25;
+    g.add(oar);
+    g.add(box(0.1, 0.22, 0.02, C.woodLight, x + 0.12, 0.05, 0.15));
+  }
+  // Cestos con la pesca y una cuerda con pescado secándose
+  for (const [x, z] of [[-0.85, 0.7], [-0.82, 0.98]]) {
+    g.add(cyl(0.13, 0.1, 0.18, 8, '#a8844e', x, 0, z));
+    const fish = mesh(new THREE.SphereGeometry(0.06, 6, 4), '#9fb3bf');
+    fish.scale.set(1.6, 0.6, 0.8);
+    fish.position.set(x, 0.2, z);
+    g.add(fish);
+  }
+  g.add(box(1.2, 0.012, 0.012, '#8a7350', 0, 0.72, 1.0));
+  for (let k = 0; k < 5; k++) {
+    const fish = mesh(new THREE.SphereGeometry(0.045, 6, 4), '#a9b8c2');
+    fish.scale.set(0.6, 1.8, 0.5);
+    fish.position.set(-0.45 + k * 0.22, 0.62, 1.0);
+    g.add(fish);
   }
   return g;
 }
