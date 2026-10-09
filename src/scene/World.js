@@ -24,6 +24,7 @@ import {
   stylobate,
   WINDOW_GLOW,
   disposeTree,
+  fishingPier,
   smokeColumn,
   gableRoof,
   hipRoof,
@@ -57,6 +58,12 @@ const TAU = Math.PI * 2;
 // la vuelta junto a la plaza y junto a la playa; la gente, un poco antes, para no cruzarse nunca
 // con el círculo que barre un carro al girar.
 const AVENUE_W = 3.2;
+// Las calles van empedradas con losas de caliza: la gente y los carros pisan por encima
+const PAVE_Y = 0.035;
+const FLAGSTONES = ['#e2d8c2', '#d9cdb3', '#ebe3d0', '#d2c5a8', '#e6dcc8', '#dcd0b6'];
+const KERBS = ['#e9e0cc', '#ddd2bb', '#e4dac4'];
+// Tierra y hierba seca entre las losas
+const JOINTS = '#a89676';
 const AVENUE_IN = 6.2;
 const CART_TURN_R = 1.75;
 // Lo que tarda en virar en redondo un pesquero
@@ -469,6 +476,86 @@ export class World {
     this.night = step(0.1, -0.3, s);
   }
 
+  /**
+   * Empedrado de las calles, la ronda y la avenida: losas de caliza irregulares con juntas de
+   * tierra y un bordillo de bloques a cada lado (abierto en los cruces). Todo en una sola malla.
+   */
+  #paving() {
+    const batch = new Batch();
+    const rand = rng(53);
+    const pick = (list) => list[Math.floor(rand() * list.length)];
+    const piece = (w, h, d, color, x, z, rot) => {
+      const m = box(w, h, d, color, 0, 0, 0);
+      m.position.set(x, 0.005 + h / 2, z);
+      m.rotation.y = rot;
+      batch.add(m);
+    };
+    // Un tramo recto: `u` a lo largo (radial), `v` a lo ancho
+    const strip = (deg, from, to, width) => {
+      const a = THREE.MathUtils.degToRad(deg);
+      const at = (u, v) => [Math.sin(a) * u + Math.cos(a) * v, Math.cos(a) * u - Math.sin(a) * v];
+      const kerb = 0.13;
+      const inner = width - 2 * kerb - 0.04;
+      for (let u = from; u < to - 0.1; ) {
+        const d = Math.min(to - u, 0.3 + rand() * 0.16);
+        for (let v = -inner / 2; v < inner / 2 - 0.08; ) {
+          const w = Math.min(inner / 2 - v, 0.28 + rand() * 0.26);
+          const [x, z] = at(u + d / 2, v + w / 2);
+          piece(w - 0.045, 0.028 + rand() * 0.01, d - 0.045, pick(FLAGSTONES), x, z, a + (rand() - 0.5) * 0.06);
+          v += w;
+        }
+        u += d;
+      }
+      // Bordillos: bloques largos, algo más altos que las losas
+      for (const side of [-1, 1]) {
+        for (let u = from; u < to - 0.15; ) {
+          const d = Math.min(to - u, 0.45 + rand() * 0.35);
+          const [x, z] = at(u + d / 2, side * (width / 2 - kerb / 2));
+          piece(kerb, 0.07, d - 0.03, pick(KERBS), x, z, a);
+          u += d;
+        }
+      }
+    };
+    for (const rd of this.roads) {
+      // Las calles de fuera arrancan de la ronda (que ya va empedrada)
+      const from = Math.abs(rd.from - ROAD_R) < 0.01 ? ROAD_R + 0.45 : rd.from;
+      strip(rd.deg, Math.max(from, 3.4), rd.to, rd.width);
+    }
+    // La ronda: losas en dos filas y bordillos, abiertos donde la cruzan las calles
+    const crossing = (deg, outer) =>
+      this.roads.some((rd) => {
+        const reaches = outer ? rd.to > ROAD_R : rd.from < ROAD_R && rd.to > ROAD_R;
+        const gap = THREE.MathUtils.radToDeg((rd.width / 2 + 0.25) / ROAD_R);
+        return reaches && Math.abs(((deg - rd.deg + 540) % 360) - 180) < gap;
+      });
+    const avenue = this.roads.find((rd) => rd.width === AVENUE_W);
+    const onAvenue = (deg) => avenue && Math.abs(((deg - avenue.deg + 540) % 360) - 180) < THREE.MathUtils.radToDeg(avenue.width / 2 / ROAD_R);
+    // Cada fila con sus propias juntas, a matajunta
+    for (const r of [ROAD_R - 0.155, ROAD_R + 0.155]) {
+      for (let deg = rand() * 2; deg < 360; ) {
+        const step = THREE.MathUtils.radToDeg((0.28 + rand() * 0.24) / r);
+        const mid = deg + step / 2;
+        const a = THREE.MathUtils.degToRad(mid);
+        if (!onAvenue(mid)) piece(step * (Math.PI / 180) * r - 0.045, 0.028 + rand() * 0.01, 0.26, pick(FLAGSTONES), Math.sin(a) * r, Math.cos(a) * r, a + (rand() - 0.5) * 0.04);
+        deg += step;
+      }
+    }
+    for (const [r, outer] of [[ROAD_R - 0.385, false], [ROAD_R + 0.385, true]]) {
+      for (let deg = 0; deg < 360; ) {
+        const step = THREE.MathUtils.radToDeg((0.45 + rand() * 0.35) / r);
+        const mid = deg + step / 2;
+        if (!crossing(mid, outer)) {
+          const a = THREE.MathUtils.degToRad(mid);
+          piece(step * (Math.PI / 180) * r - 0.03, 0.07, 0.13, pick(KERBS), Math.sin(a) * r, Math.cos(a) * r, a);
+        }
+        deg += step;
+      }
+    }
+    const mesh = batch.build({ shadows: false });
+    mesh.traverse((o) => (o.receiveShadow = true));
+    return mesh;
+  }
+
   #buildIsland() {
     const scene = this.scene;
 
@@ -509,7 +596,7 @@ export class World {
     this.roads = [];
     const road = (deg, from, to, width = 1.0) => {
       const mid = polar((from + to) / 2, deg);
-      const path = box(width, 0.03, to - from, '#c9b48a', mid.x, 0, mid.z);
+      const path = box(width, 0.02, to - from, JOINTS, mid.x, 0, mid.z);
       path.rotation.y = THREE.MathUtils.degToRad(deg);
       path.castShadow = false;
       scene.add(path);
@@ -522,14 +609,15 @@ export class World {
     road(GATE_ANGLE, 3.2, gateCoast - 0.9, AVENUE_W);
     const ringGeo = new THREE.RingGeometry(ROAD_R - 0.45, ROAD_R + 0.45, 72);
     ringGeo.rotateX(-Math.PI / 2);
-    const ring = new THREE.Mesh(ringGeo, mat('#c9b48a'));
-    ring.position.y = 0.025;
+    const ring = new THREE.Mesh(ringGeo, mat(JOINTS));
+    ring.position.y = 0.02;
     ring.receiveShadow = true;
     scene.add(ring);
+    scene.add(this.#paving());
     // Rampa de la avenida hasta la playa
     const rampLen = 2.6;
     const rampMid = polar(gateCoast - 0.9 + rampLen / 2 - 0.1, GATE_ANGLE, -0.22);
-    const ramp = box(AVENUE_W, 0.08, rampLen, '#c9b48a', 0, 0, 0);
+    const ramp = box(AVENUE_W, 0.08, rampLen, '#d9cdb3', 0, 0, 0);
     ramp.position.copy(rampMid);
     ramp.rotation.set(Math.atan2(0.5, rampLen), THREE.MathUtils.degToRad(GATE_ANGLE), 0, 'YXZ');
     scene.add(ramp);
@@ -929,16 +1017,9 @@ export class World {
     // Embarcaderos de pesca con su barca amarrada
     for (const a of [GATE_ANGLE + 128, GATE_ANGLE + 300]) {
       if (nearBusy(a, 16)) continue;
-      const g = new THREE.Group();
-      g.add(box(1.0, 0.1, 4.8, C.woodLight, 0, 0.05, 2.4));
-      for (let z = 0.4; z < 4.8; z += 1.1) for (const x of [-0.45, 0.45]) g.add(cyl(0.06, 0.06, 1.6, 5, C.woodDark, x, -1.45, z));
-      const boat = createShip('bote');
-      boat.scale.setScalar(1.6);
-      boat.position.set(1.35, -0.25, 3.3);
-      g.add(boat);
-      g.add(cyl(0.18, 0.18, 0.4, 8, C.woodLight, -0.25, 0.15, 4.2), box(0.35, 0.3, 0.35, '#c9b48a', 0.2, 0.15, 3.9));
-      place(g, polar(this.coast(a) + 1.0, a, BEACH_Y + 0.12), THREE.MathUtils.degToRad(a));
-      for (let d = 0.5; d < 6; d += 1.2) onSand(polar(this.coast(a) + 1.0 + d, a, BEACH_Y), 1.6);
+      // El rellano de piedra en la orilla y el muelle ya sobre el agua
+      place(fishingPier(), polar(this.coast(a) + 1.8, a, BEACH_Y + 0.12), THREE.MathUtils.degToRad(a));
+      for (let d = 0; d < 6; d += 1.2) onSand(polar(this.coast(a) + 1.8 + d, a, BEACH_Y), 1.8);
     }
     // Barcas varadas con su red tendida a secar
     for (let i = 0; i < 5; i++) {
@@ -1643,7 +1724,7 @@ export class World {
           moving = true;
         }
       }
-      const bob = !w.cart && moving ? Math.abs(Math.sin(t * 9 + i)) * 0.04 : 0;
+      const bob = PAVE_Y + (!w.cart && moving ? Math.abs(Math.sin(t * 9 + i)) * 0.04 : 0);
       if (w.avenue) {
         v.position.copy(onAvenue(w.s, w.lane)).setY(bob);
         let heading = gate + (w.dir > 0 ? 0 : Math.PI);

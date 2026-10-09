@@ -998,10 +998,12 @@ function windmill() {
   const N = 8;
   const L = 1.25;
   const canvas = new THREE.MeshStandardMaterial({ color: '#efe4c6', roughness: 0.95, side: THREE.DoubleSide, flatShading: true });
-  const rope = [];
   for (let k = 0; k < N; k++) {
     const a = (k / N) * Math.PI * 2;
-    const spar = box(0.035, L, 0.035, C.woodLight, 0, 0, 0);
+    // La vara va del eje a la punta de su vela
+    const sparGeo = new THREE.BoxGeometry(0.035, L, 0.035);
+    sparGeo.translate(0, L / 2, 0);
+    const spar = mesh(sparGeo, C.woodLight);
     spar.position.set(0, 0, 0.18);
     spar.rotation.z = a;
     rotor.add(spar);
@@ -1015,12 +1017,7 @@ function windmill() {
     const sail = new THREE.Mesh(geo, canvas);
     sail.castShadow = true;
     rotor.add(sail);
-    rope.push(p1);
   }
-  // Cabos de punta a punta y del eje a cada punta
-  const ropePts = [];
-  rope.forEach((p, i) => ropePts.push(p, rope[(i + 1) % N], new THREE.Vector3(0, 0, 0.45), p));
-  rotor.add(new THREE.LineSegments(new THREE.BufferGeometry().setFromPoints(ropePts), new THREE.LineBasicMaterial({ color: '#8a7350' })));
   rotor.userData.spin = { axis: 'z', speed: 0.9 };
   // El eje sale de lo alto de la torre, hacia fuera y a un lado de la puerta
   const mount = new THREE.Group();
@@ -1354,6 +1351,82 @@ function cargoCrate(g, x, y, z, s = 0.32, rot = 0) {
   const band = box(s + 0.02, 0.04, s + 0.02, C.woodDark, x, y + s * 0.45, z);
   band.rotation.y = rot;
   g.add(band);
+}
+
+/**
+ * Embarcadero de pesca: un rellano de sillares en la orilla con escalones, ánforas y un pescante con
+ * la red colgando, y un muelle de tablones en L sobre pilotes gruesos, con cabos combados entre los
+ * postes, barriles, cajas, un rollo de cabo y la barca amarrada. +Z apunta mar adentro; el suelo de
+ * la orilla queda en y ≈ -0.12 y el agua en y ≈ -0.32.
+ */
+export function fishingPier() {
+  const g = new THREE.Group();
+  const deckY = 0.15;
+  // Rellano de piedra con escalones a un lado
+  g.add(box(2.2, 0.62, 1.3, '#d8c9a6', -0.3, deckY - 0.62, 0));
+  ashlarFace(g, { x: -0.3, z: 0.65, len: 2.2, y0: -0.4, y1: deckY, course: 0.15, block: 0.36 });
+  ashlarFace(g, { x: -1.4, z: 0, len: 1.3, y0: -0.25, y1: deckY, alongZ: true, out: -1, course: 0.15, block: 0.36 });
+  g.add(box(0.3, 0.16, 0.9, '#cfbf9a', -1.55, -0.13, 0), box(0.3, 0.08, 0.9, '#d8c9a6', -1.85, -0.13, 0));
+  g.add(amphora(-1.15, deckY, -0.35, '#b9643a', 0.8), amphora(-0.9, deckY, -0.42, '#a5542f', 0.7), amphora(-1.0, deckY, -0.15, '#b9643a', 0.6));
+  cargoCrate(g, -0.45, deckY, -0.35, 0.3, 0.2);
+  cargoCrate(g, -0.45, deckY + 0.3, -0.35, 0.24, -0.3);
+  // Pescante de madera con la red de pesca colgando
+  g.add(box(0.26, 0.12, 0.26, C.woodDark, 0.55, deckY, 0.3), cyl(0.06, 0.07, 1.6, 7, C.wood, 0.55, deckY + 0.12, 0.3));
+  // El brazo sale hacia el muelle y la red cuelga sobre la tablazón
+  g.add(box(0.08, 0.08, 0.85, C.wood, 0.55, deckY + 1.62, 0.65));
+  const brace = box(0.05, 0.5, 0.05, C.woodDark, 0.55, deckY + 1.25, 0.47);
+  brace.rotation.x = 0.8;
+  g.add(brace);
+  g.add(box(0.015, 0.55, 0.015, '#8a7350', 0.55, deckY + 1.08, 0.98));
+  // Red de cuerda recogida en un fardo, con la carga asomando por debajo
+  const net = mesh(new THREE.DodecahedronGeometry(0.16), '#9a7c52');
+  net.scale.set(1, 0.9, 1);
+  net.position.set(0.55, deckY + 0.95, 0.98);
+  g.add(net);
+  for (const k of [-1, 1]) {
+    const cord = box(0.012, 0.3, 0.012, '#6b5536', 0.55 + k * 0.1, deckY + 0.88, 0.98);
+    cord.rotation.z = k * 0.35;
+    g.add(cord);
+  }
+  cargoCrate(g, 0.55, deckY + 0.62, 0.98, 0.2);
+  // Muelle de tablones: un tramo recto mar adentro y otro en L al final
+  const plank = ['#a8784a', '#9a6a3c', '#b08050', '#8f6238'];
+  for (const sx of [-0.4, 0.4]) g.add(box(0.1, 0.07, 3.9, C.woodDark, sx, deckY - 0.13, 2.55));
+  for (let k = 0, z = 0.66; z < 4.5; k++, z += 0.2) g.add(box(1.12 + (k % 3) * 0.03, 0.06, 0.17, plank[k % 4], 0, deckY - 0.06, z + 0.085));
+  for (const sz of [3.45, 4.25]) g.add(box(2.4, 0.07, 0.1, C.woodDark, 1.75, deckY - 0.13, sz));
+  for (let k = 0, x = 0.58; x < 2.95; k++, x += 0.2) g.add(box(0.17, 0.06, 1.12 + (k % 3) * 0.03, plank[(k + 1) % 4], x + 0.085, deckY - 0.06, 3.85));
+  // Pilotes gruesos que asoman por encima de la tablazón, con los cabos combados de uno a otro
+  const posts = [[-0.6, 0.9], [-0.6, 2.05], [-0.6, 3.2], [-0.6, 4.45], [0.5, 4.45], [1.4, 4.45], [2.3, 4.45], [3.0, 4.45], [3.0, 3.25], [2.3, 3.25], [1.4, 3.25], [0.6, 3.25], [0.6, 2.05], [0.6, 0.9]];
+  for (const [x, z] of posts) {
+    g.add(cyl(0.085, 0.095, 2.05, 8, '#6e4a2a', x, -1.6, z));
+    g.add(cyl(0.095, 0.095, 0.04, 8, '#8a6a46', x, 0.45, z));
+  }
+  for (let i = 1; i < posts.length; i++) {
+    const [ax, az] = posts[i - 1];
+    const [bx, bz] = posts[i];
+    sagRope(g, new THREE.Vector3(ax, 0.38, az), new THREE.Vector3(bx, 0.38, bz), 0.1);
+  }
+  // Pilotes de apoyo bajo el tramo en L
+  for (const x of [1.4, 2.3]) for (const z of [3.45, 4.25]) g.add(cyl(0.06, 0.06, 1.6, 6, C.woodDark, x, -1.6, z));
+  // Barriles, cajas y un rollo de cabo sobre la tablazón
+  for (const [x, z] of [[2.6, 3.95], [2.3, 4.1]]) {
+    g.add(cyl(0.13, 0.12, 0.32, 9, '#8b5a2b', x, deckY, z));
+    for (const y of [0.06, 0.24]) g.add(cyl(0.135, 0.135, 0.03, 9, '#3a2a1e', x, deckY + y, z));
+  }
+  cargoCrate(g, 0.05, deckY, 2.55, 0.3, 0.15);
+  cargoCrate(g, 0.3, deckY, 2.75, 0.26, -0.2);
+  const coil = mesh(new THREE.TorusGeometry(0.11, 0.035, 5, 12), '#a38457');
+  coil.rotation.x = Math.PI / 2;
+  coil.position.set(-0.25, deckY + 0.03, 3.95);
+  g.add(coil);
+  // La barca, amarrada al costado del muelle
+  const boat = createShip('bote');
+  boat.scale.setScalar(1.5);
+  boat.position.set(-1.3, -0.32, 3.5);
+  boat.rotation.y = 0.06;
+  g.add(boat);
+  sagRope(g, new THREE.Vector3(-0.6, 0.38, 3.2), new THREE.Vector3(-1.3, -0.12, 2.75), 0.08);
+  return g;
 }
 
 /** Barca de remos amarrada al muelle: se mece con las olas. */
@@ -2255,11 +2328,19 @@ function astillero(level) {
     const ship = new THREE.Group();
     const hull = shipHull({ len: 3.0, beam: 0.92, depth: 0.5, rise: 0.28, full: 0.7, color: '#b08050', band: '#2b2620' });
     ship.add(hull.mesh);
-    sternPost(ship, -1.5, hull.top(0));
-    const bowCurl = mesh(new THREE.TorusGeometry(0.1, 0.03, 4, 7, Math.PI), C.woodDark);
-    bowCurl.rotation.y = -Math.PI / 2;
-    bowCurl.position.set(0, hull.top(1) + 0.06, 1.42);
-    ship.add(bowCurl);
+    // Codaste y roda: postes que salen del casco y se curvan hacia dentro (bien metidos en la
+    // madera, sin piezas sueltas en el aire)
+    for (const [end, h, lean] of [[-1, 0.62, 0.35], [1, 0.42, 0.25]]) {
+      const post = new THREE.Group();
+      post.add(box(0.08, h, 0.08, C.woodDark, 0, 0, 0));
+      const tip = box(0.07, 0.22, 0.07, C.woodDark, 0, 0, 0);
+      tip.position.set(0, h - 0.03, 0);
+      tip.rotation.x = -end * 0.9;
+      post.add(tip);
+      post.position.set(0, hull.top(end > 0 ? 1 : 0) - 0.22, end * 1.36);
+      post.rotation.x = end * lean;
+      ship.add(post);
+    }
     // Mástil sin vela todavía
     ship.add(cyl(0.035, 0.045, 1.4, 6, C.wood, 0, hull.top(0.5) - 0.05, 0.1));
     ship.rotation.y = Math.PI;
@@ -2269,8 +2350,9 @@ function astillero(level) {
     for (const z of [-0.9, 0.2, 1.1]) {
       g.add(box(1.1, 0.14, 0.16, C.woodDark, wx, top + 0.16, z));
       for (const side of [-1, 1]) {
-        const shore = box(0.06, 0.62, 0.06, C.woodLight, wx + side * 0.62, top + 0.12, z);
-        shore.rotation.z = side * 0.35;
+        // Apoyado en el costado del casco
+        const shore = box(0.06, 0.7, 0.06, C.woodLight, wx + side * 0.55, top + 0.24, z);
+        shore.rotation.z = side * 0.3;
         g.add(shore);
       }
     }
