@@ -133,14 +133,19 @@ function startGame(game) {
       if (on) unlockAudio();
     },
     music: () => musicOn(),
-    setMusic: (on) => setMusic(on),
+    setMusic: (on) => {
+      // Encenderla con el volumen a cero no se oiría: vuelve a un volumen medio
+      if (on && musicVolume() === 0) setMusicVolume(0.5);
+      setMusic(on);
+    },
     ambientVolume: () => ambientVolume(),
     setAmbientVolume: (v) => setAmbientVolume(v),
     musicVolume: () => musicVolume(),
     setMusicVolume: (v) => {
       setMusicVolume(v);
-      // Si la música estaba quitada y se sube el volumen, vuelve a sonar
+      // Si la música estaba quitada y se sube el volumen, vuelve a sonar; a cero, se quita del todo
       if (v > 0 && !musicOn()) setMusic(true);
+      else if (v === 0 && musicOn()) setMusic(false);
     },
     notify: () => notifyOn(),
     /** Activa los avisos del navegador (pide permiso). Devuelve si han quedado activos. */

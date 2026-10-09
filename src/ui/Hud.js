@@ -212,7 +212,13 @@ export class Hud {
     });
     this.menu.addEventListener('change', (e) => {
       if (e.target.name === 'sound') settings.setSound(e.target.checked);
-      if (e.target.name === 'music') settings.setMusic(e.target.checked);
+      if (e.target.name === 'music') {
+        settings.setMusic(e.target.checked);
+        // Puede haber vuelto a un volumen audible
+        const vol = Math.round(settings.musicVolume() * 100);
+        this.menu.querySelector('[name="music-volume"]').value = vol;
+        this.menu.querySelector('.volume-pct[data-for="music-volume"]').textContent = `${vol} %`;
+      }
       if (e.target.name === 'daynight') settings.setDayNight(e.target.checked);
       if (e.target.name === 'labels') settings.setLabels(e.target.checked);
       if (e.target.name === 'quality') settings.setQuality(e.target.checked);
