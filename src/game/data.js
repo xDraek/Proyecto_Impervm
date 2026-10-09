@@ -712,6 +712,15 @@ export const BLOCKADE = { hours: 8 };
  * ocupaciones a la vez y `hours` horas cada una.
  */
 export const OCCUPATION = { hours: 24, tribute: 0.2, plunderHours: 4, plunderShare: 0.5, max: 3 };
+/**
+ * Protección contra el acoso. Tras librarse de un bloqueo o una ocupación, la ciudad queda
+ * `shieldHours` horas a salvo de nuevos bloqueos e invasiones (la pierde si ella misma bloquea o
+ * invade). Y nadie puede lanzar más de `attacksPerDay` ataques, invasiones o bloqueos contra el
+ * mismo jugador en 24 horas, salvo entre alianzas en guerra.
+ */
+export const PROTECTION = { shieldHours: 12, attacksPerDay: 5 };
+/** Misiones contra otro jugador que cuentan para el límite de ataques. */
+export const HOSTILE_MISSIONS = ['atacar', 'invadir', 'bloquear'];
 /** Misiones que se pueden lanzar desde una ciudad ocupada. */
 export const OUTPOST_MISSIONS = ['atacar', 'explorar', 'sabotaje', 'bloquear', 'invadir'];
 
