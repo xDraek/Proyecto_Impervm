@@ -4342,3 +4342,75 @@ body.landing-mode #cam-controls {
     inset 0 0 0 1px rgba(255, 245, 215, 0.7),
     inset 0 0 16px rgba(110, 70, 20, 0.22);
 }
+
+/* ── Campos de texto de las ventanas ─────────────────────────────────────── */
+
+/* Los que no tienen estilo propio: oscuros con filete de oro (con :where no pisan a los que sí lo tienen) */
+:where(.modal-card) :where(input[type='text'], input[type='email'], input[type='password'], input[type='search'], input:not([type]), textarea) {
+  min-width: 0;
+  padding: 8px 10px;
+  border-radius: 4px;
+  border: 1px solid rgba(201, 163, 94, 0.55);
+  background: rgba(6, 10, 12, 0.55);
+  color: var(--text);
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.5);
+}
+
+:where(.modal-card) :where(input, textarea)::placeholder {
+  color: rgba(185, 171, 144, 0.7);
+}
+
+/* Amigos: el campo se lleva el ancho y el botón, el suyo */
+.friend-add {
+  align-items: stretch;
+}
+
+.friend-add input {
+  flex: 1;
+  min-width: 0;
+}
+
+.friend-add .primary {
+  flex: none;
+  width: auto;
+  padding: 6px 16px;
+}
+
+.friend-actions .primary,
+.friend-actions .ghost {
+  width: auto;
+}
+
+.friend .icon-btn {
+  color: var(--parch-ink);
+  background: rgba(95, 62, 22, 0.14);
+  border: 1px solid rgba(120, 82, 30, 0.45);
+  border-radius: 4px;
+}
+
+.friend .icon-btn:hover {
+  background: rgba(95, 62, 22, 0.26);
+}
+
+/* ── Volumen de la música en el menú de opciones ─────────────────────────── */
+
+.menu label.volume {
+  gap: 6px;
+  padding-left: 22px;
+  cursor: default;
+}
+
+.menu .volume input[type='range'] {
+  flex: 1;
+  min-width: 0;
+  accent-color: #d9a92e;
+  cursor: pointer;
+}
+
+.menu .volume-pct {
+  width: 38px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+  font-size: 12px;
+}

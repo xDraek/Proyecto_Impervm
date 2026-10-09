@@ -197,7 +197,11 @@ export class Hud {
       this.menu.hidden = !this.menu.hidden;
       this.menu.querySelector('[name="sound"]').checked = settings.sound();
       this.menu.querySelector('[name="music"]').checked = settings.music();
+      const vol = Math.round(settings.musicVolume() * 100);
+      this.menu.querySelector('[name="music-volume"]').value = vol;
+      this.menu.querySelector('.volume-pct').textContent = `${vol} %`;
       this.menu.querySelector('[name="daynight"]').checked = settings.dayNight();
+      this.menu.querySelector('[name="labels"]').checked = settings.labels();
       this.menu.querySelector('[name="quality"]').checked = settings.quality();
       this.menu.querySelector('[name="notify"]').checked = settings.notify();
     });
@@ -208,8 +212,17 @@ export class Hud {
       if (e.target.name === 'sound') settings.setSound(e.target.checked);
       if (e.target.name === 'music') settings.setMusic(e.target.checked);
       if (e.target.name === 'daynight') settings.setDayNight(e.target.checked);
+      if (e.target.name === 'labels') settings.setLabels(e.target.checked);
       if (e.target.name === 'quality') settings.setQuality(e.target.checked);
       if (e.target.name === 'notify') settings.setNotify(e.target.checked).then((on) => (e.target.checked = on));
+    });
+    // Volumen de la música: cambia mientras se arrastra
+    this.menu.addEventListener('input', (e) => {
+      if (e.target.name !== 'music-volume') return;
+      const v = Number(e.target.value);
+      settings.setMusicVolume(v / 100);
+      this.menu.querySelector('.volume-pct').textContent = `${v} %`;
+      this.menu.querySelector('[name="music"]').checked = settings.music();
     });
     this.menu.querySelector('[data-action="guide"]').addEventListener('click', () => {
       this.menu.hidden = true;
@@ -336,6 +349,11 @@ export class Hud {
     const friendBadge = this.friendsBtn.querySelector('.badge');
     friendBadge.hidden = !this.game.friendRequests;
     friendBadge.textContent = this.game.friendRequests;
+    // Una solicitud nueva con la ventana de amigos abierta: que aparezca sin cerrarla
+    if (this.modalKind === 'friends' && !this.modal.hidden && this.social.friends && this.social.friendRequests !== this.game.friendRequests) {
+      this.social.friendRequests = this.game.friendRequests;
+      this.social.openFriends(null, { refresh: true });
+    }
     const armyBadge = this.armyBtn.querySelector('.badge');
     armyBadge.hidden = !this.game.missions.length;
     armyBadge.textContent = this.game.missions.length;
@@ -361,11 +379,16 @@ export class Hud {
     const qBadge = this.questsBtn.querySelector('.badge');
     qBadge.hidden = !claimable;
     qBadge.textContent = claimable;
-    if (claimable > this.claimable) {
+    // (la primera vez solo se cuenta: lo que ya estaba cumplido al entrar no suena)
+    if (this.claimable !== undefined && claimable > this.claimable) {
       const q = this.game.activeQuests().find((x) => x.done);
-      if (q) this.toast(`📋 Misión cumplida: ${q.title}. ¡Reclama la recompensa!`, 'success');
+      const task = this.game.dailyTasks().find((t) => t.done && !t.claimed && !this.tasksDone?.has(t.id));
+      if (task) this.toast(`📋 Encargo cumplido: ${task.text}. ¡Cobra la recompensa!`, 'success');
+      else if (q) this.toast(`📋 Misión cumplida: ${q.title}. ¡Reclama la recompensa!`, 'success');
+      play('fanfare');
     }
     this.claimable = claimable;
+    this.tasksDone = new Set(this.game.dailyTasks().filter((t) => t.done).map((t) => t.id));
     this.update();
   }
 

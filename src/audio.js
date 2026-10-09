@@ -5,6 +5,9 @@
 
 const MUTE_KEY = 'imperium.muted';
 const MUSIC_KEY = 'imperium.music';
+const MUSIC_VOLUME_KEY = 'imperium.musicVolume';
+// Volumen de la música a tope (el deslizador va de 0 a 1 sobre esto)
+const MUSIC_MAX = 0.65;
 
 let ctx = null;
 let master = null;
@@ -136,6 +139,30 @@ export function setGulls(k) {
 
 let music = null;
 
+/** Volumen de la música elegido por el jugador, de 0 a 1 (por defecto, el de siempre). */
+export function musicVolume() {
+  try {
+    const v = Number(localStorage.getItem(MUSIC_VOLUME_KEY));
+    return localStorage.getItem(MUSIC_VOLUME_KEY) === null || !Number.isFinite(v) ? 0.7 : Math.max(0, Math.min(1, v));
+  } catch {
+    return 0.7;
+  }
+}
+
+/** Sube o baja la música (0 a 1) al momento, con un fundido corto. */
+export function setMusicVolume(v) {
+  v = Math.max(0, Math.min(1, v));
+  try {
+    localStorage.setItem(MUSIC_VOLUME_KEY, String(v));
+  } catch {
+    // sin almacenamiento: solo esta sesión
+  }
+  if (music) {
+    music.volume = v * MUSIC_MAX;
+    if (musicOn() && music.playing) music.gain.gain.setTargetAtTime(music.volume, ctx.currentTime, 0.08);
+  }
+}
+
 export function musicOn() {
   try {
     return localStorage.getItem(MUSIC_KEY) !== '0';
@@ -158,7 +185,7 @@ export function setMusic(on) {
 
 function startMusic() {
   if (!ctx) return;
-  music ??= track('/audio/tema.mp3', 0.45);
+  music ??= track('/audio/tema.mp3', musicVolume() * MUSIC_MAX);
   fade(music, music.volume, 2);
 }
 
@@ -250,7 +277,49 @@ function tone(freq, start, dur, { type = 'sine', vol = 0.15, slide = 0 } = {}) {
   osc.stop(start + dur + 0.05);
 }
 
+/** Un metal (trompa o trompeta): diente de sierra con filtro que se abre al atacar la nota. */
+function brass(freq, start, dur, vol = 0.07) {
+  const osc = ctx.createOscillator();
+  osc.type = 'sawtooth';
+  osc.frequency.setValueAtTime(freq * 0.985, start);
+  osc.frequency.exponentialRampToValueAtTime(freq, start + 0.05);
+  const filter = ctx.createBiquadFilter();
+  filter.type = 'lowpass';
+  filter.Q.value = 2;
+  filter.frequency.setValueAtTime(freq * 1.2, start);
+  filter.frequency.exponentialRampToValueAtTime(freq * 5, start + 0.06);
+  filter.frequency.exponentialRampToValueAtTime(freq * 2.2, start + dur);
+  const g = ctx.createGain();
+  g.gain.setValueAtTime(0.0001, start);
+  g.gain.exponentialRampToValueAtTime(vol, start + 0.03);
+  g.gain.setTargetAtTime(vol * 0.7, start + 0.06, 0.1);
+  g.gain.exponentialRampToValueAtTime(0.0001, start + dur);
+  osc.connect(filter).connect(g).connect(master);
+  osc.start(start);
+  osc.stop(start + dur + 0.05);
+}
+
+/** Campana: parciales inarmónicos que se apagan despacio. */
+function bell(freq, start, vol = 0.08) {
+  [[1, 1], [2.76, 0.45], [5.4, 0.22], [0.5, 0.3]].forEach(([k, a]) => tone(freq * k, start, 1.6 / Math.sqrt(k), { vol: vol * a }));
+}
+
 const SOUNDS = {
+  /** Misión o encargo cumplido: una fanfarria corta de metales, inconfundible. */
+  fanfare: (t) => {
+    brass(392, t, 0.16);
+    brass(392, t + 0.15, 0.12);
+    brass(523, t + 0.28, 0.16);
+    brass(659, t + 0.43, 0.16);
+    brass(784, t + 0.58, 0.75, 0.08);
+    brass(523, t + 0.58, 0.75, 0.04);
+    [1568, 2093, 2637].forEach((f, i) => tone(f, t + 0.62 + i * 0.05, 0.6, { vol: 0.025 }));
+  },
+  /** Obra o investigación terminada: dos campanadas. */
+  bell: (t) => {
+    bell(660, t);
+    bell(990, t + 0.22, 0.06);
+  },
   click: (t) => tone(660, t, 0.06, { type: 'triangle', vol: 0.06 }),
   build: (t) => {
     tone(220, t, 0.09, { type: 'square', vol: 0.05 });

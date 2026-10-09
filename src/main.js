@@ -1,5 +1,5 @@
 import './style.css';
-import { isMuted, musicOn, play, setAmbienceLevel, setMusic, setMuted, unlockAudio } from './audio.js';
+import { isMuted, musicOn, musicVolume, play, setAmbienceLevel, setMusic, setMusicVolume, setMuted, unlockAudio } from './audio.js';
 import { clock, universe } from './config.js';
 import { BUILDINGS, PLAYER_UNITS, UNITS } from './game/data.js';
 import { Game, newState } from './game/Game.js';
@@ -14,6 +14,7 @@ import { Hud } from './ui/Hud.js';
 import { showLanding } from './ui/landing.js';
 
 const DAYNIGHT_KEY = 'imperium.daynight';
+const LABELS_KEY = 'imperium.labels';
 const QUALITY_KEY = 'imperium.quality';
 
 /** Gráficos de alta calidad: por defecto sí en el ordenador y no en el móvil. */
@@ -133,6 +134,12 @@ function startGame(game) {
     },
     music: () => musicOn(),
     setMusic: (on) => setMusic(on),
+    musicVolume: () => musicVolume(),
+    setMusicVolume: (v) => {
+      setMusicVolume(v);
+      // Si la música estaba quitada y se sube el volumen, vuelve a sonar
+      if (v > 0 && !musicOn()) setMusic(true);
+    },
     notify: () => notifyOn(),
     /** Activa los avisos del navegador (pide permiso). Devuelve si han quedado activos. */
     setNotify: async (on) => {
@@ -151,6 +158,15 @@ function startGame(game) {
       world.setQuality(on);
       try {
         localStorage.setItem(QUALITY_KEY, on ? 'alta' : 'baja');
+      } catch {
+        // sin almacenamiento: solo dura esta sesión
+      }
+    },
+    labels: () => world.labelsAlways,
+    setLabels: (on) => {
+      world.labelsAlways = on;
+      try {
+        localStorage.setItem(LABELS_KEY, on ? '1' : '0');
       } catch {
         // sin almacenamiento: solo dura esta sesión
       }
@@ -174,6 +190,18 @@ function startGame(game) {
   const world = new World(scene, game, { onSelect: select });
   world.setDayNight(readDayNight());
   world.setQuality(readQuality());
+  // Letreros siempre visibles: lo que eligiera el jugador; si no eligió, sí en pantallas táctiles
+  // (allí no se puede pasar el ratón por encima)
+  try {
+    const saved = localStorage.getItem(LABELS_KEY);
+    world.labelsAlways = saved === null ? matchMedia('(hover: none)').matches : saved === '1';
+  } catch {
+    world.labelsAlways = false;
+  }
+  // Pasar el ratón por un edificio de la lista lo señala también en la isla
+  const sidebar = document.getElementById('sidebar');
+  sidebar.addEventListener('mouseover', (e) => (world.listHover = e.target.closest('[data-id]')?.dataset.id ?? null));
+  sidebar.addEventListener('mouseleave', () => (world.listHover = null));
   const hud = new Hud(game, { onSelect: select, onView: setView, settings, onLogout: logout });
   game.addEventListener('logout', logout);
 
@@ -231,6 +259,8 @@ function startGame(game) {
       }
     }
     if (text.includes('¡Velas piratas') || text.startsWith('⚔️')) play(kind === 'error' ? 'horn' : 'success');
+    // Obras e investigaciones terminadas: su campana
+    else if (/ha alcanzado el nivel|Investigación completada|alcanza el nivel/.test(text)) play('bell');
     else if (kind === 'success') play('success');
     else if (kind === 'error') play('error');
   });

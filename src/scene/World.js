@@ -175,6 +175,11 @@ export class World {
     this.fleets = new Map();
     this.selected = null;
     this.hovered = null;
+    // Edificio señalado en la lista de la izquierda (como si tuviera el ratón encima)
+    this.listHover = null;
+    // Letreros de los edificios: solo los que importan (o todos, con la opción o con Alt pulsado)
+    this.labelsAlways = false;
+    this.altLabels = false;
     this.animated = [];
     this.clouds = [];
     this.view = 'isla';
@@ -1664,7 +1669,23 @@ export class World {
       this.focusTarget = null;
     });
     window.addEventListener('keyup', (e) => this.keys.delete(KEYS[e.key.toLowerCase()]));
-    window.addEventListener('blur', () => this.keys.clear());
+    window.addEventListener('blur', () => {
+      this.keys.clear();
+      this.altLabels = false;
+    });
+    // Con Alt pulsado se ven los nombres de todos los edificios
+    window.addEventListener('keydown', (e) => {
+      if (e.key === 'Alt') {
+        e.preventDefault();
+        this.altLabels = true;
+      }
+    });
+    window.addEventListener('keyup', (e) => {
+      if (e.key === 'Alt') {
+        e.preventDefault();
+        this.altLabels = false;
+      }
+    });
   }
 
   /** Vuelve a la vista de siempre de la isla o del archipiélago. */
@@ -2364,10 +2385,11 @@ export class World {
     }
 
     this.selectRing.material.opacity = 0.65 + Math.sin(t * 4) * 0.3;
-    const showHover = this.hovered && this.hovered !== this.selected;
+    const hovered = this.hovered ?? this.listHover;
+    const showHover = hovered && hovered !== this.selected && (this.slots[hovered] || this.islands[hovered]);
     this.hoverRing.visible = !!showHover;
     if (showHover) {
-      const { center, radius } = this.#ringFor(this.hovered);
+      const { center, radius } = this.#ringFor(hovered);
       this.hoverRing.position.copy(center).setY(center.y - 0.01);
       this.hoverRing.scale.setScalar(radius);
     }
@@ -2383,16 +2405,21 @@ export class World {
    * Etiquetas sin amontonarse: de la más importante a la menos, cada una se queda entera si cabe;
    * si pisa a otra se encoge (icono y nivel, o solo el nombre de la isla) y, si ni así cabe, se esconde.
    * Al pasar el ratón o seleccionar algo, su etiqueta pasa la primera.
+   * En tu isla, para que no tapen la ciudad, solo se ven los letreros del edificio que señalas
+   * (con el ratón o en la lista), del seleccionado y del que se está construyendo; todos, si lo
+   * pide la opción del menú o mientras se tiene pulsado Alt.
    */
   #declutter() {
     if (this.showcase) return;
     const items = [];
-    const boost = (id) => (id === this.selected ? 2000 : id === this.hovered ? 1500 : 0);
+    const pointed = this.hovered ?? this.listHover;
+    const boost = (id) => (id === this.selected ? 2000 : id === pointed ? 1500 : 0);
     if (this.view === 'isla') {
       const q = this.game.queue;
+      const all = this.labelsAlways || this.altLabels;
       for (const s of Object.values(this.slots)) {
         const prio = boost(s.id) + (q?.id === s.id ? 1000 : 0) + (s.id === 'ayuntamiento' ? 600 : 0) + (s.level ?? 0) * 10;
-        items.push({ el: s.el, obj: s.label, prio, island: false });
+        items.push({ el: s.el, obj: s.label, prio, island: false, hide: !all && prio < 1000 });
       }
     } else {
       const target = this.controls.target;
@@ -2411,6 +2438,14 @@ export class World {
     for (const it of items) {
       const { el, obj } = it;
       if (!obj.visible) continue;
+      if (it.hide) {
+        if (el._state !== 'hidden') {
+          el._state = 'hidden';
+          el.classList.remove('lbl-compact');
+          el.classList.add('lbl-hidden');
+        }
+        continue;
+      }
       v.copy(obj.position).project(this.camera);
       if (v.z > 1 || Math.abs(v.x) > 1.2 || Math.abs(v.y) > 1.2) continue;
       const x = ((v.x + 1) / 2) * W;

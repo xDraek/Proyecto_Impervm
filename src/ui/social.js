@@ -474,10 +474,24 @@ export class Social {
 
   // ── Amigos ─────────────────────────────────────────────────────────────────
 
-  async openFriends(data = null) {
+  /**
+   * Ventana de amigos. Sin datos los pide al servidor (con «Cargando…» mientras tanto, salvo al
+   * refrescarla). Mientras está abierta se refresca sola, sin perder lo que estés escribiendo.
+   */
+  async openFriends(data = null, { refresh = false } = {}) {
+    if (!data && !refresh) this.hud.showModal('friends', '<div class="modal-card narrow"><p class="muted">Cargando tus amigos…</p></div>');
     data ??= await this.#call('GET', '/api/friends');
-    if (!data) return;
+    if (!data || this.hud.modalKind !== 'friends') return;
     this.friends = data;
+    this.friendRequests = this.game.friendRequests;
+    clearInterval(this.friendsTimer);
+    this.friendsTimer = setInterval(() => {
+      if (this.hud.modalKind !== 'friends' || this.hud.modal.hidden) clearInterval(this.friendsTimer);
+      else this.openFriends(null, { refresh: true });
+    }, 20000);
+    const typed = this.hud.modal.querySelector('.friend-add input');
+    const draft = typed?.value ?? '';
+    const focused = typed && document.activeElement === typed;
     const person = (f, buttons) => `<li class="friend${f.online ? ' online' : ''}">
         <span class="dot" title="${f.online ? 'Conectado ahora' : 'Desconectado'}"></span>
         <div class="friend-who" data-action="profile" data-name="${escapeHtml(f.name)}">
@@ -521,6 +535,9 @@ export class Social {
         ${outgoing ? `<h4>⏳ Esperando respuesta</h4><ul class="friends">${outgoing}</ul>` : ''}
       </div>`,
     );
+    const input = this.hud.modal.querySelector('.friend-add input');
+    if (input && draft) input.value = draft;
+    if (input && focused) input.focus();
   }
 
   openSimulator(preset) {
@@ -853,6 +870,7 @@ export class Social {
         const res = await this.#call('POST', '/api/friends/add', { name: data.name });
         if (res) {
           this.hud.toast(res.result === 'amigos' ? '👥 Ya sois amigos' : `👥 Solicitud enviada a ${data.name}`, 'success');
+          form.reset();
           this.openFriends(res);
         }
       } else if (form.dataset.form === 'email') {
