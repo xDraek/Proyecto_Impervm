@@ -1954,6 +1954,13 @@ export class Game extends EventTarget {
       rt.stock = stock;
       rt.stockAt = t;
     }
+    // Sin nadie que la defienda, la isla queda arrasada: lo que no cabía en las bodegas se pierde y
+    // no vuelve a juntar nada hasta que la guarnición se haya recuperado del todo
+    const razed = result.winner === 'att' && !count(result.def.left) && !!isl.loot;
+    if (razed) {
+      rt.stock = {};
+      rt.stockAt = t + hours(isl.regenHours ?? 1);
+    }
     this.world.touch?.(isl.id);
     this.#intel(isl, rt, t);
 
@@ -1964,7 +1971,8 @@ export class Game extends EventTarget {
       empate: `Retirada en ${isl.name}`,
     }[outcome];
     if (isl.type === 'ruinas') loot = { ...m.cargo };
-    this.#report({ t, kind: 'ataque', island: isl.id, islandName: isl.name, outcome, title, battle: pick(result), loot, wall });
+    const text = razed ? 'No queda nadie en la isla: está arrasada y no habrá nada que saquear hasta que vuelvan a poblarla.' : undefined;
+    this.#report({ t, kind: 'ataque', island: isl.id, islandName: isl.name, outcome, title, text, battle: pick(result), loot, wall });
     this.#note(
       outcome === 'victoria' ? `⚔️ ${title}${loot && fmtBag(loot) ? ` · botín ${fmtBag(loot)}` : ''}` : `⚔️ ${title}`,
       outcome === 'victoria' ? 'success' : 'error',
