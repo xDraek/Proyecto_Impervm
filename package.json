@@ -7,7 +7,8 @@
     "dev": "node server/index.js --dev",
     "build": "vite build",
     "start": "node server/index.js",
-    "preview": "npm run build && node server/index.js --port 4173"
+    "preview": "npm run build && node server/index.js --port 4173",
+    "test": "node --test"
   },
   "dependencies": {
     "pg": "^8.23.1",

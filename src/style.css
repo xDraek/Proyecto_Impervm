@@ -2338,6 +2338,12 @@ input[type='text'] {
   box-shadow: 0 0 12px rgba(255, 107, 91, 0.35);
 }
 
+/* Ciudad bloqueada u ocupada */
+.label.sieged {
+  border-color: rgba(190, 120, 220, 0.9);
+  box-shadow: 0 0 12px rgba(190, 120, 220, 0.35);
+}
+
 .rel {
   font-weight: 600;
 }
@@ -3443,6 +3449,11 @@ input[type='text'] {
   border-radius: 10px;
   border: 1px solid rgba(140, 180, 220, 0.55);
   background: rgba(30, 60, 100, 0.18);
+}
+
+.port-box.shielded {
+  border-color: rgba(120, 200, 140, 0.55);
+  background: rgba(30, 90, 50, 0.18);
 }
 
 .port-box.occupied {

@@ -37,7 +37,7 @@ const HOSTILE = new Set(['atacar', 'invadir', 'bloquear']);
 /** Quién bloquea el puerto u ocupa la ciudad (para quien la mira desde fuera). */
 function portOf(state) {
   const info = state.occupied ?? state.blockade;
-  return info ? { kind: state.occupied ? 'invadir' : 'bloquear', by: info.by, name: info.name, until: info.until } : null;
+  return info ? { kind: state.occupied ? 'invadir' : 'bloquear', by: info.by, name: info.name, banner: info.banner ?? null, until: info.until } : null;
 }
 const TAG_RE = /^[\p{L}\p{N}]{2,5}$/u;
 
@@ -381,6 +381,8 @@ export class WorldServer {
       banner: game.state.banner ?? null,
       alliance: a ? { id: a.id, tag: a.tag, name: a.name } : null,
       port: portOf(game.state),
+      // Recién liberada: a salvo de bloqueos e invasiones hasta entonces
+      shield: game.state.shieldUntil || null,
     };
   }
 
@@ -1730,6 +1732,7 @@ export class WorldServer {
           const g = this.games.get(isl.owner);
           if (!g) continue;
           const a = this.allianceOf(isl.owner);
+          const port = portOf(g.state);
           cities.push({
             id: isl.id,
             x: Math.round(isl.x),
@@ -1745,6 +1748,8 @@ export class WorldServer {
             emblem: g.state.banner?.emblem ?? null,
             aid: a?.id ?? null,
             tag: a?.tag ?? null,
+            // Bloqueada u ocupada: { kind, name } de quien lo hace
+            port: port && { kind: port.kind, name: port.name },
           });
         } else {
           const entry = [Math.round(isl.x), Math.round(isl.z), isl.type, this.islandStates.get(isl.id)?.colonizedBy ?? 0];

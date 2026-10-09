@@ -13,6 +13,7 @@ import {
   DAILY_TASK_REWARD,
   DIPLOMACY,
   HERO,
+  HOSTILE_MISSIONS,
   HERO_SKILLS,
   ISLAND_TYPES,
   MERCENARIES,
@@ -23,6 +24,7 @@ import {
   OUTPOST_MISSIONS,
   PLAYER_UNITS,
   POWERS,
+  PROTECTION,
   QUESTS,
   RELICS,
   RELIC_RARITY,
@@ -138,6 +140,9 @@ export function newState({ now = clock.now(), home, name }) {
     // Quién bloquea tu puerto u ocupa tu ciudad: { by, name, mission, since, until } (y `owed` en la ocupación)
     blockade: null,
     occupied: null,
+    // Protección tras librarse de un bloqueo o una ocupación, y ataques lanzados contra cada jugador ({ uid, t })
+    shieldUntil: 0,
+    hits: [],
     startedAt: now,
     seq: 1,
     lastUpdate: now,
@@ -326,6 +331,17 @@ export class Game extends EventTarget {
   /** Si tu puerto está cerrado por un bloqueo o una ocupación enemiga. */
   portClosed() {
     return portClosed(this.state);
+  }
+
+  /** Hasta cuándo está tu ciudad a salvo de bloqueos e invasiones (o null). */
+  shield(now = this.now()) {
+    return (this.state.shieldUntil ?? 0) > now ? this.state.shieldUntil : null;
+  }
+
+  /** Ataques, invasiones y bloqueos que has lanzado contra el jugador `uid` en las últimas 24 horas. */
+  attacksOn(uid, now = this.now()) {
+    const since = now - hours(24);
+    return (this.state.hits ?? []).filter((h) => h.uid === uid && h.t > since).length;
   }
 
   // ── Misiones (objetivos) ───────────────────────────────────────────────────
@@ -858,8 +874,10 @@ export class Game extends EventTarget {
         vacation: !!p?.vacation,
         inactive: !!p?.inactive,
         relation: this.world.relation?.(this.userId, isl.owner) ?? null,
-        // Quién bloquea su puerto u ocupa la ciudad: { kind: 'bloquear'|'invadir', by, name, until }
+        // Quién bloquea su puerto u ocupa la ciudad: { kind: 'bloquear'|'invadir', by, name, banner, until }
         port: p?.port ?? null,
+        // Hasta cuándo está a salvo de bloqueos e invasiones (recién liberada)
+        shield: p?.shield > t ? p.shield : null,
       });
       // Las ciudades de tu alianza las conoces sin espiarlas
       if (view.relation === 'aliado') view.explored = true;
@@ -1133,6 +1151,12 @@ export class Game extends EventTarget {
           if (s.missions.some((m) => m.type === 'bloquear' && m.target === target)) reason ||= 'Ya tienes una flota bloqueando este puerto o de camino.';
         }
         if (!hasCombat(sent)) reason ||= 'Envía al menos una unidad de combate.';
+        // Recién liberada: nadie la puede volver a bloquear ni invadir durante un tiempo
+        if ((type === 'invadir' || type === 'bloquear') && view.shield) reason ||= `${view.ownerName} acaba de librarse de un bloqueo o una ocupación: nadie la puede bloquear ni invadir hasta dentro de un rato.`;
+        // Contra el acoso: un máximo de ataques al mismo jugador al día (salvo en guerra)
+        if (view.relation !== 'guerra' && !opts.join && this.attacksOn(isl.owner) >= PROTECTION.attacksPerDay) {
+          reason ||= `Ya has atacado ${PROTECTION.attacksPerDay} veces a ${view.ownerName} en las últimas 24 h. Dale un respiro (en guerra entre alianzas no hay límite).`;
+        }
         if (type === 'invadir') {
           const going = s.missions.filter((m) => m.type === 'invadir' && m.phase !== 'vuelta');
           if (!hasCombat(splitForces(sent).land)) reason ||= 'Para ocupar la ciudad hacen falta tropas de tierra.';
@@ -1212,6 +1236,14 @@ export class Game extends EventTarget {
       ...(plan.base ? { from: plan.base.target, fromName: plan.base.targetName, base: plan.base.id } : {}),
     });
     if (opts.hero) this.state.hero.mission = this.state.missions.at(-1).id;
+    // Lo que cuenta para el límite de ataques al mismo jugador
+    const owner = this.world.island(target)?.owner;
+    if (owner != null && HOSTILE_MISSIONS.includes(type) && !opts.join) {
+      const since = now - hours(24);
+      this.state.hits = [...(this.state.hits ?? []).filter((h) => h.t > since), { uid: owner, t: now }];
+    }
+    // Quien bloquea o invade pierde su propia protección
+    if (type === 'invadir' || type === 'bloquear') this.state.shieldUntil = 0;
     return this.#done();
   }
 
@@ -1466,6 +1498,11 @@ export class Game extends EventTarget {
     if (reason === 'liberada') {
       this.#gain(owed);
       owed = {};
+    }
+    // Un respiro: unas horas sin bloqueos ni invasiones (si solo cambia de manos, no)
+    if (reason !== 'relevo') {
+      s.shieldUntil = Math.max(s.shieldUntil ?? 0, t + hours(PROTECTION.shieldHours));
+      this.#note(`🛡️ Tu ciudad queda protegida ${PROTECTION.shieldHours} h contra bloqueos e invasiones`, 'success');
     }
     const name = info.name;
     const text =
@@ -2075,14 +2112,18 @@ export class Game extends EventTarget {
       this.state.stats.pvpWins++;
     }
     // Invasión: si sus defensores han caído y quedan tropas en tierra, se quedan ocupando la ciudad
-    const occupy = m.type === 'invadir' && outcome === 'victoria' && hasCombat(splitForces(m.units).land);
+    // (salvo que acabe de librarse de otra ocupación: entonces solo se saquea)
+    const shielded = (this.world.playerInfo?.(isl.owner)?.shield ?? 0) > t;
+    const occupy = m.type === 'invadir' && outcome === 'victoria' && hasCombat(splitForces(m.units).land) && !shielded;
     const title = occupy
       ? `Has invadido ${isl.name}`
       : { victoria: `Has saqueado ${isl.name}`, derrota: `Derrota en ${isl.name}`, empate: `Retirada de ${isl.name}` }[outcome];
     const occupyText = occupy
       ? `🦅 Tus tropas ocupan la ciudad durante ${OCCUPATION.hours} h como mucho: controlas su puerto, te quedas el ${Math.round(OCCUPATION.tribute * 100)} % de lo que produce y puedes lanzar ataques desde allí.`
       : m.type === 'invadir' && outcome === 'victoria'
-        ? 'No te quedan tropas de tierra para ocupar la ciudad.'
+        ? shielded
+          ? 'La ciudad acaba de librarse de una ocupación y está protegida: tus tropas la saquean y vuelven a casa.'
+          : 'No te quedan tropas de tierra para ocupar la ciudad.'
         : '';
     const text = [phaseText(result), names.length ? `🤝 Ataque conjunto con ${names.join(', ')}. El botín se reparte según la bodega de cada uno.` : '', warText, occupyText].filter(Boolean).join(' ') || undefined;
     this.#report({ t, kind: 'ataque', island: isl.id, islandName: isl.name, outcome, title, text, battle: battleLog, loot: loots[0], enemy, pvp: true });
@@ -2157,6 +2198,7 @@ export class Game extends EventTarget {
       : info?.vacation ? `${info.name} se ha ido de vacaciones: su puerto no se puede bloquear.`
       : port?.kind === 'invadir' ? `${port.name} ha ocupado la ciudad: su puerto ya está en otras manos.`
       : port ? `${port.name} se te ha adelantado y ya bloquea el puerto.`
+      : info?.shield > t ? `${info.name} acaba de librarse de un bloqueo o una ocupación: su puerto está protegido un tiempo.`
       : '';
     if (why) {
       this.#report({ t, kind: 'ataque', island: isl.id, islandName: isl.name, title: `Bloqueo cancelado en ${isl.name}`, text: why });
@@ -2192,7 +2234,8 @@ export class Game extends EventTarget {
     m.until = t + hours(h);
     // El primer saqueo ya ha sido el del asalto
     if (m.type === 'invadir') m.plunderAt = t + hours(OCCUPATION.plunderHours);
-    this.world.seizePort?.(isl.owner, m.type, { by: this.userId, name: this.state.name, mission: m.id, since: t, until: m.until }, t);
+    const banner = this.state.banner?.color ?? null;
+    this.world.seizePort?.(isl.owner, m.type, { by: this.userId, name: this.state.name, banner, mission: m.id, since: t, until: m.until }, t);
   }
 
   /**

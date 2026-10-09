@@ -35,7 +35,7 @@ import {
   wallHeight,
   windowMaterial,
 } from './models.js';
-import { createIslandBase, createIslandFeature, islandExtent, islandLook, islandRadius, shoreRadius } from './islands.js';
+import { createIslandBase, createIslandFeature, islandExtent, islandLook, islandRadius, ownerColor, shoreRadius } from './islands.js';
 import { escapeHtml } from '../ui/format.js';
 import { Batch, bakeStatic, hashString, mountainGeometry, paintByNormal, plateauGeometry, polar, rng, surfaceDetail } from './util.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
@@ -2086,7 +2086,41 @@ export class World {
     this.#syncIslands();
     this.#syncFleets();
     this.#syncRaid();
+    this.#syncSiege();
     this.#collectAnimated();
+  }
+
+  /** Color de las banderas de tu ciudad: el tuyo o, si te han ocupado, el del invasor. */
+  #homeBanner() {
+    const occ = this.game.state.occupied;
+    if (occ) return occ.banner ?? ownerColor({ owner: occ.by });
+    return this.game.state.banner?.color;
+  }
+
+  /**
+   * Flota enemiga anclada frente a la bocana de tu puerto mientras te bloquean u ocupan: cuatro
+   * barcos de guerra de costado que se mecen con las olas.
+   */
+  #syncSiege() {
+    const s = this.game.state;
+    const info = s.occupied ?? s.blockade;
+    const key = info ? `${s.occupied ? 'o' : 'b'}-${info.by}-${info.mission}` : null;
+    if (this.siegeKey === key) return;
+    this.siegeKey = key;
+    if (this.siegeGroup) {
+      this.scene.remove(this.siegeGroup);
+      disposeTree(this.siegeGroup);
+      this.siegeGroup = null;
+    }
+    if (!info) return;
+    const g = new THREE.Group();
+    ['dromon', 'trirreme', 'galeon', 'trirreme'].forEach((type, i) => {
+      const deg = GATE_ANGLE + (i - 1.5) * 9;
+      const p = polar(this.coast(deg) + 15 + (i % 2) * 4, deg);
+      g.add(anchoredShip(type, p, 2.6, i));
+    });
+    this.scene.add(g);
+    this.siegeGroup = g;
   }
 
   #syncBuildings() {
@@ -2095,7 +2129,7 @@ export class World {
       const slot = this.slots[id];
       const level = this.game.level(id);
       const building = q?.id === id;
-      const key = `${level}|${building}|${this.game.state.banner?.color ?? ''}`;
+      const key = `${level}|${building}|${this.#homeBanner() ?? ''}`;
       if (slot.key === key) continue;
       const leveledUp = slot.key !== null && Number(slot.key.split('|')[0]) < level;
       slot.key = key;
@@ -2111,7 +2145,7 @@ export class World {
       slot.extrasKey = null;
 
       slot.building = createBuilding(id, level);
-      paintBanner(slot.building, this.game.state.banner?.color);
+      paintBanner(slot.building, this.#homeBanner());
       slot.building.position.y = id === 'ayuntamiento' ? 0.04 : id === 'puerto' || id === 'muralla' ? 0 : 0.12;
       slot.baseScale = slot.building.scale.x;
       slot.root.add(slot.building);
@@ -2230,7 +2264,10 @@ export class World {
       if (!view) continue;
       // El color de la bandera de quien gobierna la isla también cambia el modelo
       const ownerId = view.type === 'jugador' ? view.owner : view.colonizedBy;
-      const bannerColor = ownerId === this.game.userId ? this.game.state.banner?.color : this.game.world.playerInfo(ownerId)?.banner?.color;
+      // Una ciudad ocupada luce el estandarte de quien la ocupa
+      const port = view.type === 'jugador' ? view.port : null;
+      const occupier = port?.kind === 'invadir' ? (port.by === this.game.userId ? this.game.state.banner?.color : port.banner) ?? ownerColor({ owner: port.by }) : null;
+      const bannerColor = occupier ?? (ownerId === this.game.userId ? this.game.state.banner?.color : this.game.world.playerInfo(ownerId)?.banner?.color);
       const look = `${islandLook(view)}|${bannerColor ?? ''}`;
       if (entry.look !== look) {
         entry.look = look;
@@ -2241,6 +2278,7 @@ export class World {
         entry.feature = createIslandFeature({ ...entry.isl, colonizedBy: view.colonizedBy, bannerColor }, look);
         entry.group.add(entry.feature);
       }
+      this.#syncIslandSiege(entry, port);
       const t = ISLAND_TYPES[entry.isl.type];
       let status = !view.explored ? '❔ Inexplorada' : `${t.icon} ${view.typeName}`;
       const ally = view.alliance && view.alliance.id === this.game.alliance?.id;
@@ -2251,17 +2289,43 @@ export class World {
       else if (view.colonizedBy != null) status = `🚩 Colonia de ${view.colonistName}`;
       else if (view.explored && view.tier) status += ` · Nv ${view.tier}`;
       if (view.type === 'continente') status = view.horde ? `🔥 ¡Horda! ${view.horde.left} bárbaros` : `🗺️ Continente · maravilla nivel ${view.wonder?.level ?? 0}`;
+      if (port) status += port.kind === 'invadir' ? ` · 🦅 Ocupada${port.by === this.game.userId ? ' por ti' : ''}` : ` · ⛓️ Bloqueada${port.by === this.game.userId ? ' por ti' : ''}`;
+      else if (view.shield) status += ' · 🛡️ Recién liberada';
       if (view.inbound.length) status += ' · ⛵';
       entry.el.querySelector('.label-lvl').textContent = status;
       entry.el.classList.toggle('colony', !!view.colonized);
       entry.el.classList.toggle('ally', !!ally);
       entry.el.classList.toggle('pact', view.relation === 'pacto');
       entry.el.classList.toggle('war', view.relation === 'guerra' || (view.type === 'continente' && !!view.horde));
+      entry.el.classList.toggle('sieged', !!port);
       // Lo que más importa al jugador se queda con la etiqueta entera cuando no caben todas
       entry.prio = view.type === 'continente' && view.horde ? 400 : view.colonized ? 350 : view.type === 'jugador' ? 300 : view.type === 'continente' ? 250 : view.explored ? 100 : 0;
       entry.el.classList.toggle('player', view.type === 'jugador');
       entry.el.classList.toggle('unknown', !view.explored);
     }
+  }
+
+  /** Barcos anclados junto a una ciudad del mapa que está bloqueada u ocupada (del lado que mira hacia ti). */
+  #syncIslandSiege(entry, port) {
+    const key = port ? `${port.kind}-${port.by}` : null;
+    if (entry.siegeKey === key) return;
+    entry.siegeKey = key;
+    if (entry.siege) {
+      entry.group.remove(entry.siege);
+      disposeTree(entry.siege);
+      entry.siege = null;
+    }
+    if (!port) return;
+    const g = new THREE.Group();
+    const toward = Math.atan2(-entry.pos.x, -entry.pos.z);
+    const r = islandExtent(entry.isl) + 3;
+    const types = port.kind === 'invadir' ? ['mercante', 'trirreme'] : ['trirreme', 'dromon', 'trirreme'];
+    types.forEach((type, i) => {
+      const a = toward + (i - (types.length - 1) / 2) * 0.32;
+      g.add(anchoredShip(type, new THREE.Vector3(Math.sin(a) * r, 0, Math.cos(a) * r), 3.2, i));
+    });
+    entry.group.add(g);
+    entry.siege = g;
   }
 
   /**
@@ -2536,7 +2600,11 @@ export class World {
       collect(slot.scaffold);
     }
     collect(this.houseGroup);
-    for (const isl of Object.values(this.islands)) collect(isl.feature);
+    for (const isl of Object.values(this.islands)) {
+      collect(isl.feature);
+      collect(isl.siege);
+    }
+    collect(this.siegeGroup);
     for (const f of this.fleets.values()) collect(f.group);
     collect(this.raidGroup);
   }
@@ -3147,6 +3215,17 @@ function cart() {
 }
 
 /** Las banderas (las que ondean con el color principal) toman el color del estandarte del jugador. */
+/** Un barco fondeado en `p` (en el agua), de costado respecto a la isla, que se mece con las olas. */
+function anchoredShip(type, p, scale, i) {
+  const ship = createShip(type);
+  ship.position.set(p.x, WATER_Y, p.z);
+  // De proa a lo largo de la costa: así se ve de lado desde la isla
+  ship.rotation.y = Math.atan2(p.z, -p.x);
+  ship.scale.setScalar(scale);
+  ship.userData.bob = { amp: 0.1, speed: 1 + i * 0.17, base: WATER_Y };
+  return ship;
+}
+
 function paintBanner(root, color) {
   if (!color) return;
   const base = mat(C.cloth[0]);

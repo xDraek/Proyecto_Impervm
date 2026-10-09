@@ -229,6 +229,13 @@ function recruitSection(game, building) {
 function portSection(game) {
   const s = game.state;
   const info = s.occupied ?? s.blockade;
+  const shield = game.shield();
+  if (!info && shield) {
+    return `<div class="port-box shielded">
+      <h4>🛡️ Tu ciudad está protegida</h4>
+      <p class="desc small">Te acabas de librar de un bloqueo o una ocupación: nadie puede bloquear tu puerto ni invadirte durante <b data-until="${shield}"></b>. Si tú bloqueas o invades a otro, pierdes la protección.</p>
+    </div>`;
+  }
   if (!info) return '';
   const occupied = !!s.occupied;
   const mine = occupied ? { ...splitForces(game.units).land, ...splitForces(game.units).sea } : splitForces(game.units).sea;

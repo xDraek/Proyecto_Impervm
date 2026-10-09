@@ -27,6 +27,12 @@ const head = (icon, title, sub) => `
   <div class="panel-head"><span class="panel-icon">${icon}</span><div><h3>${title}</h3><div class="panel-lvl">${sub}</div></div>
   <button class="icon-btn" data-action="close-modal" title="Cerrar">✕</button></div>`;
 
+/** «· ⛓️ bloqueada por X» o «· 🦅 ocupada por X» (texto plano). */
+function portText(c) {
+  if (!c.port) return '';
+  return c.port.kind === 'invadir' ? ` · 🦅 ocupada por ${c.port.name}` : ` · ⛓️ bloqueada por ${c.port.name}`;
+}
+
 export class WorldMap {
   constructor(hud) {
     this.hud = hud;
@@ -74,7 +80,7 @@ export class WorldMap {
           <button class="ghost small" data-wm="out" title="Alejar">－</button>
         </div>
         <div class="wm-wrap"><canvas></canvas><div class="wm-tip" hidden></div></div>
-        <div class="wm-legend">${legend}<span><i style="background:#5f9a4a"></i>Continente</span><span><i style="background:#d0663e"></i>Ciudad bárbara</span><span><i class="ring"></i>Lo que ves desde tu ciudad</span><span>🏖️ De vacaciones</span><span>💤 Inactivo</span></div>
+        <div class="wm-legend">${legend}<span><i style="background:#5f9a4a"></i>Continente</span><span><i style="background:#d0663e"></i>Ciudad bárbara</span><span><i class="ring"></i>Lo que ves desde tu ciudad</span><span>🏖️ De vacaciones</span><span>💤 Inactivo</span><span>⛓️ Puerto bloqueado</span><span>🦅 Ocupada</span></div>
         <div class="wm-info"><p class="muted small">Arrastra para moverte, usa la rueda para acercarte y pulsa una ciudad para ver quién vive en ella.</p></div>
       </div>`,
     );
@@ -265,7 +271,7 @@ export class WorldMap {
     let text;
     if (hit.kind === 'city') {
       const c = hit.item;
-      text = `${c.emblem ?? '🏰'} ${c.tag ? `[${c.tag}] ` : ''}${c.name} · ${c.city} · ${fmtNum(c.points)} pts${c.vacation ? ' · 🏖️' : c.inactive ? ' · 💤' : ''}`;
+      text = `${c.emblem ?? '🏰'} ${c.tag ? `[${c.tag}] ` : ''}${c.name} · ${c.city} · ${fmtNum(c.points)} pts${c.vacation ? ' · 🏖️' : c.inactive ? ' · 💤' : ''}${portText(c)}`;
     } else {
       const [, , type, colonist] = hit.item;
       const t = ISLAND_TYPES[type];
@@ -297,7 +303,7 @@ export class WorldMap {
       const visible = !!this.game.world.island(c.id);
       this.info.innerHTML = `<div class="wm-card">
         <div><b>${c.emblem ?? '🏰'} ${escapeHtml(c.city)}</b> <span class="rel-chip" style="--rel:${REL[rel].color}">${REL[rel].name}</span>
-          <div class="small">${me ? 'Tu capital' : `de <b>${escapeHtml(c.name)}</b>`}${c.tag ? ` <span class="tag">[${escapeHtml(c.tag)}]</span>` : ''} · ${fmtNum(c.points)} puntos${c.protected ? ' · 🛡️ novato' : ''}${c.vacation ? ' · 🏖️ de vacaciones' : c.inactive ? ' · 💤 inactivo' : ''}</div>
+          <div class="small">${me ? 'Tu capital' : `de <b>${escapeHtml(c.name)}</b>`}${c.tag ? ` <span class="tag">[${escapeHtml(c.tag)}]</span>` : ''} · ${fmtNum(c.points)} puntos${c.protected ? ' · 🛡️ novato' : ''}${c.vacation ? ' · 🏖️ de vacaciones' : c.inactive ? ' · 💤 inactivo' : ''}${escapeHtml(portText(c))}</div>
           ${me ? '' : far}</div>
         <div class="row-actions">
           ${me ? '' : `<button class="ghost small" data-action="profile" data-name="${escapeHtml(c.name)}">👤 Perfil</button><button class="ghost small" data-action="mail-to" data-name="${escapeHtml(c.name)}">✉️</button>`}
@@ -427,6 +433,23 @@ export class WorldMap {
         ctx.beginPath();
         ctx.arc(sx, sy, cr + 6, 0, Math.PI * 2);
         ctx.stroke();
+      }
+      // Bloqueada u ocupada: su icono junto a la ciudad
+      if (c.port) {
+        const bx = sx + cr + 8;
+        const by = sy - cr + 1;
+        ctx.fillStyle = 'rgba(12, 18, 26, 0.9)';
+        ctx.strokeStyle = c.port.kind === 'invadir' ? '#c98ae6' : '#9cc4ea';
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.arc(bx, by, 9, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+        ctx.font = '11px system-ui, sans-serif';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(c.port.kind === 'invadir' ? '🦅' : '⛓️', bx, by + 1);
+        ctx.textBaseline = 'alphabetic';
+        ctx.font = '600 11px Inter, system-ui, sans-serif';
       }
       if (labels || selected || rel === 'yo') {
         const text = `${c.tag ? `[${c.tag}] ` : ''}${c.name}${c.vacation ? ' 🏖️' : c.inactive ? ' 💤' : ''}`;

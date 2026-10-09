@@ -20,6 +20,7 @@ import {
   MISSION_TYPES,
   OCCUPATION,
   POWERS,
+  PROTECTION,
   RELICS,
   RELIC_RARITY,
   RELIC_SLOTS,
@@ -456,6 +457,7 @@ const TOPICS = {
         `<b>Guerra</b>: si vuestras alianzas están en guerra, tus barcos cargan un ${pct(DIPLOMACY.warLoot)} más de botín y las bajas cuentan en el marcador de la guerra.`,
         `<b>Ataques conjuntos</b>: hasta ${JOINT_MAX} aliados pueden sumar su flota al ataque de otro y combatir como un solo ejército. El botín se reparte según la bodega de cada uno.`,
         'El defensor ve venir tu flota: aviso arriba, la flota en su mapa y ⚔️ en el título de su pestaña.',
+        `<b>Límite de ataques</b>: como mucho ${PROTECTION.attacksPerDay} ataques, invasiones o bloqueos contra el mismo jugador cada 24 h, para que nadie acose a otro sin descanso. Entre alianzas en guerra no hay límite. En el panel de su ciudad ves cuántos llevas.`,
       ])}
       ${tip(`Espía antes de atacar (${see('espionaje', 'Espionaje y sabotaje')}) y usa el simulador. Para quedarte con su ciudad, mira ${see('invasiones', 'Invasiones')}.`)}`,
   },
@@ -488,6 +490,7 @@ const TOPICS = {
         'Nadie más puede atacar, invadir ni sabotear esa ciudad.',
       ])}
       <p>Puedes tener como mucho <b>${OCCUPATION.max} invasiones</b> a la vez. Si retiras las tropas o se acaba el tiempo, vuelven a casa con el tributo pendiente.</p>
+      <p>🛡️ <b>Protección</b>: cuando una ciudad se libra de un bloqueo o una ocupación (por la razón que sea), queda <b>${PROTECTION.shieldHours} h</b> a salvo de nuevos bloqueos e invasiones; los ataques normales sí pueden llegar, con su límite diario. Si invades una ciudad protegida, tus tropas la saquean pero no se quedan. La protección se pierde si esa ciudad bloquea o invade a otra.</p>
       <h5>Si te bloquean o te ocupan</h5>
       ${list([
         'Ve al <b>puerto</b> (o pulsa el aviso rojo): ahí ves quién es, cuánto le queda y el tributo apartado.',
@@ -496,6 +499,7 @@ const TOPICS = {
         'Las <b>tropas de apoyo</b> de tu alianza combaten contra ellos al llegar y, si vencen, se quedan defendiéndote.',
         'Si los echas, el tributo que no se llevaron se queda en tu almacén.',
         'Mientras dure no puedes irte de vacaciones.',
+        `Cuando termine, tendrás ${PROTECTION.shieldHours} h de protección contra nuevos bloqueos e invasiones.`,
       ])}
       ${tip('Si las dos alianzas firman un pacto o pasáis a ser aliados, el bloqueo o la ocupación terminan solos.')}`,
   },

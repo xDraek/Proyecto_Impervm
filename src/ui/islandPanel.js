@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { BLOCKADE, COLONY, ISLAND_TYPES, MISSION_TYPES, OCCUPATION, OUTPOST_MISSIONS, PLAYER_UNITS, RESOURCES, RESOURCE_KEYS, UNITS, WONDERS, WONDER_LEVELS, WONDER_RESOURCES } from '../game/data.js';
+import { BLOCKADE, COLONY, ISLAND_TYPES, MISSION_TYPES, OCCUPATION, OUTPOST_MISSIONS, PLAYER_UNITS, PROTECTION, RESOURCES, RESOURCE_KEYS, UNITS, WONDERS, WONDER_LEVELS, WONDER_RESOURCES } from '../game/data.js';
 import { colonyUpgrade, colonyYield } from '../game/rules.js';
 import { NEWBIE_POINTS } from '../game/Game.js';
 import { createIslandBase, createIslandFeature, islandLook } from '../scene/islands.js';
@@ -20,6 +20,13 @@ function playerSection(game, view) {
   if (view.vacation) lines.push('<p class="hint ok">🏖️ Está de vacaciones: su isla no se puede atacar ni espiar.</p>');
   else if (view.inactive) lines.push('<p class="hint">💤 Lleva más de una semana sin aparecer por su ciudad.</p>');
   if (view.protected) lines.push(`<p class="hint ok">🛡️ Protección de novato: con menos de ${NEWBIE_POINTS} puntos nadie puede atacar esta ciudad.</p>`);
+  if (view.shield) lines.push(`<p class="hint ok">🛡️ Acaba de librarse de un bloqueo o una ocupación: nadie la puede bloquear ni invadir en <span data-until="${view.shield}"></span>.</p>`);
+  // Límite de ataques al mismo jugador (no cuenta entre alianzas en guerra)
+  if (!ally && view.relation !== 'pacto') {
+    const hits = game.attacksOn(view.owner);
+    if (view.relation === 'guerra') lines.push('<p class="muted small">⚔️ En guerra no hay límite de ataques al día.</p>');
+    else if (hits) lines.push(`<p class="${hits >= PROTECTION.attacksPerDay ? 'hint warn' : 'muted small'}">⚔️ Le has atacado ${hits} de ${PROTECTION.attacksPerDay} veces permitidas en 24 h.</p>`);
+  }
   const port = view.port;
   if (port && port.by !== game.userId) {
     lines.push(
