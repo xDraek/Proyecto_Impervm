@@ -29,6 +29,7 @@ import {
   hipRoof,
   mat,
   mediterraneanTree,
+  palmTree,
   mesh,
   wallHeight,
   windowMaterial,
@@ -81,8 +82,9 @@ const LAYOUT = {
   granja: { r: 22, angle: 60 },
   aserradero: { r: 22, angle: 100 },
   forja: { r: 22, angle: 140 },
-  cantera: { r: 22, angle: 178 },
-  mina: { r: 22, angle: 216 },
+  // La cantera y la mina, al pie de su monte (#layoutFor las arrima a él)
+  cantera: { foot: true, angle: 178 },
+  mina: { foot: true, angle: 216 },
   fundicion: { r: 22, angle: 254 },
   torre: { r: 22, angle: 292 },
   coloso: { r: 22, angle: 330, ring: 1.15 },
@@ -95,12 +97,14 @@ const LAYOUT = {
 const INNER = ['academia', 'almacen', 'templo', 'cuartel', 'mercado', 'taberna'];
 const OUTER = ['granja', 'aserradero', 'forja', 'cantera', 'mina', 'fundicion', 'torre', 'coloso'];
 const COAST = ['astillero', 'faro'];
-// Montañas detrás de la cantera y la mina: a `inset` de la orilla
+// Sierra junto a la costa, a `inset` de la orilla. La cantera y la mina están excavadas en la
+// falda de su monte (`behind`): la cantera es un tajo en la roca y la mina, una galería.
 const MOUNTAINS = [
-  { angle: 197, inset: 2.8, radius: 4.8, height: 8.6 },
-  { angle: 176, inset: 1.0, radius: 2.9, height: 5.0 },
-  { angle: 220, inset: 1.0, radius: 2.8, height: 4.4 },
-  { angle: 236, inset: 1.6, radius: 2.1, height: 3.2 },
+  { angle: 178, inset: 2.4, radius: 4.6, height: 7.6, behind: 'cantera' },
+  { angle: 197, inset: 2.6, radius: 4.4, height: 9.4 },
+  { angle: 216, inset: 2.4, radius: 4.5, height: 8.0, behind: 'mina' },
+  { angle: 160, inset: 1.2, radius: 2.6, height: 4.4 },
+  { angle: 236, inset: 1.4, radius: 2.6, height: 4.2 },
 ];
 const VIEWS = {
   isla: { offset: new THREE.Vector3(44, 48, 64), min: 16, max: 150 },
@@ -229,7 +233,14 @@ export class World {
   /** La disposición de los edificios, con los de la costa puestos en la orilla real. */
   #layoutFor() {
     const out = {};
-    for (const [id, l] of Object.entries(LAYOUT)) out[id] = l.coast != null ? { ...l, r: this.coast(l.angle) + l.coast } : { ...l };
+    for (const [id, l] of Object.entries(LAYOUT)) {
+      if (l.coast != null) out[id] = { ...l, r: this.coast(l.angle) + l.coast };
+      else if (l.foot) {
+        // Con la espalda metida en la falda del monte
+        const m = MOUNTAINS.find((x) => x.behind === id);
+        out[id] = { ...l, r: this.coast(m.angle) - m.inset - m.radius * 0.72 - 1.3 };
+      } else out[id] = { ...l };
+    }
     return out;
   }
 
@@ -523,10 +534,11 @@ export class World {
     ramp.rotation.set(Math.atan2(0.5, rampLen), THREE.MathUtils.degToRad(GATE_ANGLE), 0, 'YXZ');
     scene.add(ramp);
 
-    // Montañas detrás de la cantera y la mina
+    // Montañas detrás de la cantera y la mina (el monte de la cantera es de mármol)
     for (const m of this.mountains) {
+      const rock = m.behind === 'cantera' ? '#d8d1c2' : '#8c8780';
       const mountain = new THREE.Mesh(
-        mountainGeometry(m.radius, m.height, m.angle, { snow: '#f4f6f8', grass: '#7d9a52', rock: '#8c8780' }),
+        mountainGeometry(m.radius, m.height, m.angle, { snow: '#f4f6f8', grass: '#7d9a52', rock }),
         new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 1 }),
       );
       mountain.position.copy(polar(m.r, m.angle));
@@ -944,7 +956,7 @@ export class World {
       if (nearBusy(a, 12)) continue;
       const p = polar(this.coast(a) + 1.3 + rand() * 1.6, a, BEACH_Y);
       if (onBeach.some((b) => b.p.distanceTo(p) < b.r + 1.1)) continue;
-      place(palm(), p, rand() * Math.PI, 0.9 + rand() * 0.5);
+      place(palmTree(rand), p, rand() * Math.PI, 0.85 + rand() * 0.4);
       onSand(p, 0.6);
     }
     scene.add(decor.build());
@@ -2603,21 +2615,6 @@ function amphoraPot(x, z) {
   g.add(cyl(0.1, 0.07, 0.16, 7, '#b9643a', x, 0, z));
   g.add(box(0.16, 0.1, 0.16, '#e86a8a', x, 0.16, z));
   return g;
-}
-
-function palm() {
-  const t = new THREE.Group();
-  const trunk = cyl(0.08, 0.12, 1.5, 5, C.woodLight);
-  trunk.rotation.z = 0.15;
-  t.add(trunk);
-  for (let k = 0; k < 6; k++) {
-    const leaf = box(0.95, 0.04, 0.24, k % 2 ? '#4f9a3a' : '#3f8a3a', 0, 0, 0);
-    leaf.geometry.translate(0.47, 0, 0);
-    leaf.position.set(0.22, 1.45, 0);
-    leaf.rotation.set(0, (k * Math.PI * 2) / 6, -0.35);
-    t.add(leaf);
-  }
-  return t;
 }
 
 function sheep() {

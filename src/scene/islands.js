@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { C, box, colonnade, createShip, createSoldier, cyl, dome, gableRoof, hipRoof, mat, mediterraneanTree, mesh, smokeColumn, stylobate } from './models.js';
+import { C, box, colonnade, createShip, createSoldier, cyl, dome, gableRoof, hipRoof, mat, mediterraneanTree, mesh, palmTree, smokeColumn, stylobate } from './models.js';
 import { wonderLevel, wonderOf } from '../game/rules.js';
 import { Batch, bakeStatic, hashString, mountainGeometry, paintByNormal, plateauGeometry, polar, rng } from './util.js';
 import { coastFactor, coastMax, islandCoast, shapeGeometry } from './coast.js';
@@ -298,19 +298,7 @@ function seaStacks(R, rand) {
 
 function tree(color, palm) {
   const t = new THREE.Group();
-  if (palm) {
-    const trunk = cyl(0.08, 0.12, 1.4, 5, C.woodLight);
-    trunk.rotation.z = 0.15;
-    t.add(trunk);
-    for (let k = 0; k < 5; k++) {
-      const leaf = box(0.9, 0.04, 0.22, '#4f9a3a', 0, 0, 0);
-      leaf.geometry.translate(0.45, 0, 0);
-      leaf.position.set(0.2, 1.35, 0);
-      leaf.rotation.set(0, (k * Math.PI * 2) / 5, -0.35);
-      t.add(leaf);
-    }
-    return t;
-  }
+  if (palm) return palmTree();
   t.add(cyl(0.1, 0.15, 0.6, 6, C.woodDark));
   const leaves = mesh(new THREE.ConeGeometry(0.75, 1.5, 7), color);
   leaves.position.y = 1.25;

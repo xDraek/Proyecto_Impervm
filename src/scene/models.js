@@ -282,6 +282,87 @@ export function mediterraneanTree(r) {
   return stonePine(r < 0.88 ? '#476f3a' : '#3f6633');
 }
 
+/** Hoja de palmera: una tira arqueada que se estrecha en la punta, con el nervio en lomo (por las dos caras). */
+function frondGeometry(L, rise, droop, width) {
+  const S = 5;
+  const rows = [];
+  for (let i = 0; i <= S; i++) {
+    const u = i / S;
+    const d = L * u;
+    const x = d * Math.cos(rise);
+    const y = d * Math.sin(rise) - droop * d * d;
+    const w = width * Math.sin(Math.PI * Math.min(1, u * 1.05 + 0.08)) * (i % 2 ? 1 : 0.8);
+    rows.push([new THREE.Vector3(x, y - 0.03 * w / width, -w), new THREE.Vector3(x, y + 0.035, 0), new THREE.Vector3(x, y - 0.03 * w / width, w)]);
+  }
+  const pos = [];
+  const tri = (a, b, c) => pos.push(a.x, a.y, a.z, b.x, b.y, b.z, c.x, c.y, c.z, a.x, a.y, a.z, c.x, c.y, c.z, b.x, b.y, b.z);
+  for (let i = 0; i < S; i++) {
+    const [l0, m0, r0] = rows[i];
+    const [l1, m1, r1] = rows[i + 1];
+    tri(l0, m0, m1);
+    tri(l0, m1, l1);
+    tri(m0, r0, r1);
+    tri(m0, r1, m1);
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  geo.computeVertexNormals();
+  return geo;
+}
+
+/**
+ * Palmera: tronco curvado y anillado que se estrecha hacia arriba, corona de hojas arqueadas
+ * (las de abajo, más caídas y amarillentas) y unos cocos. `rand` da la variedad de cada una.
+ */
+export function palmTree(rand = Math.random) {
+  const t = new THREE.Group();
+  const H = 1.65 + rand() * 0.45;
+  const lean = 0.18 + rand() * 0.22;
+  const S = 6;
+  const pts = [];
+  for (let i = 0; i <= S; i++) {
+    const u = i / S;
+    pts.push(new THREE.Vector3(lean * H * u * u, H * u, 0));
+  }
+  const up = new THREE.Vector3(0, 1, 0);
+  for (let i = 0; i < S; i++) {
+    const a = pts[i];
+    const b = pts[i + 1];
+    const dir = b.clone().sub(a);
+    const len = dir.length();
+    const r0 = 0.12 * (1 - (i / S) * 0.45);
+    const r1 = 0.12 * (1 - ((i + 1) / S) * 0.45);
+    const seg = mesh(new THREE.CylinderGeometry(r1, r0 * 1.06, len * 1.04, 7), i % 2 ? '#a07c50' : '#8d6c43');
+    seg.position.copy(a).add(b).multiplyScalar(0.5);
+    seg.quaternion.setFromUnitVectors(up, dir.normalize());
+    t.add(seg);
+  }
+  const top = pts[S];
+  const greens = ['#3f8a3a', '#4f9a3a', '#5aa544', '#468f36'];
+  const N = 8;
+  for (let k = 0; k < N; k++) {
+    const low = k % 3 === 0;
+    const frond = mesh(
+      frondGeometry(0.95 + rand() * 0.35, low ? -0.1 : 0.25 + rand() * 0.35, low ? 0.55 : 0.32 + rand() * 0.15, 0.17 + rand() * 0.04),
+      low ? '#7f9a3a' : greens[k % greens.length],
+    );
+    frond.position.copy(top);
+    frond.rotation.y = (k / N) * Math.PI * 2 + (rand() - 0.5) * 0.4;
+    t.add(frond);
+  }
+  // Brote del centro y cocos
+  const bud = mesh(new THREE.ConeGeometry(0.07, 0.22, 6), '#5aa544');
+  bud.position.copy(top).add(new THREE.Vector3(0, 0.08, 0));
+  t.add(bud);
+  for (let k = 0; k < 3; k++) {
+    const a = (k / 3) * Math.PI * 2 + rand();
+    const nut = mesh(new THREE.SphereGeometry(0.065, 6, 5), '#6b4a2a');
+    nut.position.copy(top).add(new THREE.Vector3(Math.cos(a) * 0.09, -0.1, Math.sin(a) * 0.09));
+    t.add(nut);
+  }
+  return t;
+}
+
 /** Pino piñonero: tronco alto y copa ancha y plana, como una sombrilla. */
 export function stonePine(color = '#476f3a') {
   const t = new THREE.Group();
@@ -430,83 +511,198 @@ function aserradero(level) {
   return g;
 }
 
+/** Peñas de roca que funden el edificio con la falda del monte que tiene detrás. */
+function rockFlank(g, spots, color = C.stoneDark) {
+  for (const [x, y, z, s, sy] of spots) {
+    const rock = mesh(new THREE.DodecahedronGeometry(s), color);
+    rock.scale.set(1, sy ?? 0.9, 0.85);
+    rock.position.set(x, y, z);
+    rock.rotation.y = x * 1.7 + z;
+    g.add(rock);
+  }
+}
+
+/** Grúa de cantera: mástil de madera con tornapuntas, pluma horizontal que gira y un sillar colgando del cabo. */
+function derrick(x, z, rotY, h = 2.4) {
+  const g = new THREE.Group();
+  g.add(box(0.14, h, 0.14, C.wood, 0, 0, 0));
+  // Tornapuntas que sujetan el mástil
+  for (const [dx, dz] of [[0.45, 0], [-0.45, 0], [0, 0.45]]) {
+    const brace = box(0.06, h * 0.55, 0.06, C.woodDark, dx * 0.5, 0, dz * 0.5);
+    brace.rotation.set(dz ? -0.42 : 0, 0, dx ? (dx > 0 ? 0.42 : -0.42) : 0);
+    g.add(brace);
+  }
+  // La pluma gira despacio, como si llevara la piedra al carro
+  const jib = new THREE.Group();
+  jib.position.set(0, h - 0.1, 0);
+  jib.add(box(1.7, 0.1, 0.1, C.woodLight, 0.6, 0, 0), box(0.5, 0.08, 0.08, C.woodDark, -0.35, 0, 0));
+  jib.add(box(0.3, 0.25, 0.25, '#9a8f7c', -0.55, -0.18, 0));
+  jib.add(box(0.02, 1.15, 0.02, '#8a7350', 1.35, -1.15, 0), box(0.38, 0.28, 0.32, '#ece6d8', 1.35, -1.43, 0));
+  jib.userData.swing = { speed: 0.4, amp: 0.55 };
+  g.add(jib);
+  g.position.set(x, 0, z);
+  g.rotation.y = rotY;
+  return g;
+}
+
+/** Andamio de madera con escalera, pegado a una cara de la cantera. */
+function scaffold(x, z, w, h) {
+  const g = new THREE.Group();
+  for (const px of [-w / 2, w / 2]) g.add(box(0.05, h, 0.05, C.wood, px, 0, 0));
+  for (let y = 0.5; y < h; y += 0.55) g.add(box(w, 0.04, 0.22, C.woodLight, 0, y, 0.08));
+  const ladder = new THREE.Group();
+  for (const px of [-0.08, 0.08]) ladder.add(box(0.025, h, 0.025, C.woodDark, px, 0, 0));
+  for (let y = 0.15; y < h; y += 0.18) ladder.add(box(0.16, 0.02, 0.02, C.woodDark, 0, y, 0));
+  ladder.position.set(w / 2 - 0.15, 0, 0.18);
+  ladder.rotation.x = -0.12;
+  g.add(ladder);
+  g.position.set(x, 0, z);
+  return g;
+}
+
+/**
+ * Cantera de mármol excavada en la ladera: terrazas blancas escalonadas con las caras cortadas a
+ * escuadra, andamios y grúas de madera, sillares en hileras, un cobertizo y el camino de tierra.
+ */
 function cantera(level) {
   const g = new THREE.Group();
-  g.add(cyl(1.2, 1.0, 0.04, 10, '#6b6157', -0.3, 0, -0.1));
-  const wall = mesh(new THREE.DodecahedronGeometry(1.1), C.stoneDark);
-  wall.scale.set(1.4, 0.9, 0.7);
-  wall.position.set(-0.4, 0.55, -1.3);
-  g.add(wall);
-
-  const n = Math.min(10, 2 + level);
-  for (let i = 0; i < n; i++) {
-    const layer = Math.floor(i / 4);
-    const k = i % 4;
-    const x = 0.7 + (k % 2) * 0.55 + layer * 0.12;
-    const z = 0.4 + Math.floor(k / 2) * 0.55 + layer * 0.12;
-    g.add(box(0.5, 0.4, 0.5, i % 3 ? C.stone : '#bdb7ab', x, layer * 0.4, z));
+  const marble = ['#f3efe6', '#ebe5d8', '#f7f4ec', '#e2dbcb'];
+  const cut = '#c8c0ae';
+  // Explanada de polvo de mármol
+  g.add(cyl(1.7, 1.8, 0.04, 14, '#ddd5c4', 0, 0, 0.2));
+  // Terrazas: cada una más alta y más atrás, hechas de bloques (como se cortan); con el nivel se
+  // abren más terrazas
+  const tiers = Math.min(5, 2 + Math.floor(level / 3));
+  for (let t = 0; t < tiers; t++) {
+    const top = 0.5 + t * 0.55;
+    const z = -0.9 - t * 0.5;
+    const span = 3.4 - t * 0.25;
+    const blocks = 5;
+    for (let b = 0; b < blocks; b++) {
+      const bw = span / blocks;
+      const bx = -span / 2 + bw * (b + 0.5);
+      // Algún hueco donde ya se sacó el bloque
+      const taken = (t + b * 3 + level) % 7 === 0 && t < tiers - 1;
+      const bh = taken ? top - 0.35 : top;
+      g.add(box(bw - 0.02, bh, 0.5, marble[(t + b) % marble.length], bx, 0, z));
+      // Juntas y marcas de los cortes en la cara
+      g.add(box(0.015, bh - 0.04, 0.012, cut, bx - bw / 2 + 0.01, 0.02, z + 0.252));
+      if (bh > 0.6) g.add(box(bw - 0.06, 0.015, 0.012, cut, bx, bh * 0.5, z + 0.252));
+    }
   }
-
-  // Grúa de madera con brazo que oscila
-  g.add(box(0.16, 2.4, 0.16, C.wood, -1.5, 0, 1.0));
-  const jib = new THREE.Group();
-  jib.position.set(-1.5, 2.3, 1.0);
-  jib.add(box(1.8, 0.12, 0.12, C.wood, 0.8, 0, 0));
-  jib.add(box(0.03, 1.2, 0.03, C.dark, 1.5, -1.2, 0));
-  jib.add(box(0.35, 0.3, 0.35, C.stone, 1.5, -1.5, 0));
-  jib.userData.swing = { speed: 0.6, amp: 0.7 };
-  g.add(jib);
-  // Cantero labrando un bloque
-  g.add(box(0.45, 0.35, 0.45, '#bdb7ab', -0.2, 0, 1.2));
-  g.add(worker('pico', -0.7, 1.35, -0.2, 1.2, { color: '#7a6a55', speed: 4, phase: 1, base: 0.45 }));
+  // Los costados de la ladera, también de mármol, para que la cantera se meta en el monte
+  for (const s of [-1, 1]) {
+    for (let t = 0; t < tiers; t += 2) {
+      const rock = mesh(new THREE.DodecahedronGeometry(0.42 + t * 0.08), marble[(t + 1) % marble.length]);
+      rock.scale.set(0.8, 1.2, 0.8);
+      rock.position.set(s * (2.05 - t * 0.12), 0.3 + t * 0.42, -0.95 - t * 0.5);
+      g.add(rock);
+    }
+  }
+  // Andamios contra las caras y grúas en A
+  g.add(scaffold(-0.9, -0.55, 0.8, 1.05));
+  if (tiers > 2) g.add(scaffold(0.85, -1.05, 0.7, 1.55));
+  g.add(derrick(1.35, 0.3, Math.PI + 0.4, 2.5));
+  if (level >= 6) g.add(derrick(-1.5, -0.2, 0.3, 2.2));
+  // Sillares cortados en hileras, listos para el carro (más con el nivel)
+  const n = Math.min(12, 3 + level);
+  for (let i = 0; i < n; i++) {
+    const row = Math.floor(i / 4);
+    const k = i % 4;
+    const stacked = row >= 2;
+    g.add(box(0.42, 0.3, 0.32, marble[i % marble.length], -1.2 + k * 0.5, stacked ? 0.3 : 0, 0.55 + (row % 2) * 0.42));
+  }
+  // Cobertizo de los canteros: tejadillo de cañas sobre cuatro postes
+  const shed = new THREE.Group();
+  for (const [px, pz] of [[-0.35, -0.25], [0.35, -0.25], [-0.35, 0.25], [0.35, 0.25]]) shed.add(box(0.05, 0.6, 0.05, C.woodDark, px, 0, pz));
+  const roof = box(0.9, 0.05, 0.7, '#b9955a', 0, 0.6, 0);
+  roof.rotation.x = 0.12;
+  shed.add(roof, box(0.5, 0.25, 0.3, '#ece6d8', 0, 0, 0));
+  shed.position.set(1.55, 0, 1.25);
+  g.add(shed);
+  // Rodillos y trineo de madera para arrastrar los bloques
+  for (let k = 0; k < 3; k++) {
+    const roller = cyl(0.05, 0.05, 0.5, 6, C.woodLight, 0, 0, 0);
+    roller.rotation.z = Math.PI / 2;
+    roller.position.set(0.3, 0.05, 1.45 + k * 0.18);
+    g.add(roller);
+  }
+  // Cipreses junto al camino
+  for (const [cx, cz] of [[-1.85, 1.2], [-2.1, 0.6]]) {
+    const c = cypress('#2f5e34');
+    c.scale.setScalar(0.45);
+    c.position.set(cx, 0, cz);
+    g.add(c);
+  }
+  // Canteros: uno labra un sillar y otro sube por el andamio
+  g.add(box(0.45, 0.32, 0.36, '#ece6d8', -0.2, 0, 1.25));
+  g.add(worker('pico', -0.7, 1.4, -0.2, 1.25, { color: '#7a6a55', speed: 4, phase: 1, base: 0.45 }));
+  g.add(worker('pico', 0.15, -0.35, 0.15, -0.9, { color: '#8a5a3a', speed: 3.4, phase: 2.2, base: 0.4 }));
   return g;
 }
 
 function mina(level) {
   const g = new THREE.Group();
-  const mound = mesh(new THREE.DodecahedronGeometry(1.6), C.stoneDark);
-  mound.scale.set(1.1, 0.75, 0.9);
-  mound.position.set(0, 0.4, -0.6);
-  g.add(mound);
+  // La boca de la galería, abierta en la pared de roca de la falda del monte
+  rockFlank(g, [
+    [-1.25, 0.7, -0.7, 0.95],
+    [1.25, 0.65, -0.7, 0.9],
+    [-0.75, 1.55, -1.05, 0.85],
+    [0.75, 1.5, -1.05, 0.85],
+    [0, 1.95, -1.25, 0.9],
+    [-1.8, 0.4, 0.0, 0.6],
+    [1.8, 0.35, 0.05, 0.55],
+    [-1.5, 1.7, -1.8, 1.0],
+    [1.5, 1.6, -1.8, 1.0],
+    [0, 2.6, -2.2, 1.2, 0.8],
+  ]);
+  // Hueco oscuro de la galería con su entibado de madera
+  g.add(box(0.85, 1.05, 0.9, '#120f0c', 0, 0, -0.35));
+  for (const x of [-0.5, 0.5]) g.add(box(0.15, 1.15, 0.16, C.wood, x, 0, 0.12));
+  g.add(box(1.3, 0.18, 0.22, C.wood, 0, 1.12, 0.12));
+  g.add(box(1.0, 0.1, 0.18, C.woodDark, 0, 1.3, 0.05));
+  // Farol junto a la entrada
+  g.add(box(0.03, 0.25, 0.03, C.dark, 0.62, 0.95, 0.24));
+  g.add(box(0.1, 0.12, 0.1, '#ffcf6a', 0.62, 0.8, 0.24, { emissive: '#ffb347', emissiveIntensity: 1.4 }));
+  // Vía que sale de la galería y la vagoneta
+  g.add(box(0.06, 0.05, 2.2, C.stoneDark, -0.2, 0, 0.9));
+  g.add(box(0.06, 0.05, 2.2, C.stoneDark, 0.2, 0, 0.9));
+  for (let k = 0; k < 6; k++) g.add(box(0.55, 0.03, 0.08, C.woodDark, 0, 0, -0.1 + k * 0.38));
+  g.add(box(0.55, 0.35, 0.6, '#5d646d', 0, 0.08, 1.55));
+  // Escombrera de roca sacada de la mina
+  rockFlank(g, [[1.25, 0.15, 1.2, 0.32, 0.6], [1.5, 0.12, 1.45, 0.26, 0.6], [1.15, 0.1, 1.55, 0.22, 0.6]], '#7a736a');
 
-  g.add(box(0.8, 0.9, 0.3, C.dark, 0, 0, 0.75));
-  g.add(box(0.14, 1.0, 0.14, C.wood, -0.47, 0, 0.9));
-  g.add(box(0.14, 1.0, 0.14, C.wood, 0.47, 0, 0.9));
-  g.add(box(1.15, 0.16, 0.2, C.wood, 0, 1.0, 0.9));
-  g.add(box(0.06, 0.05, 1.3, C.stoneDark, -0.2, 0, 1.6));
-  g.add(box(0.06, 0.05, 1.3, C.stoneDark, 0.2, 0, 1.6));
-  g.add(box(0.55, 0.35, 0.6, '#5d646d', 0, 0.08, 1.7));
-
+  // Vetas de cristal que asoman de la roca alrededor de la boca (más con el nivel)
   const spots = [
-    [-1.3, 0.2, 0.4],
-    [1.3, 0.1, 0.3],
-    [-0.8, 0.9, -0.9],
-    [0.9, 0.8, -1.0],
-    [0.0, 1.4, -0.7],
-    [-1.6, 0.1, -0.8],
-    [1.7, 0.1, -0.6],
+    [-0.85, 0.5, -0.15],
+    [0.9, 0.45, -0.15],
+    [-0.6, 1.35, -0.45],
+    [0.65, 1.3, -0.45],
+    [0.0, 1.85, -0.6],
+    [-1.55, 0.35, 0.35],
+    [1.6, 0.3, 0.4],
   ];
   const n = Math.min(spots.length, 1 + level);
   const size = 0.8 + Math.min(level, 10) * 0.05;
+  // Cada veta es un racimo de tres cristales clavados en la roca, inclinados hacia fuera
+  const crystal = { emissive: '#2aa8d8', emissiveIntensity: 0.6, roughness: 0.25 };
   for (let i = 0; i < n; i++) {
     const [x, y, z] = spots[i];
-    const c = mesh(new THREE.OctahedronGeometry(0.3), C.crystal, {
-      emissive: '#2aa8d8',
-      emissiveIntensity: 0.6,
-      roughness: 0.25,
-    });
-    c.scale.set(size, size * 2, size);
-    c.position.set(x, y + 0.5 * size, z);
-    c.rotation.z = (i % 2 ? 1 : -1) * 0.25;
-    c.userData.spin = { axis: 'y', speed: 0.6 + i * 0.1 };
-    g.add(c);
+    for (let k = 0; k < 3; k++) {
+      const s = size * (k ? 0.6 : 0.85);
+      const c = mesh(new THREE.OctahedronGeometry(0.22), C.crystal, crystal);
+      c.scale.set(s, s * 2.2, s);
+      c.position.set(x + (k - 1) * 0.12, y + 0.18 * s, z + 0.05);
+      c.rotation.set(0.35, (i + k) * 0.9, (k - 1) * 0.45 + (x > 0 ? -0.2 : 0.2));
+      g.add(c);
+    }
   }
   // Un cristal en la vagoneta
   const ore = mesh(new THREE.OctahedronGeometry(0.15), C.crystal, { emissive: '#2aa8d8', emissiveIntensity: 0.6 });
-  ore.position.set(0, 0.55, 1.7);
+  ore.position.set(0, 0.55, 1.55);
   g.add(ore);
-  // Minero picando la veta
-  g.add(worker('pico', -1.0, 0.85, -1.3, 0.4, { color: '#55606b', speed: 4.5, phase: 2, base: 0.1 }));
+  // Minero picando la veta junto a la entrada
+  g.add(worker('pico', -1.05, 0.55, -0.85, -0.1, { color: '#55606b', speed: 4.5, phase: 2, base: 0.1 }));
   return g;
 }
 
