@@ -2,6 +2,7 @@ import { clock, universe } from '../config.js';
 import {
   ACHIEVEMENTS,
   BANNER_COLORS,
+  BLOCKADE,
   BANNER_EMBLEMS,
   BUILDINGS,
   BUILDING_KEYS,
@@ -18,6 +19,8 @@ import {
   MERCENARY_HOURS,
   JOINT_MAX,
   LAND_UNITS,
+  OCCUPATION,
+  OUTPOST_MISSIONS,
   PLAYER_UNITS,
   POWERS,
   QUESTS,
@@ -55,6 +58,7 @@ import {
   missingRequirements,
   multiplyCost,
   playerCombat,
+  portClosed,
   protectedAmount,
   researchCost,
   researchMax,
@@ -74,7 +78,7 @@ import {
   navalDefense,
 } from './rules.js';
 
-export const SAVE_VERSION = 4;
+export const SAVE_VERSION = 5;
 const MAX_REPORTS = 40;
 const MAX_NOTES = 30;
 
@@ -131,6 +135,9 @@ export function newState({ now = clock.now(), home, name }) {
     nextVisitAt: null,
     vacation: null,
     vacationReadyAt: 0,
+    // Quién bloquea tu puerto u ocupa tu ciudad: { by, name, mission, since, until } (y `owed` en la ocupación)
+    blockade: null,
+    occupied: null,
     startedAt: now,
     seq: 1,
     lastUpdate: now,
@@ -299,6 +306,28 @@ export class Game extends EventTarget {
     return a && b ? Math.hypot(a.x - b.x, a.z - b.z) : Infinity;
   }
 
+  /** Distancia en leguas entre dos islas cualesquiera. */
+  distanceBetween(from, to) {
+    const a = this.world.island(from);
+    const b = this.world.island(to);
+    return a && b ? Math.hypot(a.x - b.x, a.z - b.z) : Infinity;
+  }
+
+  /** Flotas que ocupan un hueco del puerto (los convoyes del tributo no). */
+  fleetsAtSea() {
+    return this.state.missions.filter((m) => m.type !== 'tributo').length;
+  }
+
+  /** Ciudades que ocupan tus tropas (sus misiones estacionadas). */
+  occupations() {
+    return this.state.missions.filter((m) => m.type === 'invadir' && m.phase === 'estacionada');
+  }
+
+  /** Si tu puerto está cerrado por un bloqueo o una ocupación enemiga. */
+  portClosed() {
+    return portClosed(this.state);
+  }
+
   // ── Misiones (objetivos) ───────────────────────────────────────────────────
 
   /** Las próximas misiones sin reclamar, con su progreso. */
@@ -414,6 +443,8 @@ export class Game extends EventTarget {
     const attacked = this.world.underAttack ? this.world.underAttack(this.userId) : !!this.incoming?.length;
     let reason = null;
     if (s.missions.length) reason = 'Tienes flotas en el mar o tropas de apoyo fuera: espera a que vuelvan.';
+    else if (s.occupied) reason = `${s.occupied.name} ocupa tu ciudad: libérala antes.`;
+    else if (s.blockade) reason = `${s.blockade.name} bloquea tu puerto: rompe antes el bloqueo.`;
     else if (s.raid) reason = 'Hay piratas a la vista: defiende antes tu isla.';
     else if (attacked) reason = 'Una flota enemiga viene hacia tu isla.';
     else if ((s.vacationReadyAt ?? 0) > now) reason = 'Acabas de volver de vacaciones.';
@@ -827,6 +858,8 @@ export class Game extends EventTarget {
         vacation: !!p?.vacation,
         inactive: !!p?.inactive,
         relation: this.world.relation?.(this.userId, isl.owner) ?? null,
+        // Quién bloquea su puerto u ocupa la ciudad: { kind: 'bloquear'|'invadir', by, name, until }
+        port: p?.port ?? null,
       });
       // Las ciudades de tu alianza las conoces sin espiarlas
       if (view.relation === 'aliado') view.explored = true;
@@ -954,6 +987,7 @@ export class Game extends EventTarget {
     this.#advance(now);
     const n = Math.floor(amount);
     if (this.level('mercado') < 1) return this.#fail('Necesitas un mercado.');
+    if (this.portClosed()) return this.#fail('Los mercaderes no pueden entrar: tu puerto está en manos enemigas.');
     if (from === to || !RESOURCES[from] || !RESOURCES[to]) return this.#fail('Elige dos recursos distintos.');
     if (!(n >= 1)) return this.#fail('Indica cuánto quieres cambiar.');
     if (n > this.state.resources[from]) return this.#fail(`No tienes tanta ${RESOURCES[from].name.toLowerCase()}.`);
@@ -990,11 +1024,15 @@ export class Game extends EventTarget {
     const view = this.island(target);
     // Sin explorar no se sabe qué hay: solo se puede mandar un bote a mirar
     if (!view.explored && type !== 'explorar') reason = 'Primero explora la isla con un bote: no sabes qué hay en ella.';
+    // Desde una ciudad ocupada zarpan las tropas que la ocupan
+    const base = opts.from != null ? (this.occupations().find((m) => m.id === opts.from) ?? null) : null;
+    if (opts.from != null && !base) reason ||= 'Ya no ocupas esa ciudad.';
+    const pool = base ? base.units : s.units;
     for (const id of PLAYER_UNITS) {
       const n = Math.max(0, Math.floor(Number(units?.[id]) || 0));
       if (!n) continue;
       sent[id] = n;
-      if (n > s.units[id]) reason ||= `No tienes ${n} × ${UNITS[id].name}.`;
+      if (n > (pool[id] ?? 0)) reason ||= base ? `En ${base.targetName} no tienes ${n} × ${UNITS[id].name}.` : `No tienes ${n} × ${UNITS[id].name}.`;
     }
     let capacity = 0;
     let used = 0;
@@ -1014,7 +1052,8 @@ export class Game extends EventTarget {
     }
     const withHero = !!opts.hero;
     const heroSpeed = withHero ? 1 + this.heroBonus('velocidad') : 1;
-    const travel = Number.isFinite(speed) ? travelSeconds(s, this.distanceTo(target), speed, heroSpeed) : 0;
+    const dist = base ? this.distanceBetween(base.target, target) : this.distanceTo(target);
+    const travel = Number.isFinite(speed) ? travelSeconds(s, dist, speed, heroSpeed) : 0;
     // Unirse al ataque de un aliado: la flota acompasa la marcha para llegar a la vez
     const joint = opts.join ? (this.world.jointAttack?.(opts.join) ?? null) : null;
     const seconds = joint ? Math.max(1, Math.ceil((joint.arrive - this.now()) / 1000)) : travel;
@@ -1023,6 +1062,17 @@ export class Game extends EventTarget {
     let cost = null;
 
     if (target === s.home) reason ||= 'Es tu propia isla.';
+    if (base) {
+      if (!OUTPOST_MISSIONS.includes(type)) reason ||= 'Desde una ciudad ocupada solo se puede atacar, espiar, sabotear, bloquear o invadir.';
+      if (target === base.target) reason ||= 'Es la ciudad que ocupas.';
+      if (opts.join) reason ||= 'Desde una ciudad ocupada no puedes unirte a ataques.';
+      if (withHero) reason ||= 'Tu almirante está en tu capital.';
+      // Alguien tiene que quedarse guardando la ciudad
+      const rest = { ...base.units };
+      for (const [id, n] of Object.entries(sent)) rest[id] = (rest[id] ?? 0) - n;
+      if (!hasCombat(splitForces(rest).land)) reason ||= `Deja al menos una unidad de tierra ocupando ${base.targetName}.`;
+    } else if (s.occupied) reason ||= `${s.occupied.name} ocupa tu ciudad: sus tropas no dejan zarpar a nadie.`;
+    else if (s.blockade) reason ||= `${s.blockade.name} bloquea tu puerto: no puede zarpar ningún barco.`;
     // Un continente solo se ataca cuando hay una horda bárbara en él
     if (isl.type === 'continente' && !(type === 'atacar' && rt?.horde)) reason ||= rt?.horde ? 'Contra la horda solo se puede atacar.' : 'Es un continente: elige una de sus ciudades o tierras.';
     if (opts.join) {
@@ -1035,11 +1085,11 @@ export class Game extends EventTarget {
       else if (travel > seconds) reason ||= 'Tu flota no llega a tiempo: el ataque llegará antes.';
       if (withHero) reason ||= 'Tu almirante solo va en tus propios ataques.';
     }
-    if (withHero && this.heroStatus() !== 'casa') reason ||= this.state.hero ? 'Tu almirante no está en casa o está herido.' : 'No tienes almirante.';
+    if (withHero && !base && this.heroStatus() !== 'casa') reason ||= this.state.hero ? 'Tu almirante no está en casa o está herido.' : 'No tienes almirante.';
     if (withHero) cargo = Math.floor(cargo * (1 + this.heroBonus('botin')));
     cargo = Math.floor(cargo * (1 + relicBonus(s, 'botin')));
     if (slots < 1) reason ||= 'Necesitas un puerto para zarpar.';
-    else if (s.missions.length >= slots) reason ||= `Todas tus flotas están en el mar (${s.missions.length}/${slots}). Mejora el puerto.`;
+    else if (this.fleetsAtSea() >= slots) reason ||= `Todas tus flotas están en el mar (${this.fleetsAtSea()}/${slots}). Mejora el puerto.`;
     if (!count(sent)) reason ||= 'Elige qué unidades envías.';
     else if (!ships) reason ||= 'Hace falta al menos un barco para cruzar el mar.';
     else if (used > capacity) reason ||= `Faltan plazas en los barcos: ${used}/${capacity}.`;
@@ -1051,6 +1101,7 @@ export class Game extends EventTarget {
         if (view.vacation) reason ||= `${view.ownerName} está de vacaciones: no hay nada que espiar.`;
       } else if (type === 'sabotaje') {
         if (Object.keys(sent).some((id) => !UNITS[id].explorer)) reason ||= 'Los saboteadores van en botes exploradores.';
+        if (view.port?.kind === 'invadir') reason ||= view.port.by === this.userId ? 'Esa ciudad la ocupas tú.' : `${view.port.name} ocupa esa ciudad.`;
         if (this.world.sameAlliance?.(this.userId, isl.owner)) reason ||= `${view.ownerName} es de tu alianza.`;
         else if (view.relation === 'pacto') reason ||= `Tu alianza tiene un pacto de no agresión con la de ${view.ownerName}.`;
         else if (view.vacation) reason ||= `${view.ownerName} está de vacaciones.`;
@@ -1067,13 +1118,27 @@ export class Game extends EventTarget {
         if (!this.world.sameAlliance?.(this.userId, isl.owner)) reason ||= 'Solo puedes mandar tropas de apoyo a miembros de tu alianza.';
         if (!hasCombat(sent)) reason ||= 'Envía al menos una unidad de combate.';
         if (s.missions.some((m) => m.type === 'apoyo' && m.target === target && m.phase !== 'vuelta')) reason ||= 'Ya tienes tropas de apoyo en esa ciudad: retíralas antes de mandar más.';
-      } else if (type === 'atacar') {
+      } else if (type === 'atacar' || type === 'invadir' || type === 'bloquear') {
         if (this.world.sameAlliance?.(this.userId, isl.owner)) reason ||= `${view.ownerName} es de tu alianza.`;
         else if (view.relation === 'pacto') reason ||= `Tu alianza tiene un pacto de no agresión con la de ${view.ownerName}.`;
         else if (view.vacation) reason ||= `${view.ownerName} está de vacaciones: su isla no se puede atacar.`;
         else if (view.protected) reason ||= `${view.ownerName} está bajo protección de novato (menos de ${NEWBIE_POINTS} puntos).`;
         else if (this.isProtected()) reason ||= `Mientras tengas menos de ${NEWBIE_POINTS} puntos no puedes atacar a otros jugadores.`;
+        // Una ciudad ocupada es de quien la ocupa: nadie más la puede atacar
+        const port = view.port;
+        if (port?.kind === 'invadir') reason ||= port.by === this.userId ? 'Ya ocupas esta ciudad: saquéala desde la ocupación.' : `${port.name} ocupa esta ciudad.`;
+        if (type === 'bloquear') {
+          if (Object.keys(sent).some((id) => UNITS[id].kind !== 'barco' || !(UNITS[id].atk > 0))) reason ||= 'Para bloquear un puerto envía solo barcos de guerra.';
+          if (port?.kind === 'bloquear') reason ||= port.by === this.userId ? 'Ya bloqueas este puerto.' : `${port.name} ya bloquea este puerto.`;
+          if (s.missions.some((m) => m.type === 'bloquear' && m.target === target)) reason ||= 'Ya tienes una flota bloqueando este puerto o de camino.';
+        }
         if (!hasCombat(sent)) reason ||= 'Envía al menos una unidad de combate.';
+        if (type === 'invadir') {
+          const going = s.missions.filter((m) => m.type === 'invadir' && m.phase !== 'vuelta');
+          if (!hasCombat(splitForces(sent).land)) reason ||= 'Para ocupar la ciudad hacen falta tropas de tierra.';
+          if (going.some((m) => m.target === target)) reason ||= 'Ya va una flota tuya a invadirla.';
+          else if (going.length >= OCCUPATION.max) reason ||= `Como mucho puedes tener ${OCCUPATION.max} invasiones a la vez.`;
+        }
       } else {
         reason ||= 'Esa misión no sirve contra otra ciudad.';
       }
@@ -1118,14 +1183,16 @@ export class Game extends EventTarget {
     } else {
       reason ||= 'Esa misión no se puede hacer en esta isla.';
     }
-    return { ok: !reason, reason, units: sent, seconds, travel, capacity, used, cargo, ships, cost, load, joint };
+    return { ok: !reason, reason, units: sent, seconds, travel, capacity, used, cargo, ships, cost, load, joint, base };
   }
 
   sendMission(type, target, units, payload, opts = {}, now = this.now()) {
     this.#advance(now);
     const plan = this.planMission(type, target, units, payload, opts);
     if (!plan.ok) return this.#fail(plan.reason);
-    for (const [id, n] of Object.entries(plan.units)) this.state.units[id] -= n;
+    const pool = plan.base ? plan.base.units : this.state.units;
+    for (const [id, n] of Object.entries(plan.units)) pool[id] -= n;
+    if (plan.base) plan.base.units = clean(plan.base.units);
     if (plan.cost) this.#pay(plan.cost);
     if (plan.load) this.#pay(plan.load, false);
     this.state.missions.push({
@@ -1141,6 +1208,8 @@ export class Game extends EventTarget {
       phase: 'ida',
       hero: !!opts.hero,
       ...(plan.joint ? { joint: opts.join, leader: plan.joint.leader, trip: plan.travel * 1000 } : {}),
+      // Si zarpa de una ciudad ocupada, vuelve a ella
+      ...(plan.base ? { from: plan.base.target, fromName: plan.base.targetName, base: plan.base.id } : {}),
     });
     if (opts.hero) this.state.hero.mission = this.state.missions.at(-1).id;
     return this.#done();
@@ -1151,6 +1220,11 @@ export class Game extends EventTarget {
     this.#advance(now);
     const m = this.state.missions.find((x) => x.id === id);
     if (!m || (m.phase !== 'ida' && m.phase !== 'estacionada')) return this.#fail('Esa flota ya no puede volver.');
+    // Levantar un bloqueo o dejar una ciudad ocupada: el tributo pendiente se va con las tropas
+    if (m.phase === 'estacionada' && (m.type === 'bloquear' || m.type === 'invadir')) {
+      this.endStation(m, now, 'retirada');
+      return this.#done();
+    }
     // De ida: deshace lo andado. Estacionada: el viaje completo de vuelta.
     m.back = m.phase === 'ida' ? now + Math.min(now - m.depart, m.trip ?? Infinity) : now + (m.arrive - m.depart);
     m.recalled = m.phase === 'ida';
@@ -1329,6 +1403,101 @@ export class Game extends EventTarget {
     this.#dirty = true;
   }
 
+  /** Una flota enemiga llega a bloquear tu puerto: la recibe tu flota (con la de tus aliados). */
+  receiveBlockade({ attackerName, units, atkMul, hpMul }, t) {
+    const s = this.state;
+    const sea = splitForces(units).sea;
+    // Sin barcos de guerra que defiendan el puerto, ni hay combate
+    const defenders = [s.units, ...(this.world.supportersAt?.(s.home, this.userId) ?? []).map((x) => x.mission.units)];
+    if (!defenders.some((u) => hasCombat(splitForces(u).sea))) {
+      return { result: { seaWon: true, naval: null, att: { start: sea, left: { ...sea }, lost: {} }, def: { start: {}, left: {}, lost: {} } } };
+    }
+    const { result } = this.#defend({ units: sea, atkMul, hpMul }, t, attackerName);
+    const title = result.seaWon ? `${attackerName} vence a tu flota frente al puerto` : `Tu flota rechaza el bloqueo de ${attackerName}`;
+    this.#report({ t, kind: 'defensa', outcome: result.seaWon ? 'derrota' : 'victoria', title, islandName: this.homeIsland?.name, battle: pick(result), enemy: attackerName });
+    this.#note(`⛓️ ${title}`, result.seaWon ? 'error' : 'success');
+    this.#dirty = true;
+    return { result };
+  }
+
+  /** Empieza un bloqueo de tu puerto ('bloquear') o la ocupación de tu ciudad ('invadir'). */
+  portSeized(kind, info, t) {
+    const s = this.state;
+    if (kind === 'invadir') {
+      s.occupied = { ...info, owed: {} };
+      this.#report({
+        t,
+        kind: 'ocupacion',
+        islandName: this.homeIsland?.name,
+        outcome: 'derrota',
+        title: `${info.name} ocupa tu ciudad`,
+        enemy: info.name,
+        text: `Sus tropas se quedan con el ${Math.round(OCCUPATION.tribute * 100)} % de lo que produces, controlan tu puerto (no zarpa nadie, no entran transportes ni mercaderes y tus colonias no te mandan nada) y pueden saquear tu almacén. Entrena tropas y échalos desde el puerto, o pide a tu alianza que mande tropas de apoyo. Como mucho se quedarán ${OCCUPATION.hours} h.`,
+      });
+      this.#note(`🦅 ¡${info.name} ocupa tu ciudad!`, 'error');
+    } else {
+      s.blockade = { ...info };
+      this.#report({
+        t,
+        kind: 'ocupacion',
+        islandName: this.homeIsland?.name,
+        outcome: 'derrota',
+        title: `${info.name} bloquea tu puerto`,
+        enemy: info.name,
+        text: `Sus barcos de guerra no dejan zarpar a nadie, no entran transportes ni mercaderes y tus colonias no te pueden mandar nada. Ataca su flota desde el puerto con tus barcos de guerra, o pide a tu alianza que mande tropas de apoyo. Como mucho aguantarán ${BLOCKADE.hours} h.`,
+      });
+      this.#note(`⛓️ ¡${info.name} bloquea tu puerto!`, 'error');
+    }
+    this.#dirty = true;
+  }
+
+  /**
+   * Termina el bloqueo o la ocupación. Devuelve el tributo que se llevan los invasores
+   * (si los han echado, se queda en tu almacén).
+   */
+  portFreed(kind, { reason, who }, t) {
+    const s = this.state;
+    const info = kind === 'invadir' ? s.occupied : s.blockade;
+    if (!info) return {};
+    if (kind === 'invadir') s.occupied = null;
+    else s.blockade = null;
+    let owed = {};
+    for (const [r, n] of Object.entries(info.owed ?? {})) if (Math.floor(n) > 0) owed[r] = Math.floor(n);
+    if (reason === 'liberada') {
+      this.#gain(owed);
+      owed = {};
+    }
+    const name = info.name;
+    const text =
+      reason === 'liberada'
+        ? who && who !== s.name ? (kind === 'invadir' ? `🛡️ ${who} ha liberado tu ciudad de ${name}` : `🛡️ ${who} ha roto el bloqueo de ${name}`) : null
+        : reason === 'relevo' ? null
+        : kind === 'invadir' ? `🦅 Las tropas de ${name} se marchan de tu ciudad${count(owed) ? ` llevándose ${fmtBag(owed)}` : ''}`
+        : `⛓️ ${name} levanta el bloqueo: tu puerto vuelve a estar libre`;
+    if (text) this.#note(text, 'success');
+    this.#dirty = true;
+    return owed;
+  }
+
+  /** Quien ocupa tu ciudad se lleva el tributo apartado y parte de lo que no esconde tu almacén. */
+  plunderedBy({ name, capacity }, t) {
+    const s = this.state;
+    const tribute = {};
+    for (const [r, n] of Object.entries(s.occupied?.owed ?? {})) if (Math.floor(n) > 0) tribute[r] = Math.floor(n);
+    if (s.occupied) s.occupied.owed = {};
+    const safe = protectedAmount(s);
+    const bag = {};
+    for (const res of RESOURCE_KEYS) bag[res] = Math.max(0, s.resources[res] - safe);
+    const loot = takeLoot(bag, capacity, OCCUPATION.plunderShare);
+    for (const [r, n] of Object.entries(loot)) s.resources[r] -= n;
+    const all = { ...tribute };
+    for (const [r, n] of Object.entries(loot)) all[r] = (all[r] ?? 0) + n;
+    this.#report({ t, kind: 'ocupacion', islandName: this.homeIsland?.name, outcome: 'derrota', title: `${name} saquea tu ciudad`, loot: all, enemy: name, text: 'Se llevan el tributo de lo que has producido y parte de lo que tu almacén no esconde.' });
+    this.#note(`💰 ${name} saquea tu ciudad${fmtBag(all) ? `: ${fmtBag(all)}` : ''}`, 'error');
+    this.#dirty = true;
+    return { tribute, loot };
+  }
+
   /** Aparta recursos (oferta del mercado del archipiélago). Devuelve si había bastantes. */
   takeResources(bag, now = this.now()) {
     this.#advance(now);
@@ -1460,6 +1629,8 @@ export class Game extends EventTarget {
     }
     for (const m of s.missions) {
       // Las estacionadas no tienen fecha; las de un ataque conjunto las resuelve quien lo dirige
+      // (salvo los bloqueos y las ocupaciones, que duran un tiempo máximo)
+      if (m.phase === 'estacionada' && m.until) consider(m.until, (t) => this.endStation(m, t, 'tiempo'));
       if (m.phase === 'estacionada' || (m.joint && m.phase === 'ida')) continue;
       consider(m.phase === 'ida' ? m.arrive : m.back, (t) => this.#missionEvent(m, t));
     }
@@ -1530,6 +1701,11 @@ export class Game extends EventTarget {
     if (eco.net.comida < 0) fed = Math.min(h, s.resources.comida / -eco.net.comida);
     this.#produce(eco.net, fed, cap);
     if (h > fed) this.#produce(eco.hungry, h - fed, cap);
+    // El tributo de la ocupación se va apartando hasta que los invasores se lo llevan
+    if (s.occupied) {
+      const owed = (s.occupied.owed ??= {});
+      for (const res of RESOURCE_KEYS) if (eco.tribute[res] > 0) owed[res] = (owed[res] ?? 0) + eco.tribute[res] * h;
+    }
   }
 
   #produce(rates, h, cap) {
@@ -1585,12 +1761,14 @@ export class Game extends EventTarget {
 
   #missionEvent(m, t) {
     if (m.phase === 'vuelta') {
+      if (m.base != null) return this.#backToBase(m, t);
       for (const [id, n] of Object.entries(m.units)) this.state.units[id] += n;
       for (const [res, n] of Object.entries(m.cargo)) this.state.resources[res] += n;
       this.state.missions = this.state.missions.filter((x) => x !== m);
       if (m.hero && this.state.hero) this.state.hero.mission = null;
       const loot = fmtBag(m.cargo);
-      this.#note(`⚓ Ha vuelto la flota de ${m.targetName}${loot ? `: ${loot}` : ''}`, 'success');
+      if (m.type === 'tributo') this.#note(`💰 Llega a tu capital lo que mandas desde ${m.targetName}${loot ? `: ${loot}` : ''}`, 'success');
+      else this.#note(`⚓ Ha vuelto la flota de ${m.targetName}${loot ? `: ${loot}` : ''}`, 'success');
       return;
     }
 
@@ -1605,8 +1783,9 @@ export class Game extends EventTarget {
         if (!this.world.sameAlliance?.(this.userId, isl.owner)) {
           this.#report({ t, kind: 'apoyo', island: isl.id, islandName: isl.name, title: `Apoyo rechazado en ${isl.name}`, text: 'Ya no sois aliados. Tus tropas vuelven a casa.' });
           m.rejected = true;
-        }
+        } else if (this.world.stationAt?.(isl.owner)) this.#arriveRelief(m, isl, t);
       } else if (m.type === 'transporte') this.#arriveTransport(m, isl, t);
+      else if (m.type === 'bloquear') this.#arriveBlockade(m, isl, t);
       else this.#arrivePlayerAttack(m, isl, t);
     } else if (m.type === 'explorar') this.#arriveExplore(m, isl, t);
     else if (m.type === 'atacar') isl.type === 'continente' ? this.#arriveHorde(m, isl, t) : this.#arriveAttack(m, isl, t);
@@ -1624,6 +1803,8 @@ export class Game extends EventTarget {
       this.#report({ t, kind: 'apoyo', island: isl.id, islandName: isl.name, title: `Defendiendo la ciudad de ${host}`, text: 'Tus tropas se quedan hasta que las retires. Siguen comiendo de tus graneros.' });
       return;
     }
+    // Un bloqueo o una ocupación que empieza: la flota se queda allí
+    if (m.phase === 'estacionada') return;
     if (count(m.units) > 0) {
       m.phase = 'vuelta';
       m.turn = t;
@@ -1805,6 +1986,12 @@ export class Game extends EventTarget {
   }
 
   #arriveTransport(m, isl, t) {
+    const port = this.world.playerInfo(isl.owner)?.port;
+    if (port) {
+      const text = port.kind === 'invadir' ? `${port.name} ocupa la ciudad: no dejan desembarcar la carga.` : `${port.name} bloquea el puerto: los barcos no pueden entrar.`;
+      this.#report({ t, kind: 'transporte', island: isl.id, islandName: isl.name, title: `Puerto cerrado en ${isl.name}`, text: `${text} Vuelven con todo.` });
+      return;
+    }
     const delivered = this.world.deliver?.(isl.owner, { fromName: this.state.name, cargo: m.cargo, islandName: this.homeIsland?.name }, t);
     const owner = this.world.playerInfo(isl.owner)?.name ?? isl.name;
     if (!delivered) {
@@ -1821,12 +2008,18 @@ export class Game extends EventTarget {
     // Lo que valía al zarpar puede haber cambiado por el camino
     const rel = this.world.relation?.(this.userId, isl.owner);
     const away = this.world.playerInfo?.(isl.owner)?.vacation;
-    if (rel === 'aliado' || rel === 'pacto' || away) {
-      const why = away
-        ? `${this.world.playerInfo(isl.owner).name} se ha ido de vacaciones: su isla no se puede atacar.`
-        : rel === 'aliado'
-          ? 'Ahora sois aliados: tu flota se da la vuelta sin combatir.'
-          : 'Vuestras alianzas han firmado un pacto de no agresión: tu flota se da la vuelta.';
+    const port = this.world.playerInfo?.(isl.owner)?.port;
+    const taken = port?.kind === 'invadir';
+    if (rel === 'aliado' || rel === 'pacto' || away || taken) {
+      const why = taken
+        ? port.by === this.userId
+          ? 'Ya ocupas esa ciudad: tu flota se da la vuelta.'
+          : `${port.name} ha ocupado la ciudad antes de que llegaras: tu flota se da la vuelta.`
+        : away
+          ? `${this.world.playerInfo(isl.owner).name} se ha ido de vacaciones: su isla no se puede atacar.`
+          : rel === 'aliado'
+            ? 'Ahora sois aliados: tu flota se da la vuelta sin combatir.'
+            : 'Vuestras alianzas han firmado un pacto de no agresión: tu flota se da la vuelta.';
       this.#report({ t, kind: 'ataque', island: isl.id, islandName: isl.name, title: `Ataque cancelado en ${isl.name}`, text: why });
       return;
     }
@@ -1881,10 +2074,20 @@ export class Game extends EventTarget {
       this.state.stats.victories++;
       this.state.stats.pvpWins++;
     }
-    const title = { victoria: `Has saqueado ${isl.name}`, derrota: `Derrota en ${isl.name}`, empate: `Retirada de ${isl.name}` }[outcome];
-    const text = [phaseText(result), names.length ? `🤝 Ataque conjunto con ${names.join(', ')}. El botín se reparte según la bodega de cada uno.` : '', warText].filter(Boolean).join(' ') || undefined;
+    // Invasión: si sus defensores han caído y quedan tropas en tierra, se quedan ocupando la ciudad
+    const occupy = m.type === 'invadir' && outcome === 'victoria' && hasCombat(splitForces(m.units).land);
+    const title = occupy
+      ? `Has invadido ${isl.name}`
+      : { victoria: `Has saqueado ${isl.name}`, derrota: `Derrota en ${isl.name}`, empate: `Retirada de ${isl.name}` }[outcome];
+    const occupyText = occupy
+      ? `🦅 Tus tropas ocupan la ciudad durante ${OCCUPATION.hours} h como mucho: controlas su puerto, te quedas el ${Math.round(OCCUPATION.tribute * 100)} % de lo que produce y puedes lanzar ataques desde allí.`
+      : m.type === 'invadir' && outcome === 'victoria'
+        ? 'No te quedan tropas de tierra para ocupar la ciudad.'
+        : '';
+    const text = [phaseText(result), names.length ? `🤝 Ataque conjunto con ${names.join(', ')}. El botín se reparte según la bodega de cada uno.` : '', warText, occupyText].filter(Boolean).join(' ') || undefined;
     this.#report({ t, kind: 'ataque', island: isl.id, islandName: isl.name, outcome, title, text, battle: battleLog, loot: loots[0], enemy, pvp: true });
-    this.#note(`⚔️ ${title}${fmtBag(loots[0]) ? ` · botín ${fmtBag(loots[0])}` : ''}`, outcome === 'victoria' ? 'success' : 'error');
+    this.#note(`${occupy ? '🦅' : '⚔️'} ${title}${fmtBag(loots[0]) ? ` · botín ${fmtBag(loots[0])}` : ''}`, outcome === 'victoria' ? 'success' : 'error');
+    if (occupy) this.#station(m, isl, t, OCCUPATION.hours);
 
     allies.forEach((a, i) => {
       const g = groups[i + 1];
@@ -1939,6 +2142,208 @@ export class Game extends EventTarget {
     m.back = now + Math.min(Math.max(0, now - m.depart), m.trip ?? Infinity);
     this.#note(`🤝 El ataque conjunto contra ${m.targetName} se ha cancelado: tu flota vuelve a casa`, 'error');
     this.#flush(true);
+  }
+
+  // ── Bloqueos y ocupaciones ─────────────────────────────────────────────────
+
+  /** Tus barcos llegan a bloquear un puerto: primero tienen que vencer a su flota. */
+  #arriveBlockade(m, isl, t) {
+    const info = this.world.playerInfo?.(isl.owner);
+    const rel = this.world.relation?.(this.userId, isl.owner);
+    const port = info?.port;
+    const why =
+      rel === 'aliado' ? 'Ahora sois aliados: tu flota se da la vuelta.'
+      : rel === 'pacto' ? 'Vuestras alianzas han firmado un pacto de no agresión: tu flota se da la vuelta.'
+      : info?.vacation ? `${info.name} se ha ido de vacaciones: su puerto no se puede bloquear.`
+      : port?.kind === 'invadir' ? `${port.name} ha ocupado la ciudad: su puerto ya está en otras manos.`
+      : port ? `${port.name} se te ha adelantado y ya bloquea el puerto.`
+      : '';
+    if (why) {
+      this.#report({ t, kind: 'ataque', island: isl.id, islandName: isl.name, title: `Bloqueo cancelado en ${isl.name}`, text: why });
+      return;
+    }
+    const { atkMul, hpMul } = playerCombat(this.state);
+    const heroAtk = m.hero ? this.heroBonus('ataque') : 0;
+    const res = this.world.blockadePlayer?.(isl.owner, { attackerName: this.state.name, units: m.units, atkMul: atkMul + heroAtk, hpMul }, t);
+    if (!res) {
+      this.#report({ t, kind: 'ataque', island: isl.id, islandName: isl.name, title: `No hay nadie en ${isl.name}`, text: 'La ciudad está vacía. La flota vuelve a casa.' });
+      return;
+    }
+    const { result } = res;
+    m.units = clean(result.att.left);
+    if (m.hero) this.#heroXp(result.def.lost, t);
+    this.state.stats.kills += count(result.def.lost);
+    const won = result.seaWon && hasCombat(m.units);
+    const enemy = info?.name ?? isl.name;
+    const title = won ? `Bloqueas el puerto de ${isl.name}` : `No has podido bloquear ${isl.name}`;
+    const text = won
+      ? `${result.naval ? 'Has vencido a su flota.' : 'No había barcos de guerra en el puerto.'} Tus barcos se quedan frente a la ciudad ${BLOCKADE.hours} h como mucho: no zarpa nadie, no entran transportes ni mercaderes y sus colonias no le pueden mandar nada.`
+      : 'Su flota defiende el puerto. Lo que queda de la tuya vuelve a casa.';
+    this.#report({ t, kind: 'ataque', island: isl.id, islandName: isl.name, outcome: won ? 'victoria' : 'derrota', title, text, battle: result.naval ? pick(result) : undefined, enemy, pvp: true });
+    this.#note(`⛓️ ${title}`, won ? 'success' : 'error');
+    if (won) this.#station(m, isl, t, BLOCKADE.hours);
+  }
+
+  /** La flota se queda frente a la ciudad (bloqueo) o dentro de ella (ocupación) un máximo de `h` horas. */
+  #station(m, isl, t, h) {
+    m.units = clean(m.units);
+    m.phase = 'estacionada';
+    m.stationedAt = t;
+    m.until = t + hours(h);
+    // El primer saqueo ya ha sido el del asalto
+    if (m.type === 'invadir') m.plunderAt = t + hours(OCCUPATION.plunderHours);
+    this.world.seizePort?.(isl.owner, m.type, { by: this.userId, name: this.state.name, mission: m.id, since: t, until: m.until }, t);
+  }
+
+  /**
+   * Termina un bloqueo o una ocupación y la flota vuelve. `reason`: 'retirada' (la retiras tú),
+   * 'tiempo', 'liberada' (te han vencido; `who` es quien), 'relevo' (tu ejército ocupa la ciudad
+   * que bloqueabas) o 'paz' (ya no estáis enfrentados). Salvo si te han echado, el tributo
+   * pendiente se va con las tropas.
+   */
+  endStation(m, t, reason, who = null) {
+    if (m.phase !== 'estacionada' || (m.type !== 'bloquear' && m.type !== 'invadir')) return;
+    const owed = this.world.liftStation?.(m.target, { by: this.userId, mission: m.id, kind: m.type, reason, who }, t) ?? {};
+    for (const [r, n] of Object.entries(owed)) {
+      const v = Math.floor(n);
+      if (v > 0) m.cargo[r] = (m.cargo[r] ?? 0) + v;
+    }
+    m.units = clean(m.units);
+    const what = m.type === 'invadir' ? `la ocupación de ${m.targetName}` : `el bloqueo de ${m.targetName}`;
+    const text = {
+      tiempo: `${m.type === 'invadir' ? '🦅' : '⛓️'} Se acaba el tiempo: termina ${what} y tus tropas vuelven a casa`,
+      relevo: `⛓️ Tu ejército ha tomado ${m.targetName}: la flota del bloqueo vuelve a casa`,
+      paz: `🕊️ Ya no estáis enfrentados: termina ${what}`,
+    }[reason];
+    if (text) this.#note(text, 'info');
+    this.#dirty = true;
+    if (count(m.units) > 0) {
+      m.phase = 'vuelta';
+      m.turn = t;
+      m.back = t + (m.arrive - m.depart);
+    } else {
+      this.state.missions = this.state.missions.filter((x) => x !== m);
+      if (m.hero) this.#heroWounded(t);
+    }
+  }
+
+  /** Alguien ha atacado tu bloqueo o tu ocupación (el dueño de la ciudad o sus aliados). */
+  stationFought(m, { result, broken, enemy }, t) {
+    m.units = clean(result.def.left);
+    this.#mercsLost(result.def.lost);
+    this.state.stats.kills += count(result.att.lost);
+    if (m.hero) this.#heroXp(result.att.lost, t);
+    const what = m.type === 'invadir' ? `la ocupación de ${m.targetName}` : `el bloqueo de ${m.targetName}`;
+    const title = broken ? `${enemy} rompe ${what}` : `Tus tropas resisten: mantienes ${what}`;
+    this.#report({ t, kind: 'defensa', island: m.target, islandName: m.targetName, outcome: broken ? 'derrota' : 'victoria', title, battle: pick(result), enemy });
+    this.#note(`${m.type === 'invadir' ? '🦅' : '⛓️'} ${title}`, broken ? 'error' : 'success');
+    if (broken) this.endStation(m, t, 'liberada', enemy);
+    else this.#dirty = true;
+  }
+
+  /** Saquea la ciudad que ocupas: el tributo apartado y parte de su almacén van a tu capital en barcos requisados. */
+  plunder(id, now = this.now()) {
+    this.#advance(now);
+    const m = this.occupations().find((x) => x.id === id);
+    if (!m) return this.#fail('Ya no ocupas esa ciudad.');
+    if (now < (m.plunderAt ?? 0)) return this.#fail('Tus tropas aún no pueden volver a saquear la ciudad.');
+    const isl = this.world.island(m.target);
+    const capacity = Math.floor(cargoOf(m.units) * (1 + relicBonus(this.state, 'botin')));
+    const res = this.world.plunderCity?.(isl?.owner, { name: this.state.name, capacity }, now);
+    if (!res) return this.#fail('No se puede saquear ahora.');
+    // También lo que ya llevaban encima las tropas (el botín del asalto y de sus ataques)
+    const cargo = {};
+    for (const bag of [res.tribute, res.loot, m.cargo]) for (const [r, n] of Object.entries(bag)) if (n > 0) cargo[r] = (cargo[r] ?? 0) + n;
+    m.cargo = {};
+    m.plunderAt = now + hours(OCCUPATION.plunderHours);
+    this.state.stats.loot += count(res.loot) + count(res.tribute);
+    if (count(cargo) > 0) {
+      const travel = this.#travelHome(m.target, { mercante: 1 }) * 1000;
+      this.state.missions.push({ id: this.state.seq++, type: 'tributo', target: m.target, targetName: m.targetName, units: {}, cargo, depart: now - travel, arrive: now, turn: now, back: now + travel, phase: 'vuelta', hero: false });
+    }
+    this.#report({
+      t: now,
+      kind: 'ocupacion',
+      island: m.target,
+      islandName: m.targetName,
+      title: `Saqueo de ${m.targetName}`,
+      loot: cargo,
+      text: count(cargo) ? 'Barcos requisados en su puerto llevan a tu capital el tributo y lo saqueado del almacén.' : 'No había nada que llevarse.',
+    });
+    this.#note(`💰 Saqueas ${m.targetName}${fmtBag(cargo) ? `: ${fmtBag(cargo)} de camino a casa` : ''}`, 'success');
+    this.#flush(true);
+    return { ok: true, cargo };
+  }
+
+  /** Tus tropas de apoyo llegan a una ciudad aliada bloqueada u ocupada: primero hay que liberarla. */
+  #arriveRelief(m, isl, t) {
+    const { atkMul, hpMul } = playerCombat(this.state);
+    const res = this.world.fightStation?.(isl.owner, { units: m.units, atkMul, hpMul, name: this.state.name }, t, { fromSea: true });
+    if (!res?.result) return;
+    m.units = clean(res.result.att.left);
+    this.#mercsLost(res.result.att.lost);
+    this.state.stats.kills += count(res.result.def.lost);
+    const what = res.kind === 'invadir' ? 'la ocupación' : 'el bloqueo';
+    const title = res.broken ? `Has liberado ${isl.name}` : `No has podido romper ${what} de ${isl.name}`;
+    const text = res.broken ? `Has vencido a las tropas de ${res.enemy}. Tus tropas se quedan defendiendo la ciudad.` : `Las tropas de ${res.enemy} resisten. Lo que queda de las tuyas vuelve a casa.`;
+    this.#report({ t, kind: 'ataque', island: isl.id, islandName: isl.name, outcome: res.broken ? 'victoria' : 'derrota', title, text, battle: pick(res.result), enemy: res.enemy, pvp: true });
+    this.#note(`🛡️ ${title}`, res.broken ? 'success' : 'error');
+    if (!res.broken || !hasCombat(m.units)) m.rejected = true;
+  }
+
+  /** Una flota que zarpó de una ciudad ocupada vuelve a ella; si ya no es tuya, sigue hasta casa. */
+  #backToBase(m, t) {
+    const base = this.occupations().find((x) => x.id === m.base);
+    if (base) {
+      for (const [id, n] of Object.entries(m.units)) if (n > 0) base.units[id] = (base.units[id] ?? 0) + n;
+      for (const [r, n] of Object.entries(m.cargo)) if (n > 0) base.cargo[r] = (base.cargo[r] ?? 0) + n;
+      this.state.missions = this.state.missions.filter((x) => x !== m);
+      const loot = fmtBag(m.cargo);
+      this.#note(`🦅 Tus tropas vuelven a ${base.targetName}${loot ? ` con ${loot}` : ''}`, 'success');
+      return;
+    }
+    const travel = this.#travelHome(m.from, m.units) * 1000;
+    const name = m.fromName;
+    // Un viaje nuevo (con otro id, para que el mapa dibuje la nueva ruta) desde la ciudad perdida
+    Object.assign(m, { id: this.state.seq++, base: null, target: m.from, targetName: name, from: null, fromName: null, depart: t - travel, arrive: t, turn: t, back: t + travel, recalled: false });
+    this.#note(`⚓ Ya no ocupas ${name}: tu flota sigue hasta casa`, 'info');
+  }
+
+  /** Segundos desde la isla `from` hasta tu capital al paso del barco más lento de `units`. */
+  #travelHome(from, units) {
+    let speed = Infinity;
+    for (const [id, n] of Object.entries(units)) if (n > 0 && UNITS[id].kind === 'barco') speed = Math.min(speed, UNITS[id].speed);
+    return travelSeconds(this.state, this.distanceTo(from), Number.isFinite(speed) ? speed : 1);
+  }
+
+  /** Atacas a quien bloquea tu puerto (con tus barcos) o a quien ocupa tu ciudad (con todo lo que tengas en casa). */
+  breakPort(now = this.now()) {
+    this.#advance(now);
+    const s = this.state;
+    const kind = s.occupied ? 'invadir' : s.blockade ? 'bloquear' : null;
+    if (!kind) return this.#fail('Tu puerto está libre.');
+    const army = kind === 'bloquear' ? splitForces(s.units).sea : splitForces(s.units).land;
+    if (kind === 'invadir') Object.assign(army, splitForces(s.units).sea);
+    if (!hasCombat(army)) return this.#fail(kind === 'bloquear' ? 'Necesitas barcos de guerra en el puerto para romper el bloqueo.' : 'Necesitas tropas en casa para echar a los invasores.');
+    const mine = playerCombat(s);
+    const heroHome = this.heroStatus(now) === 'casa';
+    const atkMul = mine.atkMul + (heroHome ? this.heroBonus('ataque') : 0);
+    // Junto a casa ayuda el faro
+    const hpMul = mine.hpMul + (kind === 'bloquear' ? navalDefense(this.level('faro')) : 0);
+    const res = this.world.fightStation?.(this.userId, { units: army, atkMul, hpMul, name: s.name }, now, { fromSea: false });
+    if (!res) return this.#fail('Ahora no se puede combatir.');
+    if (res.result) {
+      for (const [id, n] of Object.entries(army)) s.units[id] -= n - (res.result.att.left[id] ?? 0);
+      this.#mercsLost(res.result.att.lost);
+      s.stats.kills += count(res.result.def.lost);
+      if (heroHome) this.#heroXp(res.result.def.lost, now);
+    }
+    const title = res.broken
+      ? kind === 'bloquear' ? `¡Has roto el bloqueo de ${res.enemy}!` : `¡Has expulsado a ${res.enemy} de tu ciudad!`
+      : kind === 'bloquear' ? `No has podido romper el bloqueo de ${res.enemy}` : `${res.enemy} sigue ocupando tu ciudad`;
+    this.#report({ t: now, kind: 'ataque', islandName: this.homeIsland?.name, outcome: res.broken ? 'victoria' : 'derrota', title, battle: res.result ? pick(res.result) : undefined, enemy: res.enemy });
+    this.#note(`${kind === 'bloquear' ? '⛓️' : '🦅'} ${title}`, res.broken ? 'success' : 'error');
+    return this.#done();
   }
 
   #arriveAttack(m, isl, t) {
@@ -2472,6 +2877,11 @@ function splitBag(bagIn, weights) {
     if (n - given > 0) out[first][res] = (out[first][res] ?? 0) + n - given;
   }
   return out;
+}
+
+/** Las unidades sin las que ya no quedan. */
+function clean(units) {
+  return Object.fromEntries(Object.entries(units ?? {}).filter(([, n]) => n > 0));
 }
 
 function cargoOf(units) {

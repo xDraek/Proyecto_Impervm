@@ -3189,6 +3189,28 @@ input[type='text'] {
   color: var(--bad);
 }
 
+/* Bloqueo de un puerto (cadenas, azul de acero) u ocupación de una ciudad (púrpura imperial) */
+.port-box {
+  padding: 10px 12px;
+  margin: 10px 0 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(140, 180, 220, 0.55);
+  background: rgba(30, 60, 100, 0.18);
+}
+
+.port-box.occupied {
+  border-color: rgba(190, 120, 220, 0.6);
+  background: rgba(80, 30, 100, 0.18);
+}
+
+.port-box h4 {
+  margin-top: 0;
+}
+
+.port-box .wide + .wide {
+  margin-top: 6px;
+}
+
 .progress.horde-bar i {
   background: linear-gradient(90deg, #ff7a6b, #c9533a);
 }

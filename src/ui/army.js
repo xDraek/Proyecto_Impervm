@@ -43,9 +43,15 @@ function fleetRows(game) {
       let what;
       let when = '';
       let button = '';
-      if (m.phase === 'estacionada') what = `🛡️ Defendiendo ${target}`;
-      else if (m.phase === 'ida') {
-        what = `${t.icon} ${t.name} · ${target}`;
+      const from = m.fromName ? ` <span class="muted small">desde ${escapeHtml(m.fromName)}</span>` : '';
+      if (m.phase === 'estacionada') {
+        what = `${{ invadir: '🦅 Ocupando', bloquear: '⛓️ Bloqueando' }[m.type] ?? '🛡️ Defendiendo'} ${target}`;
+        if (m.until) when = `termina en <span data-until="${m.until}"></span>`;
+      } else if (m.type === 'tributo') {
+        what = `💰 Botín de ${target}`;
+        when = `llega en <span data-until="${m.back}"></span>`;
+      } else if (m.phase === 'ida') {
+        what = `${t.icon} ${t.name} · ${target}${from}`;
         when = `llega en <span data-until="${m.arrive}"></span>`;
         button = `<button class="ghost small" data-action="recall" data-mission="${m.id}">Retirar</button>`;
       } else {
@@ -53,6 +59,9 @@ function fleetRows(game) {
         when = `en <span data-until="${m.back}"></span>`;
       }
       if (m.phase === 'estacionada') button = `<button class="ghost small" data-action="recall" data-mission="${m.id}">Retirar</button>`;
+      if (m.phase === 'estacionada' && m.type === 'invadir') {
+        button = `<button class="primary small" data-action="plunder" data-mission="${m.id}" data-ready-at="${m.plunderAt ?? 0}" ${(m.plunderAt ?? 0) <= game.now() ? '' : 'disabled'}>💰 Saquear</button>${button}`;
+      }
       return `<div class="fleet-line" data-select="${m.target}">
         <div><b>${what}${m.hero ? ' 🎖️' : ''}</b><div class="muted small">${unitList(m.units)}</div></div>
         <div class="fleet-when"><span class="small">${when}</span>${button}</div>

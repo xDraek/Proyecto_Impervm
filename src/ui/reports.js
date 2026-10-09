@@ -4,7 +4,7 @@ import { bag, escapeHtml, fmtAgo, fmtNum, unitList } from './format.js';
 
 // Informes de combate, exploración y colonias.
 
-const KIND_ICON = { reliquia: '🏺', ataque: '⚔️', defensa: '🏴‍☠️', exploracion: '🔭', colonia: '🚩', expedicion: '🧭', visita: '🧳', victoria: '🗽' };
+const KIND_ICON = { reliquia: '🏺', ataque: '⚔️', defensa: '🏴‍☠️', exploracion: '🔭', colonia: '🚩', expedicion: '🧭', visita: '🧳', victoria: '🗽', ocupacion: '🦅' };
 
 function sideTable(title, side) {
   const rows = Object.entries(side.start)

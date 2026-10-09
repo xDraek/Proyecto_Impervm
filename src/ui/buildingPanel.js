@@ -1,7 +1,8 @@
-import { BUILDINGS, HERO, HERO_SKILLS, RELIC_RARITY, RELIC_SLOTS, POWERS, POWER_KEYS, RESEARCH, RESEARCH_KEYS, RESOURCES, RESOURCE_KEYS, UNITS, UNIT_KEYS, WORK } from '../game/data.js';
+import { BUILDINGS, HERO, HERO_SKILLS, OCCUPATION, RELIC_RARITY, RELIC_SLOTS, POWERS, POWER_KEYS, RESEARCH, RESEARCH_KEYS, RESOURCES, RESOURCE_KEYS, UNITS, UNIT_KEYS, WORK } from '../game/data.js';
 import { favorMax, favorRate, hasWorkers, producerOutput, protectedAmount, requirementName, storageCapacity, townSpeedup, wallBonus, workShare, workTaxes } from '../game/rules.js';
+import { splitForces } from '../game/combat.js';
 import { portrait, unitIcon } from '../scene/portraits.js';
-import { costList, escapeHtml, fmtDec, fmtNum, fmtTime, unitList } from './format.js';
+import { bag, costList, escapeHtml, fmtDec, fmtNum, fmtTime, unitList } from './format.js';
 
 const unitArt = (id) => unitIcon(id, 'card-art');
 
@@ -212,14 +213,44 @@ function trainingQueue(game, building) {
 
 function recruitSection(game, building) {
   const title = building === 'puerto' ? 'Astillero' : 'Reclutar';
-  if (game.level(building) < 1) return `<h4>${title}</h4><p class="desc">Constrúyelo para empezar a ${building === 'puerto' ? 'botar barcos' : 'entrenar tropas'}.</p>`;
+  // Aunque no tengas puerto te pueden ocupar: desde aquí se echa a los invasores
+  const port = building === 'puerto' ? portSection(game) : '';
+  if (game.level(building) < 1) return `${port}<h4>${title}</h4><p class="desc">Constrúyelo para empezar a ${building === 'puerto' ? 'botar barcos' : 'entrenar tropas'}.</p>`;
   const ids = UNIT_KEYS.filter((id) => UNITS[id].building === building);
   let extra = '';
   if (building === 'puerto') {
-    extra = `<div class="effect"><span>⛵ Flotas en el mar</span><b>${game.missions.length} / ${game.fleetSlots()}</b></div>
+    extra = `${port}<div class="effect"><span>⛵ Flotas en el mar</span><b>${game.fleetsAtSea()} / ${game.fleetSlots()}</b></div>
       <button class="ghost wide" data-action="open-map">🗺️ Abrir el mapa del archipiélago</button>`;
   }
   return `${extra}${trainingQueue(game, building)}<h4>${title}</h4><div class="cards">${ids.map((id) => unitCard(game, id)).join('')}</div>`;
+}
+
+/** Bloqueo de tu puerto u ocupación de tu ciudad: qué pasa y cómo librarte. */
+function portSection(game) {
+  const s = game.state;
+  const info = s.occupied ?? s.blockade;
+  if (!info) return '';
+  const occupied = !!s.occupied;
+  const mine = occupied ? { ...splitForces(game.units).land, ...splitForces(game.units).sea } : splitForces(game.units).sea;
+  const ready = Object.entries(mine).some(([id, n]) => n > 0 && UNITS[id].atk > 0);
+  const owed = occupied ? bag(Object.fromEntries(Object.entries(info.owed ?? {}).map(([r, n]) => [r, Math.floor(n)]))) : '';
+  return `<div class="port-box ${occupied ? 'occupied' : ''}">
+    <h4>${occupied ? `🦅 ${escapeHtml(info.name)} ocupa tu ciudad` : `⛓️ ${escapeHtml(info.name)} bloquea tu puerto`}</h4>
+    <p class="desc small">${
+      occupied
+        ? `Sus tropas se quedan con el ${Math.round(OCCUPATION.tribute * 100)} % de lo que produces y pueden saquear tu almacén. No zarpa nadie, no entran transportes ni mercaderes y tus colonias no te mandan nada.`
+        : 'Sus barcos de guerra no dejan zarpar a nadie, no entran transportes ni mercaderes y tus colonias no te pueden mandar nada.'
+    }</p>
+    <div class="info-row"><span>Se irán como mucho en</span><b class="q-time" data-until="${info.until}"></b></div>
+    ${occupied && owed ? `<div class="info-row"><span>Tributo apartado</span><span>${owed}</span></div>` : ''}
+    <p class="desc small">${
+      occupied
+        ? 'Échalos con todo lo que tengas en casa (tropas y barcos), o pide a tu alianza que mande tropas de apoyo: al llegar lucharán contra ellos. Si los echas, el tributo apartado se queda en tu almacén.'
+        : 'Ataca su flota con tus barcos de guerra (el faro les da más vida), o pide a tu alianza que mande tropas de apoyo: al llegar lucharán contra ella.'
+    }</p>
+    <button class="danger wide" data-action="break-port" ${ready ? '' : 'disabled'}>${occupied ? '⚔️ Expulsar a los invasores' : '⚔️ Romper el bloqueo'}</button>
+    ${ready ? '' : `<p class="muted small">${occupied ? 'Entrena tropas en el cuartel para poder echarlos.' : 'Bota barcos de guerra para poder romperlo.'}</p>`}
+  </div>`;
 }
 
 // ── Mercado ──────────────────────────────────────────────────────────────────
@@ -227,7 +258,8 @@ function recruitSection(game, building) {
 function marketSection(game) {
   if (game.level('mercado') < 1) return '';
   const opts = (sel) => RESOURCE_KEYS.map((r) => `<option value="${r}" ${r === sel ? 'selected' : ''}>${RESOURCES[r].icon} ${RESOURCES[r].name}</option>`).join('');
-  return `<h4>Cambiar recursos</h4>
+  const closed = game.portClosed() ? '<p class="hint warn">⛓️ Tu puerto está en manos enemigas: los mercaderes no pueden entrar.</p>' : '';
+  return `<h4>Cambiar recursos</h4>${closed}
     <div class="trade">
       <label>Das <select name="t-from">${opts('madera')}</select></label>
       <div class="train-row">

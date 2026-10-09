@@ -71,6 +71,11 @@ export class Hud {
     this.panel.addEventListener('click', (e) => this.#onPanelClick(e));
     this.panel.addEventListener('input', () => this.#refreshPanel());
     this.panel.addEventListener('change', (e) => {
+      // Cambiar el origen de la flota cambia las tropas que se pueden mandar
+      if (e.target.name === 'from') {
+        this.fleetFrom = e.target.value;
+        this.#renderPanel();
+      }
       this.#refreshPanel();
       // Al soltar el control de trabajadores, se aplica
       const id = e.target.dataset?.work;
@@ -109,6 +114,8 @@ export class Hud {
       if (this.modalKind === 'army') {
         const recall = e.target.closest('[data-action="recall"]');
         if (recall) return this.#run(recall, () => game.recall(Number(recall.dataset.mission)), 'La flota da media vuelta.', 'sail');
+        const plunder = e.target.closest('[data-action="plunder"]');
+        if (plunder && !plunder.disabled) return this.#run(plunder, () => game.plunder(Number(plunder.dataset.mission)), null, 'coins');
         if (e.target.closest('[data-action="army-sim"]')) {
           const attacker = Object.fromEntries(Object.entries(game.units).filter(([, n]) => n > 0));
           return this.social.openSimulator({ attacker, title: 'Tu ejército en casa' });
@@ -493,6 +500,8 @@ export class Hud {
       ];
       if (eco.research[key]) lines.push(`Investigación: +${fmtNum(eco.research[key])}/h`);
       if (eco.colonies[key]) lines.push(`Colonias: +${fmtNum(eco.colonies[key])}/h`);
+      else if (eco.closed && game.colonies().some((c) => c.specialty === key)) lines.push('Colonias: nada (tu puerto está en manos enemigas)');
+      if (eco.tribute?.[key]) lines.push(`Tributo para los invasores: −${fmtNum(eco.tribute[key])}/h`);
       if (key === 'oro' && eco.taxes) lines.push(`Impuestos de los trabajadores libres: +${fmtNum(eco.taxes)}/h`);
       if (key === 'oro' && eco.pay) lines.push(`Paga de las tropas de élite: −${fmtNum(eco.pay)}/h`);
       if (eco.eventBonus?.[key]) lines.push(`Evento del archipiélago: +${Math.round(eco.eventBonus[key] * 100)} %`);
@@ -670,6 +679,11 @@ export class Hud {
       const cost = multiplyCost(JSON.parse(el.dataset.need), this.#countOf(root, el.dataset.count));
       el.disabled = el.dataset.blocked === '1' || !canAfford(have, cost);
     }
+    // Botones que se habilitan solos al llegar su hora (el saqueo de una ciudad ocupada)
+    for (const el of root.querySelectorAll('[data-ready-at]')) {
+      const off = now < Number(el.dataset.readyAt);
+      if (el.disabled !== off) el.disabled = off;
+    }
     for (const el of root.querySelectorAll('[data-wait]')) {
       const cost = JSON.parse(el.dataset.wait);
       let text = '';
@@ -758,7 +772,7 @@ export class Hud {
         break;
       case 'fleet-all': {
         const input = root.querySelector(`[name="f-${btn.dataset.unit}"]`);
-        input.value = game.units[btn.dataset.unit];
+        input.value = btn.dataset.max ?? game.units[btn.dataset.unit];
         this.#refreshPanel();
         break;
       }
@@ -766,13 +780,23 @@ export class Hud {
         const type = btn.dataset.type;
         const target = this.selected;
         const payload = readPayload(root);
-        const units = fleetFor(game, type, readFleet(root), payload);
-        const name = game.world.island(target)?.name ?? 'la isla';
         const opts = readOpts(root);
+        const units = fleetFor(game, type, readFleet(root), payload, opts.from);
+        const name = game.world.island(target)?.name ?? 'la isla';
         const res = await this.#run(btn, () => game.sendMission(type, target, units, payload, opts), opts.join ? `🤝 Tu flota se une al ataque contra ${name}` : `${MISSION_TYPES[type].icon} La flota zarpa hacia ${name}`, 'sail');
         if (res?.ok) for (const input of this.panel.querySelectorAll('input[name^="f-"], input[name^="p-"]')) input.value = '';
         break;
       }
+      case 'recall':
+        await this.#run(btn, () => game.recall(Number(btn.dataset.mission)), 'La flota da media vuelta.', 'sail');
+        break;
+      case 'plunder':
+        await this.#run(btn, () => game.plunder(Number(btn.dataset.mission)), null, 'coins');
+        break;
+      case 'break-port':
+        if (!confirm(game.state.occupied ? '¿Atacar a los invasores con todo lo que tienes en casa?' : '¿Atacar la flota que bloquea tu puerto con tus barcos de guerra?')) break;
+        await this.#run(btn, () => game.breakPort(), null, 'sail');
+        break;
       case 'mail-to':
         this.social.compose(btn.dataset.name);
         break;
@@ -858,9 +882,17 @@ export class Hud {
     for (const m of game.missions) {
       const t = MISSION_TYPES[m.type];
       if (m.phase === 'estacionada') {
+        const what = { invadir: '🦅 Ocupando', bloquear: '⛓️ Bloqueando' }[m.type] ?? '🛡️ Defendiendo';
+        const until = m.until ? `<span class="q-time" data-until="${m.until}"></span>` : `<span class="muted small">${unitList(m.units)}</span>`;
+        const ready = (m.plunderAt ?? 0) <= game.now();
+        const plunder = m.type === 'invadir' ? `<button class="primary small" data-action="plunder" data-mission="${m.id}" data-ready-at="${m.plunderAt ?? 0}" ${ready ? '' : 'disabled'} title="Saquear su almacén y mandar el tributo a casa">💰 Saquear</button>` : '';
         rows.push(`<div class="dock-row" data-select="${m.target}">
-          <div class="q-title"><span>🛡️ Defendiendo ${escapeHtml(m.targetName ?? '')}</span><span class="muted small">${unitList(m.units)}</span></div>
-          <button class="ghost small" data-action="recall" data-mission="${m.id}">Retirar</button></div>`);
+          <div class="q-title"><span>${what} ${escapeHtml(m.targetName ?? '')}</span>${until}</div>
+          ${plunder}<button class="ghost small" data-action="recall" data-mission="${m.id}">Retirar</button></div>`);
+        continue;
+      }
+      if (m.type === 'tributo') {
+        rows.push(row({ icon: t.icon, title: `Botín de ${escapeHtml(m.targetName ?? '')}`, start: m.turn ?? m.arrive, end: m.back, select: m.target }));
         continue;
       }
       const going = m.phase === 'ida';
@@ -869,7 +901,7 @@ export class Hud {
       rows.push(
         row({
           icon: going ? t.icon : '⚓',
-          title: `${going ? t.name : 'Vuelta de'} ${escapeHtml(m.targetName ?? game.world.island(m.target)?.name ?? '')}${m.hero ? ' 🎖️' : ''}${jointTag(m)}`,
+          title: `${going ? t.name : 'Vuelta de'} ${escapeHtml(m.targetName ?? game.world.island(m.target)?.name ?? '')}${m.fromName ? ` <span class="muted small">desde ${escapeHtml(m.fromName)}</span>` : ''}${m.hero ? ' 🎖️' : ''}${jointTag(m)}`,
           start,
           end,
           select: m.target,
@@ -887,6 +919,10 @@ export class Hud {
       const action = btn.dataset.action;
       if (action === 'recall') {
         await this.#run(btn, () => this.game.recall(Number(btn.dataset.mission)), 'La flota da media vuelta.', 'sail');
+        return;
+      }
+      if (action === 'plunder') {
+        await this.#run(btn, () => this.game.plunder(Number(btn.dataset.mission)), null, 'coins');
         return;
       }
       if (!btn.dataset.armed) {
@@ -914,23 +950,33 @@ export class Hud {
     // Hordas en los continentes donde tienes colonias
     const lands = new Set(this.game.colonies().map((c) => this.game.world.island(c.id)?.land).filter(Boolean));
     const hordes = [...lands].map((id) => ({ id, isl: this.game.world.island(id), h: this.game.world.islandState(id)?.horde })).filter((x) => x.h && x.isl);
-    this.alert.hidden = !raid && !incoming.length && !hordes.length;
+    const s = this.game.state;
+    const port = s.occupied ?? s.blockade;
+    this.alert.hidden = !raid && !incoming.length && !hordes.length && !port;
     if (this.alert.hidden) {
       this.cache.alert = '';
       return;
     }
-    this.alertTarget = !raid && !incoming.length ? hordes[0].id : 'muralla';
+    this.alertTarget = port ? 'puerto' : !raid && !incoming.length ? hordes[0].id : 'muralla';
     const lines = [];
+    if (s.occupied) lines.push(`<div><b>🦅 ¡${escapeHtml(port.name)} ocupa tu ciudad!</b> Se llevan parte de lo que produces · se irán en <span data-until="${port.until}"></span></div>`);
+    else if (s.blockade) lines.push(`<div><b>⛓️ ¡${escapeHtml(port.name)} bloquea tu puerto!</b> No zarpa ni entra nadie · como mucho <span data-until="${port.until}"></span></div>`);
     for (const x of hordes) {
       const left = Object.values(x.h.garrison).reduce((a, b) => a + b, 0);
       lines.push(`<div><b>🔥 ¡Horda en ${escapeHtml(x.isl.name)}!</b> ${fmtNum(left)} bárbaros · arrasará tus colonias en <span data-until="${x.h.deadline}"></span></div>`);
     }
     if (raid) lines.push(`<div><b>¡Piratas a la vista!</b> Llegan en <span data-until="${raid.arrival}"></span> · ${unitList(raid.army)}</div>`);
     for (const m of incoming.slice(0, 3)) {
-      lines.push(`<div><b>¡Ataque de ${escapeHtml(m.from)}!</b> ${fmtNum(m.size)} unidades desde ${escapeHtml(m.fromIsland ?? '')} · llegan en <span data-until="${m.arrive}"></span></div>`);
+      const what = { invadir: 'Invasión', bloquear: 'Bloqueo' }[m.type] ?? 'Ataque';
+      lines.push(`<div><b>¡${what} de ${escapeHtml(m.from)}!</b> ${fmtNum(m.size)} unidades desde ${escapeHtml(m.fromIsland ?? '')} · llegan en <span data-until="${m.arrive}"></span></div>`);
     }
-    const html = `<span class="alert-icon">${incoming.length ? '⚔️' : raid ? '🏴‍☠️' : '🔥'}</span>
-      <div>${lines.join('')}<div class="small">${raid || incoming.length ? 'Defiende con tropas en casa, la muralla y la Égida del templo' : 'Pulsa para ver la horda y mandar tus tropas contra ella'}</div></div>`;
+    const tip = port
+      ? 'Pulsa para ver tu puerto y echarlos, o pide tropas de apoyo a tu alianza'
+      : raid || incoming.length
+        ? 'Defiende con tropas en casa, la muralla y la Égida del templo'
+        : 'Pulsa para ver la horda y mandar tus tropas contra ella';
+    const html = `<span class="alert-icon">${s.occupied ? '🦅' : s.blockade ? '⛓️' : incoming.length ? '⚔️' : raid ? '🏴‍☠️' : '🔥'}</span>
+      <div>${lines.join('')}<div class="small">${tip}</div></div>`;
     this.#setHtml(this.alert, 'alert', html);
   }
 

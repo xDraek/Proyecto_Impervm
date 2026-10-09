@@ -1,5 +1,5 @@
 import { NEWBIE_POINTS } from '../game/Game.js';
-import { CONTEST_DAYS, HORDE, JOINT_MAX, RELIC_SLOTS, VACATION, WONDER_LEVELS } from '../game/data.js';
+import { BLOCKADE, CONTEST_DAYS, HORDE, JOINT_MAX, OCCUPATION, RELIC_SLOTS, VACATION, WONDER_LEVELS } from '../game/data.js';
 import { escapeHtml } from './format.js';
 
 // Guía del juego: todo lo que hay que saber, por temas y con buscador.
@@ -41,8 +41,15 @@ const TOPICS = [
   {
     icon: '⛵',
     title: 'Flotas y misiones',
-    body: `<p>Pulsa una isla del mapa (tecla M) y elige qué mandas: <b>explorar</b> (botes), <b>atacar</b>, <b>colonizar</b>, <b>conquistar</b>, <b>expedición</b> a la niebla, <b>transporte</b> o <b>apoyo</b> a un aliado.</p>
+    body: `<p>Pulsa una isla del mapa (tecla M) y elige qué mandas: <b>explorar</b> (botes), <b>atacar</b>, <b>invadir</b> o <b>bloquear</b> otra ciudad, <b>colonizar</b>, <b>conquistar</b>, <b>expedición</b> a la niebla, <b>transporte</b> o <b>apoyo</b> a un aliado.</p>
       <p>El puerto limita cuántas flotas tienes en el mar a la vez. Puedes retirar una flota que aún no ha llegado.</p>`,
+  },
+  {
+    icon: '🦅',
+    title: 'Bloqueos e invasiones',
+    body: `<p>⛓️ <b>Bloquear un puerto</b>: manda solo barcos de guerra a otra ciudad. Si vencen a su flota, se quedan frente a ella hasta ${BLOCKADE.hours} h: de allí no zarpa nadie, no entran transportes ni mercaderes y sus colonias no le mandan nada.</p>
+      <p>🦅 <b>Invadir</b>: un ataque con tropas de tierra. Si desembarcan y acaban con todo su ejército, se quedan <b>ocupando la ciudad</b> hasta ${OCCUPATION.hours} h: controlas su puerto, te llevas el ${Math.round(OCCUPATION.tribute * 100)} % de lo que produce, cada ${OCCUPATION.plunderHours} h puedes <b>saquear</b> su almacén y puedes lanzar ataques, espías y bloqueos <b>desde allí</b> (elige «Zarpar desde…» al mandar la flota). Las tropas vuelven a la ciudad ocupada; si la pierdes, siguen hasta casa.</p>
+      <p>Si te bloquean o te ocupan, ve al <b>puerto</b>: puedes atacarlos con lo que tengas en casa (el faro ayuda a tus barcos). Las <b>tropas de apoyo</b> de tu alianza luchan contra ellos al llegar. Si echas a los invasores, el tributo que no se llevaron se queda en tu almacén.</p>`,
   },
   {
     icon: '🗺️',
