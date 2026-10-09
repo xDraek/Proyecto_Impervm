@@ -689,7 +689,7 @@ export class Hud {
         this.onSelect(null);
         break;
       case 'upgrade':
-        await this.#run(btn, () => game.upgrade(this.selected));
+        await this.#run(btn, () => game.upgrade(this.selected), null, 'hammer');
         break;
       case 'hire':
         await this.#run(btn, () => game.hireMercenaries(btn.dataset.id), null, 'coins');
@@ -712,7 +712,7 @@ export class Hud {
         break;
       }
       case 'colony-upgrade':
-        await this.#run(btn, () => game.upgradeColony(this.selected), '🔨 Los colonos se ponen manos a la obra');
+        await this.#run(btn, () => game.upgradeColony(this.selected), '🔨 Los colonos se ponen manos a la obra', 'hammer');
         break;
       case 'research': {
         const r = RESEARCH[btn.dataset.id];

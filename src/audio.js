@@ -38,6 +38,8 @@ function ensure() {
   ambientBus.connect(master);
   startAmbience();
   if (musicOn()) startMusic();
+  // Los efectos grabados, ya descargados para cuando hagan falta
+  loadSample('/audio/martillo.mp3');
   return ctx;
 }
 
@@ -340,7 +342,40 @@ function bell(freq, start, vol = 0.08) {
   [[1, 1], [2.76, 0.45], [5.4, 0.22], [0.5, 0.3]].forEach(([k, a]) => tone(freq * k, start, 1.6 / Math.sqrt(k), { vol: vol * a }));
 }
 
+// Efectos grabados cortos (public/audio): se descargan una vez y se reproducen desde memoria
+const samples = new Map();
+function loadSample(url) {
+  let entry = samples.get(url);
+  if (!entry) {
+    entry = { buffer: null };
+    entry.ready = fetch(url)
+      .then((r) => r.arrayBuffer())
+      .then((data) => ctx.decodeAudioData(data))
+      .then((buffer) => (entry.buffer = buffer))
+      .catch(() => samples.delete(url));
+    samples.set(url, entry);
+  }
+  return entry;
+}
+
+function sample(url, start, vol) {
+  const entry = loadSample(url);
+  const go = () => {
+    if (!entry.buffer || muted) return;
+    const src = ctx.createBufferSource();
+    src.buffer = entry.buffer;
+    const g = ctx.createGain();
+    g.gain.value = vol;
+    src.connect(g).connect(master);
+    src.start(Math.max(start, ctx.currentTime));
+  };
+  if (entry.buffer) go();
+  else entry.ready.then(go);
+}
+
 const SOUNDS = {
+  /** Obra empezada: tres martillazos. */
+  hammer: (t) => sample('/audio/martillo.mp3', t, 0.55),
   /** Misión o encargo cumplido: una fanfarria corta de metales, inconfundible. */
   fanfare: (t) => {
     brass(392, t, 0.16);
