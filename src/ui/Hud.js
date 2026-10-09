@@ -108,6 +108,9 @@ export class Hud {
     this.eventEl.addEventListener('click', () => this.openEvents());
     this.modal.addEventListener('click', async (e) => {
       if (e.target === this.modal || e.target.closest('[data-action="close-modal"]')) return this.closeModal();
+      // Enlaces a un tema de la guía (dentro de la guía o desde otra ventana)
+      const guide = e.target.closest('[data-guide]');
+      if (guide) return openGuide(this, { topic: guide.dataset.guide });
       const task = e.target.closest('[data-action="claim-task"]');
       if (task && !task.disabled) return this.#run(task, () => game.claimTask(task.dataset.id), null, 'coins');
       // Ventana del ejército: retirar flotas, abrir el simulador o ir a un edificio o isla
@@ -198,10 +201,13 @@ export class Hud {
     this.#pollChat();
 
     // Menú de opciones
-    this.menu.querySelector('.menu-user').innerHTML = `⚜ <b>${escapeHtml(game.username ?? '')}</b><div class="muted small">${escapeHtml(game.homeIsland?.name ?? '')}</div>`;
     $('#menu-btn').addEventListener('click', (e) => {
       e.stopPropagation();
       this.menu.hidden = !this.menu.hidden;
+      if (this.menu.hidden) return;
+      const tag = game.alliance ? ` <span class="muted">[${escapeHtml(game.alliance.tag)}]</span>` : '';
+      this.menu.querySelector('.menu-user').innerHTML = `<span class="menu-avatar">${escapeHtml(game.state.banner?.emblem ?? '⚜')}</span>
+        <div><b>${escapeHtml(game.username ?? '')}</b>${tag}<div class="muted small">${escapeHtml(game.homeIsland?.name ?? '')} · ${fmtNum(game.score())} puntos</div></div>`;
       this.menu.querySelector('[name="sound"]').checked = settings.sound();
       this.menu.querySelector('[name="music"]').checked = settings.music();
       for (const [name, value] of [['music-volume', settings.musicVolume()], ['ambient-volume', settings.ambientVolume()]]) {
@@ -311,6 +317,7 @@ export class Hud {
 
   /** Al abrir (no al redibujar) la ventana entra con su animación. */
   #reveal() {
+    this.menu.hidden = true;
     if (!this.modal.hidden) return;
     this.modal.hidden = false;
     this.modal.classList.add('opening');
@@ -522,8 +529,8 @@ export class Hud {
     if (this.eventEl.title !== title) this.eventEl.title = title;
   }
 
-  openGuide() {
-    openGuide(this);
+  openGuide(topic) {
+    openGuide(this, { topic });
   }
 
   openEvents() {
@@ -540,7 +547,7 @@ export class Hud {
       'events',
       `<div class="modal-card narrow">
         <div class="panel-head"><span class="panel-icon">📅</span><div><h3>Calendario del archipiélago</h3><div class="panel-lvl">Temporadas para todos los jugadores a la vez</div></div>
-        <button class="icon-btn" data-action="close-modal" title="Cerrar">✕</button></div>
+        <button class="icon-btn help-btn" data-guide="eventos" title="Qué es esto (guía)">?</button><button class="icon-btn" data-action="close-modal" title="Cerrar">✕</button></div>
         <h4>Ahora</h4>${row(cur, true)}
         <h4>Próximamente</h4>${next.map((ev) => row(ev, false)).join('')}
         <p class="muted small">Aprovecha la Fiebre del oro para guardar oro, el Festival de Poseidón para acumular favor o la Gran feria para cambiar en el mercado.</p>
@@ -796,6 +803,9 @@ export class Hud {
       case 'break-port':
         if (!confirm(game.state.occupied ? '¿Atacar a los invasores con todo lo que tienes en casa?' : '¿Atacar la flota que bloquea tu puerto con tus barcos de guerra?')) break;
         await this.#run(btn, () => game.breakPort(), null, 'sail');
+        break;
+      case 'guide':
+        openGuide(this, { topic: btn.dataset.topic });
         break;
       case 'mail-to':
         this.social.compose(btn.dataset.name);

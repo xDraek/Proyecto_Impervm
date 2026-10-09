@@ -248,6 +248,7 @@ function portSection(game) {
         ? 'Échalos con todo lo que tengas en casa (tropas y barcos), o pide a tu alianza que mande tropas de apoyo: al llegar lucharán contra ellos. Si los echas, el tributo apartado se queda en tu almacén.'
         : 'Ataca su flota con tus barcos de guerra (el faro les da más vida), o pide a tu alianza que mande tropas de apoyo: al llegar lucharán contra ella.'
     }</p>
+    <p class="small"><button class="link" data-action="guide" data-topic="invasiones">📖 Cómo librarte, en la guía</button></p>
     <button class="danger wide" data-action="break-port" ${ready ? '' : 'disabled'}>${occupied ? '⚔️ Expulsar a los invasores' : '⚔️ Romper el bloqueo'}</button>
     ${ready ? '' : `<p class="muted small">${occupied ? 'Entrena tropas en el cuartel para poder echarlos.' : 'Bota barcos de guerra para poder romperlo.'}</p>`}
   </div>`;
@@ -470,6 +471,27 @@ function buildingArt(id, level) {
   return `<div class="building-art${level > 0 ? '' : ' unbuilt'}"><img src="${url}" alt="" draggable="false" /><span class="art-tag">${tag}</span></div>`;
 }
 
+/** Tema de la guía que explica cada edificio. */
+const BUILDING_GUIDE = {
+  aserradero: 'recursos',
+  cantera: 'recursos',
+  granja: 'recursos',
+  mina: 'recursos',
+  fundicion: 'recursos',
+  almacen: 'recursos',
+  mercado: 'comercio',
+  academia: 'investigacion',
+  templo: 'templo',
+  cuartel: 'unidades',
+  puerto: 'flotas',
+  astillero: 'unidades',
+  muralla: 'defensa',
+  torre: 'defensa',
+  faro: 'defensa',
+  forja: 'combate',
+  taberna: 'mercenarios',
+};
+
 export function buildingPanel(hud, id) {
   const game = hud.game;
   const b = BUILDINGS[id];
@@ -490,6 +512,7 @@ export function buildingPanel(hud, id) {
         <h3>${b.name}</h3>
         <div class="panel-lvl">${level > 0 ? `Nivel ${level}` : 'Sin construir'}</div>
       </div>
+      <button class="icon-btn help-btn" data-action="guide" data-topic="${BUILDING_GUIDE[id] ?? 'edificios'}" title="Qué es esto (guía)">?</button>
       <button class="icon-btn" data-action="close" title="Cerrar">✕</button>
     </div>
     ${buildingArt(id, level)}

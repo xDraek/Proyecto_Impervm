@@ -3029,33 +3029,280 @@ input[type='text'] {
 
 /* ── Guía del juego ──────────────────────────────────────────────────────── */
 
+.modal-card.guide-card {
+  width: min(1040px, 100%);
+}
+
 .guide-search {
   width: 100%;
-  margin: 10px 0;
+  margin: 10px 0 12px;
   padding: 9px 12px;
   border-radius: 8px;
-  border: 1px solid rgba(255, 255, 255, 0.18);
+  border: 1px solid rgba(242, 201, 76, 0.3);
   background: rgba(0, 0, 0, 0.3);
   color: var(--text);
   font: inherit;
 }
 
-.guide-topic {
-  margin: 6px 0;
-  padding: 8px 12px;
-  border-radius: 10px;
-  border: 1px solid var(--panel-border);
+.guide-layout {
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr);
+  gap: 18px;
+  align-items: start;
 }
 
-.guide-topic summary {
-  cursor: pointer;
-  font-weight: 600;
+/* El índice se queda a la vista mientras bajas por el tema */
+.guide-nav {
+  position: sticky;
+  top: 0;
+  max-height: calc(100vh - 40px);
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(242, 201, 76, 0.35) transparent;
+  display: grid;
+  gap: 10px;
+  padding: 10px;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.22);
+  border: 1px solid rgba(242, 201, 76, 0.18);
+}
+
+.guide-chapter {
+  display: grid;
+  gap: 1px;
+}
+
+.guide-chapter h5 {
+  margin: 0 0 3px;
+  font-family: var(--font-title);
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
   color: var(--gold);
+  opacity: 0.85;
+}
+
+.guide-nav button {
+  padding: 4px 8px;
+  border: none;
+  border-left: 2px solid transparent;
+  border-radius: 0 4px 4px 0;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.guide-nav button:hover {
+  background: rgba(242, 201, 76, 0.08);
+}
+
+.guide-nav button.active {
+  border-left-color: var(--gold);
+  background: rgba(242, 201, 76, 0.14);
+  color: var(--gold);
+  font-weight: 600;
+}
+
+.guide-nav button.dim {
+  opacity: 0.35;
+}
+
+.guide-article {
+  min-width: 0;
+}
+
+.guide-crumb {
+  font-size: 12px;
+  color: var(--muted);
+  letter-spacing: 0.04em;
+}
+
+.guide-title {
+  margin: 2px 0 10px;
+  font-family: var(--font-title);
+  font-size: 20px;
+  color: var(--gold);
+}
+
+.guide-title .link {
+  font: inherit;
+  color: inherit;
+}
+
+.guide-body {
+  line-height: 1.55;
 }
 
 .guide-body p {
   margin: 8px 0;
-  line-height: 1.5;
+}
+
+.guide-body h5 {
+  margin: 18px 0 6px;
+  font-family: var(--font-title);
+  font-size: 14px;
+  color: var(--gold);
+  letter-spacing: 0.03em;
+}
+
+.guide-points,
+.guide-steps {
+  margin: 8px 0;
+  padding-left: 22px;
+}
+
+.guide-points li,
+.guide-steps li {
+  margin: 5px 0;
+}
+
+.guide-points li::marker {
+  color: var(--gold);
+}
+
+.guide-steps li::marker {
+  color: var(--gold);
+  font-weight: 700;
+}
+
+.guide-tip,
+.guide-warn {
+  margin: 12px 0 !important;
+  padding: 9px 12px;
+  border-radius: 6px;
+  border-left: 3px solid var(--gold);
+  background: rgba(242, 201, 76, 0.08);
+}
+
+.guide-warn {
+  border-left-color: var(--bad);
+  background: rgba(255, 122, 107, 0.08);
+}
+
+.guide-link {
+  font: inherit;
+  font-weight: 600;
+}
+
+.guide-table-wrap {
+  margin: 10px 0;
+  overflow-x: auto;
+  border-radius: 6px;
+  border: 1px solid rgba(242, 201, 76, 0.22);
+}
+
+.guide-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.guide-table th {
+  position: sticky;
+  top: 0;
+  padding: 7px 9px;
+  text-align: left;
+  font-weight: 600;
+  white-space: nowrap;
+  color: var(--gold);
+  background: rgba(30, 24, 14, 0.95);
+}
+
+.guide-table td {
+  padding: 7px 9px;
+  vertical-align: top;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.guide-table tbody tr:nth-child(even) td {
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.guide-table td .small {
+  display: block;
+  margin-top: 2px;
+  line-height: 1.35;
+}
+
+.guide-rarity {
+  color: var(--rar);
+  font-weight: 600;
+}
+
+.guide-chips {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 6px;
+  margin: 8px 0;
+  padding: 0;
+  list-style: none;
+}
+
+.guide-chips li {
+  display: grid;
+  padding: 7px 10px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(242, 201, 76, 0.18);
+}
+
+.guide-pager {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 22px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(242, 201, 76, 0.18);
+}
+
+.guide-result {
+  padding-bottom: 14px;
+  margin-bottom: 14px;
+  border-bottom: 1px solid rgba(242, 201, 76, 0.18);
+}
+
+.guide-body mark {
+  padding: 0 2px;
+  border-radius: 2px;
+  background: rgba(242, 201, 76, 0.45);
+  color: inherit;
+}
+
+/* En pantallas estrechas el índice es una tira de temas que se desliza */
+@media (max-width: 760px) {
+  .guide-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .guide-nav {
+    position: static;
+    max-height: none;
+    display: flex;
+    gap: 6px;
+    overflow-x: auto;
+    padding: 6px;
+  }
+
+  .guide-chapter {
+    display: flex;
+    gap: 4px;
+    flex: none;
+    align-items: center;
+  }
+
+  .guide-chapter h5 {
+    display: none;
+  }
+
+  .guide-nav button {
+    flex: none;
+    white-space: nowrap;
+    border-left: none;
+    border-radius: 4px;
+  }
 }
 
 /* ── Estandarte e historial ──────────────────────────────────────────────── */
@@ -3287,6 +3534,21 @@ input[type='text'] {
   text-shadow: 0 1px 0 rgba(0, 0, 0, 0.6);
 }
 
+/* Botón «?» de la cabecera: abre el tema de la guía que lo explica */
+.panel-head .help-btn {
+  font-family: var(--font-title);
+  font-weight: 700;
+  opacity: 0.8;
+}
+
+.panel-head .help-btn:hover {
+  opacity: 1;
+}
+
+.panel-head .help-btn + .icon-btn {
+  margin-left: -6px;
+}
+
 /* Títulos de sección con una línea que se desvanece */
 #panel h4,
 .modal-card h4 {
@@ -3374,8 +3636,7 @@ summary:focus-visible {
 /* Barras de desplazamiento finas y doradas */
 #sidebar,
 #panel,
-.modal-card,
-.guide-list {
+.modal-card {
   scrollbar-width: thin;
   scrollbar-color: rgba(242, 201, 76, 0.35) transparent;
 }
@@ -4424,11 +4685,91 @@ body.landing-mode #cam-controls {
   background: rgba(95, 62, 22, 0.26);
 }
 
-/* ── Volumen de la música en el menú de opciones ─────────────────────────── */
+/* ── Menú de opciones ────────────────────────────────────────────────────── */
 
-.menu label.volume {
-  gap: 6px;
-  padding-left: 22px;
+.menu {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 4px;
+  width: 340px;
+  max-width: calc(100vw - 40px);
+}
+
+.menu-group,
+.menu .menu-row {
+  min-width: 0;
+}
+
+.menu-user {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding-bottom: 10px;
+  margin-bottom: 2px;
+  border-bottom: none;
+}
+
+.menu-avatar {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  font-size: 18px;
+  background: radial-gradient(circle at 35% 30%, rgba(242, 201, 76, 0.35), rgba(242, 201, 76, 0.08));
+  border: 1px solid rgba(242, 201, 76, 0.55);
+}
+
+.menu-group {
+  display: grid;
+  gap: 2px;
+  padding: 8px 0 6px;
+  border-top: 1px solid rgba(242, 201, 76, 0.16);
+}
+
+.menu-group h5,
+.menu-links::before {
+  margin: 0 0 4px;
+  font-family: var(--font-title);
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--gold);
+  opacity: 0.85;
+}
+
+.menu .menu-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 30px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.menu label.menu-row:hover,
+.menu .volume label:hover {
+  background: rgba(242, 201, 76, 0.07);
+}
+
+.menu .volume {
+  cursor: default;
+}
+
+/* Casilla y nombre a la izquierda, siempre del mismo ancho, para que las barras queden alineadas */
+.menu .volume label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+  width: 108px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.menu .volume label.volume-name {
+  padding-left: 21px;
   cursor: default;
 }
 
@@ -4440,14 +4781,73 @@ body.landing-mode #cam-controls {
 }
 
 .menu .volume-pct {
-  width: 38px;
+  flex: none;
+  width: 42px;
+  white-space: nowrap;
   text-align: right;
   font-variant-numeric: tabular-nums;
   color: var(--muted);
   font-size: 12px;
 }
 
-/* El volumen del ambiente va sin casilla delante */
-.menu label.volume-solo {
-  padding-left: 0;
+.menu-links {
+  display: grid;
+  gap: 1px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(242, 201, 76, 0.16);
+}
+
+.menu-links::before {
+  content: 'Tu cuenta';
+  display: block;
+}
+
+.menu-links button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  min-height: 32px;
+  padding: 4px 8px;
+  border: none;
+  border-radius: 4px;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.menu-links button:hover {
+  background: rgba(242, 201, 76, 0.1);
+  color: var(--gold);
+}
+
+.menu-links .menu-logout {
+  margin-top: 4px;
+  color: var(--bad);
+}
+
+kbd {
+  display: inline-block;
+  min-width: 1.6em;
+  padding: 1px 5px;
+  border-radius: 4px;
+  border: 1px solid rgba(242, 201, 76, 0.4);
+  border-bottom-width: 2px;
+  background: rgba(0, 0, 0, 0.25);
+  font: 600 11px/1.4 var(--font-body, inherit);
+  text-align: center;
+  color: var(--text);
+}
+
+/* Dentro del pergamino (informes, tarjetas…), las filas de datos van en tinta sobre papel */
+.report .info-row,
+.report .effect,
+.card .info-row,
+.quest .info-row {
+  background: rgba(110, 70, 20, 0.08);
+  border-color: rgba(140, 95, 30, 0.45);
+  box-shadow: none;
+  color: var(--parch-ink);
 }
