@@ -1133,34 +1133,104 @@ function granja(level) {
   return g;
 }
 
+/**
+ * Fundición: el gran horno redondo de piedra que humea, un taller largo porticado con pilares de
+ * piedra y tejado de teja donde arden las fraguas, una grúa de madera que mueve el crisol, montones
+ * de mineral y carbón, lingotes apilados y bancales de piedra seca.
+ */
 function fundicion(level) {
   const g = new THREE.Group();
-  g.add(box(2.2, 1.3, 1.6, C.stoneDark, -0.3, 0, -0.5));
-  g.add(gableRoof(2.5, 0.7, 1.9, C.roofGrey, -0.3, 1.3, -0.5));
-  g.add(box(0.7, 0.6, 0.05, '#ff8a2a', -0.3, 0.1, 0.31, { emissive: '#ff6a00', emissiveIntensity: 1.2 }));
-  const chimneys = Math.min(3, 1 + Math.floor(level / 3));
-  for (let i = 0; i < chimneys; i++) {
-    const x = -1.0 + i * 0.7;
-    const h = 2.6 + i * 0.2;
-    g.add(box(0.35, h, 0.35, C.stone, x, 0, -1.0));
-    const smoke = new THREE.Group();
-    smoke.position.set(x, h + 0.2, -1.0);
-    for (let k = 0; k < 3; k++) {
-      const puff = mesh(new THREE.IcosahedronGeometry(0.18 + k * 0.06, 0), '#9a9a9a', { transparent: true, opacity: 0.7 });
-      puff.castShadow = false;
-      puff.position.set(k * 0.12, k * 0.3, 0);
-      smoke.add(puff);
-    }
-    smoke.userData.smoke = { phase: i * 1.7 };
-    g.add(smoke);
+  const fire = { emissive: '#ff5a00', emissiveIntensity: 1.6 };
+  // Patio de tierra quemada
+  g.add(cyl(2.0, 2.1, 0.03, 16, '#8d7a62', 0, 0, 0));
+  // Horno de cuba: torre redonda de piedra que se estrecha, con su aro, la boca encendida y humo
+  const fx = -1.25;
+  const fz = -1.0;
+  g.add(cyl(0.62, 0.78, 0.25, 12, C.stoneDark, fx, 0, fz));
+  g.add(cyl(0.5, 0.66, 2.0, 12, C.stone, fx, 0.25, fz));
+  g.add(cyl(0.56, 0.56, 0.14, 12, C.stoneDark, fx, 2.25, fz));
+  for (const y of [0.85, 1.55]) g.add(cyl(0.63 - y * 0.06, 0.63 - y * 0.06, 0.06, 12, '#9a8f7c', fx, y, fz));
+  g.add(box(0.36, 0.42, 0.1, '#ff8a2a', fx + 0.18, 0.3, fz + 0.62, fire));
+  g.add(box(0.5, 0.08, 0.12, C.stoneDark, fx + 0.18, 0.72, fz + 0.62));
+  g.add(smokeColumn(fx, 2.45, fz, 0.4));
+  if (level >= 6) g.add(smokeColumn(fx + 0.15, 2.45, fz - 0.1, 1.9));
+  // Taller porticado: muro de fondo, pilares de piedra al frente y tejado de teja a cuatro aguas
+  g.add(box(2.6, 1.2, 0.3, C.stone, 0.55, 0, -1.25));
+  for (const px of [-0.55, 0.2, 0.95, 1.7]) {
+    g.add(box(0.22, 0.12, 0.22, C.stoneDark, px, 0, 0.15));
+    g.add(box(0.17, 1.1, 0.17, C.stone, px, 0.12, 0.15));
+    g.add(box(0.24, 0.08, 0.24, C.stoneDark, px, 1.22, 0.15));
   }
-  // Yunque y lingotes
-  g.add(box(0.5, 0.35, 0.3, C.dark, 1.3, 0, 0.6));
-  g.add(box(0.7, 0.12, 0.3, '#4a4f57', 1.3, 0.35, 0.6, { metalness: 0.5, roughness: 0.4 }));
-  const ingots = Math.min(9, 2 + level);
+  g.add(box(2.6, 0.12, 0.2, C.wood, 0.55, 1.3, 0.15));
+  g.add(hipRoof(3.0, 1.85, 0.62, C.roofRed, 0.55, 1.42, -0.55));
+  // Fraguas encendidas bajo el pórtico, con su fuelle, yunques y el herrero
+  for (const [hx, hz] of [[-0.1, -0.85], [1.25, -0.85]]) {
+    g.add(box(0.6, 0.45, 0.45, C.stoneDark, hx, 0, hz));
+    g.add(box(0.42, 0.1, 0.3, '#ff7a1a', hx, 0.45, hz, fire));
+    const bellows = box(0.3, 0.12, 0.22, '#6b4a2a', hx - 0.42, 0.3, hz);
+    bellows.rotation.z = 0.2;
+    g.add(bellows);
+  }
+  g.add(box(0.28, 0.3, 0.22, C.dark, 0.55, 0, -0.35), box(0.48, 0.1, 0.22, '#4a4f57', 0.55, 0.3, -0.35, { metalness: 0.5, roughness: 0.4 }));
+  g.add(worker('martillo', 0.12, -0.35, 0.55, -0.35, { color: '#6b3a22', speed: 6.5, base: 0.95, amp: 0.45 }));
+  g.add(sparks(0.55, 0.42, -0.35, 6.5));
+  // Cobertizo a un lado con la grúa de madera que levanta el crisol
+  g.add(box(0.1, 1.0, 0.1, C.woodDark, 2.15, 0, -0.9), box(0.1, 1.0, 0.1, C.woodDark, 2.15, 0, -0.1));
+  const shedRoof = box(0.8, 0.06, 1.1, C.roofRed, 1.95, 1.0, -0.5);
+  shedRoof.rotation.z = -0.2;
+  g.add(shedRoof);
+  g.add(box(0.12, 2.0, 0.12, C.wood, 1.95, 0, 0.85));
+  const jib = new THREE.Group();
+  jib.position.set(1.95, 1.95, 0.85);
+  jib.add(box(1.2, 0.09, 0.09, C.woodLight, -0.45, 0, 0), box(0.015, 0.75, 0.015, '#3a2a1a', -0.9, -0.75, 0));
+  jib.add(cyl(0.12, 0.09, 0.2, 8, '#3a3a3a', -0.9, -0.95, 0), box(0.18, 0.04, 0.18, '#ff8a2a', -0.9, -0.77, 0, fire));
+  jib.userData.swing = { speed: 0.35, amp: 0.5 };
+  g.add(jib);
+  // Montones de mineral y de carbón
+  const heap = (x, z, color, n, s) => {
+    for (let k = 0; k < n; k++) {
+      const r = mesh(new THREE.DodecahedronGeometry(s * (0.7 + (k % 3) * 0.15)), color);
+      r.position.set(x + Math.sin(k * 2.4) * s * 0.8, s * 0.4 + (k > n / 2 ? s * 0.45 : 0), z + Math.cos(k * 2.4) * s * 0.8);
+      r.scale.y = 0.7;
+      g.add(r);
+    }
+  };
+  heap(-1.55, 0.55, '#5b5650', 7, 0.22);
+  heap(-0.75, 1.15, '#22201e', 6, 0.18);
+  // Carreta con mineral
+  const cart = new THREE.Group();
+  cart.add(box(0.6, 0.22, 0.4, C.wood, 0, 0.18, 0));
+  for (const sx of [-1, 1]) {
+    const wh = mesh(new THREE.CylinderGeometry(0.16, 0.16, 0.05, 10), C.woodDark);
+    wh.rotation.z = Math.PI / 2;
+    wh.position.set(sx * 0.33, 0.16, 0);
+    cart.add(wh);
+  }
+  for (let k = 0; k < 4; k++) {
+    const ore = mesh(new THREE.DodecahedronGeometry(0.1), '#6a645c');
+    ore.position.set(-0.15 + (k % 2) * 0.3, 0.45, -0.08 + Math.floor(k / 2) * 0.16);
+    cart.add(ore);
+  }
+  cart.position.set(-1.7, 0, 1.35);
+  cart.rotation.y = 0.5;
+  g.add(cart);
+  // Lingotes apilados en el patio (más con el nivel), de bronce y de hierro
+  const ingots = Math.min(12, 3 + level);
   for (let i = 0; i < ingots; i++) {
-    const layer = Math.floor(i / 3);
-    g.add(box(0.2, 0.14, 0.36, '#8fa3bf', 0.95 + (i % 3) * 0.24, layer * 0.14, -0.6, { metalness: 0.6, roughness: 0.35 }));
+    const layer = Math.floor(i / 4);
+    const k = i % 4;
+    const across = layer % 2 === 1;
+    const x = 0.65 + (across ? 0.18 : k * 0.2);
+    const z = 1.2 + (across ? k * 0.12 - 0.18 : 0);
+    const ing = box(across ? 0.36 : 0.14, 0.1, across ? 0.1 : 0.36, i % 3 ? '#b07a3a' : '#8fa3bf', x, layer * 0.1, z, { metalness: 0.6, roughness: 0.35 });
+    g.add(ing);
+  }
+  // Bancales de piedra seca al borde del patio
+  for (let k = 0; k < 7; k++) {
+    const st = mesh(new THREE.DodecahedronGeometry(0.17), k % 2 ? C.stone : C.stoneDark);
+    st.position.set(-2.0 + k * 0.32, 0.1, 1.9);
+    st.scale.set(1.3, 0.7, 0.9);
+    g.add(st);
   }
   return g;
 }
@@ -1887,8 +1957,8 @@ function astillero(level) {
 const FACTORIES = { ayuntamiento, aserradero, cantera, granja, mina, fundicion, mercado, almacen, academia, templo, cuartel, puerto, muralla, coloso, taberna, forja, torre, faro, astillero };
 
 // Los que no tienen sitio alrededor (están en la costa, sobre rocas o rodean la isla)
-// Sin enlosado delante: los del mar, la muralla, el coloso, la granja y el aserradero (son de campo)
-const NO_ADORN = new Set(['puerto', 'muralla', 'faro', 'astillero', 'coloso', 'granja', 'aserradero']);
+// Sin enlosado delante: los del mar, la muralla, el coloso y los talleres de campo (granja, aserradero, fundición)
+const NO_ADORN = new Set(['puerto', 'muralla', 'faro', 'astillero', 'coloso', 'granja', 'aserradero', 'fundicion']);
 
 /**
  * Escalones de prosperidad comunes a todos los edificios: con el nivel ganan un enlosado
