@@ -95,8 +95,9 @@
         <div id="visitor" hidden></div>
         <div id="vacation" hidden></div>
       </div>
-      <aside id="sidebar"></aside>
-      <section id="panel" hidden></section>
+      <!-- Los recuadros con marco de bronce: el contenido se desplaza dentro (.scroll) y los adornos quedan fijos -->
+      <aside id="sidebar"><div class="scroll"></div></aside>
+      <section id="panel" hidden><div class="scroll"></div></section>
       <section id="chat" hidden>
         <div class="panel-head"><span class="panel-icon">💬</span><div><h3>Chat</h3><div class="panel-lvl chat-sub">Todo el archipiélago lo lee</div></div>
           <button class="icon-btn" data-action="close-chat" title="Cerrar">✕</button></div>
@@ -107,7 +108,7 @@
         <div class="chat-log"></div>
         <form class="chat-form"><input name="text" maxlength="300" placeholder="Escribe un mensaje…" autocomplete="off" /><button class="primary small auto">Enviar</button></form>
       </section>
-      <div id="dock" hidden></div>
+      <div id="dock" hidden><div class="scroll"></div></div>
       <div id="cam-controls" hidden>
         <button class="icon-btn" data-cam="rotl" title="Girar a la izquierda (Q)" aria-label="Girar a la izquierda">⟲</button>
         <button class="icon-btn" data-cam="in" title="Acercar (+)" aria-label="Acercar">＋</button>

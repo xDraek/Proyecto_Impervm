@@ -3802,3 +3802,543 @@ body.landing-mode #cam-controls {
   gap: 4px;
   flex: none;
 }
+
+/* ── Marco clásico de los recuadros ──────────────────────────────────────── */
+
+/*
+ * Columnas de mármol, bandas con greca, capiteles y pedestales con laurel, medallón arriba y
+ * roseta abajo, y una cabecera de mármol. Las piezas (public/ui/marco-*) salen de la maqueta del
+ * marco (1356 x 1160) y aquí se colocan con sus coordenadas en ella multiplicadas por --fs (la
+ * escala del marco): el recuadro ocupa de x 40 a 1316 y de y 69 a 1110 de la maqueta.
+ *   ::before  bandas de arriba y abajo y fustes de las columnas (se repiten)
+ *   ::after   esquinas, medallón y roseta
+ * Los adornos sobresalen, así que lo que se desplaza va por dentro (.scroll) o es #modal.
+ */
+:root {
+  --navy: #141b1f;
+  --navy-hi: #1d272c;
+  --marble-ink: #3b2915;
+}
+
+#topbar,
+#sidebar,
+#panel,
+#chat,
+#dock,
+.menu,
+.modal-card,
+.auth,
+.world-stats {
+  --fs: 0.5;
+  --med: url('/ui/marco-medallon.png');
+  --ros: url('/ui/marco-roseta.png');
+  --pie-izq: url('/ui/marco-inf-izq.png');
+  --pie-der: url('/ui/marco-inf-der.png');
+  border: none;
+  border-radius: 0;
+  background: radial-gradient(ellipse at 50% 0%, var(--navy-hi), var(--navy) 70%);
+  backdrop-filter: none;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.55);
+  /* Dentro de las columnas, las bandas y los pedestales */
+  padding: calc(50px * var(--fs) + 12px) calc(66px * var(--fs) + 14px) calc(52px * var(--fs) + 16px);
+}
+
+.modal-card,
+.auth,
+.world-stats {
+  position: relative;
+}
+
+#topbar::before,
+#sidebar::before,
+#panel::before,
+#chat::before,
+#dock::before,
+.menu::before,
+.modal-card::before,
+.auth::before,
+.world-stats::before {
+  content: '';
+  position: absolute;
+  top: calc(-3px * var(--fs));
+  bottom: calc(-3px * var(--fs));
+  left: calc(5px * var(--fs));
+  right: calc(5px * var(--fs));
+  background:
+    url('/ui/marco-banda-sup.png') left top / calc(300px * var(--fs)) calc(53px * var(--fs)) repeat-x,
+    url('/ui/marco-banda-inf.png') left bottom / calc(300px * var(--fs)) calc(55px * var(--fs)) repeat-x,
+    url('/ui/marco-fuste-izq.png') left calc(-9px * var(--fs)) top / calc(70px * var(--fs)) calc(113px * var(--fs)) repeat-y,
+    url('/ui/marco-fuste-der.png') right calc(-10px * var(--fs)) top / calc(70px * var(--fs)) calc(113px * var(--fs)) repeat-y;
+  pointer-events: none;
+  z-index: 3;
+}
+
+#topbar::after,
+#sidebar::after,
+#panel::after,
+#chat::after,
+#dock::after,
+.menu::after,
+.modal-card::after,
+.auth::after,
+.world-stats::after {
+  content: '';
+  position: absolute;
+  top: calc(-69px * var(--fs));
+  bottom: calc(-50px * var(--fs));
+  left: calc(-40px * var(--fs));
+  right: calc(-40px * var(--fs));
+  background:
+    var(--med) center top calc(-22px * var(--fs)) / calc(360px * var(--fs)) calc(168px * var(--fs)) no-repeat,
+    var(--ros) center bottom calc(10px * var(--fs)) / calc(320px * var(--fs)) calc(110px * var(--fs)) no-repeat,
+    url('/ui/marco-sup-izq.png') left top / calc(200px * var(--fs)) calc(178px * var(--fs)) no-repeat,
+    url('/ui/marco-sup-der.png') right top / calc(200px * var(--fs)) calc(178px * var(--fs)) no-repeat,
+    var(--pie-izq) left bottom / calc(220px * var(--fs)) calc(240px * var(--fs)) no-repeat,
+    var(--pie-der) right bottom / calc(220px * var(--fs)) calc(240px * var(--fs)) no-repeat;
+  pointer-events: none;
+  z-index: 3;
+}
+
+/* Cabecera de mármol con el título en tinta oscura, de columna a columna */
+.modal-card > .panel-head:first-child,
+#panel > .scroll > .panel-head:first-child,
+#chat > .panel-head {
+  margin: -12px -14px 14px;
+  padding: 12px 14px;
+  background: url('/ui/marco-marmol.jpg') center / cover;
+  border: none;
+  border-image: none;
+  box-shadow:
+    inset 0 -3px 0 #b58d4e,
+    inset 0 -4px 0 #5a3d18,
+    0 3px 8px rgba(0, 0, 0, 0.45);
+}
+
+.modal-card > .panel-head:first-child h3,
+#panel > .scroll > .panel-head:first-child h3,
+#chat > .panel-head h3 {
+  color: var(--marble-ink);
+  text-shadow: 0 1px 0 rgba(255, 250, 235, 0.6);
+}
+
+.modal-card > .panel-head:first-child .panel-lvl,
+#panel > .scroll > .panel-head:first-child .panel-lvl,
+#chat > .panel-head .panel-lvl {
+  color: #5c4a33;
+}
+
+.panel-icon {
+  background: radial-gradient(circle at 35% 30%, #2c3a42, #0f161a 75%);
+  border: 2px solid #c9a35e;
+  box-shadow:
+    inset 0 0 10px rgba(0, 0, 0, 0.7),
+    0 0 0 2px rgba(60, 40, 15, 0.5);
+}
+
+/* El botón de cerrar de las cabeceras: un medallón oscuro con aro de oro */
+.modal-card > .panel-head:first-child .icon-btn,
+#panel > .scroll > .panel-head:first-child .icon-btn,
+#chat > .panel-head .icon-btn {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  color: #e6c780;
+  background: radial-gradient(circle at 35% 30%, #2c3a42, #0f161a 75%);
+  border: 2px solid #c9a35e;
+}
+
+/* ── Tamaños según el recuadro ── */
+
+.modal-card {
+  --fs: 0.5;
+}
+
+/* Los paneles de los lados, más finos y sin medallón ni roseta */
+#sidebar,
+#panel,
+#chat,
+#dock,
+.menu,
+.auth,
+.world-stats {
+  --fs: 0.34;
+  --med: none;
+}
+
+#sidebar,
+.menu {
+  --ros: none;
+}
+
+/* La entrada al juego, con su medallón */
+.auth {
+  --fs: 0.4;
+  --med: url('/ui/marco-medallon.png');
+}
+
+.world-stats:empty {
+  display: none;
+}
+
+/* La barra de arriba: columnas a los lados con su capitel, sin pedestales */
+#topbar {
+  --fs: 0.3;
+  --med: none;
+  --ros: none;
+  --pie-izq: none;
+  --pie-der: none;
+  top: 24px;
+  left: 20px;
+  right: 20px;
+  padding: calc(50px * var(--fs) + 6px) calc(66px * var(--fs) + 12px) calc(52px * var(--fs) + 6px);
+}
+
+#dock {
+  --ros: none;
+}
+
+/* Los paneles se apartan de los bordes de la pantalla para que quepan los capiteles */
+#sidebar {
+  left: 20px;
+  width: 236px;
+  max-height: calc(100vh - var(--top) - 26px);
+}
+
+/* Abajo queda sitio para los pedestales */
+#panel {
+  max-height: calc(100vh - var(--top) - 26px);
+}
+
+.menu {
+  right: 20px;
+}
+
+#panel,
+#chat {
+  right: 20px;
+  width: 380px;
+}
+
+#panel:not([hidden]) ~ #cam-controls,
+#chat:not([hidden]) ~ #cam-controls {
+  right: 412px;
+}
+
+#dock {
+  bottom: 22px;
+}
+
+/* Lo que se desplaza va por dentro del marco */
+#sidebar,
+#panel,
+#dock {
+  display: flex;
+  flex-direction: column;
+  overflow: visible;
+}
+
+#sidebar > .scroll,
+#panel > .scroll,
+#dock > .scroll {
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(242, 201, 76, 0.35) transparent;
+}
+
+#sidebar,
+#panel,
+#dock {
+  padding: calc(50px * var(--fs) + 2px) calc(66px * var(--fs) + 2px) calc(52px * var(--fs) + 4px);
+}
+
+#sidebar > .scroll {
+  padding: 10px;
+}
+
+#panel > .scroll {
+  padding: 12px 14px 14px;
+}
+
+#dock > .scroll {
+  display: grid;
+  gap: 8px;
+  padding: 8px 12px;
+}
+
+#sidebar > .scroll::-webkit-scrollbar,
+#panel > .scroll::-webkit-scrollbar,
+#dock > .scroll::-webkit-scrollbar {
+  width: 8px;
+}
+
+#sidebar > .scroll::-webkit-scrollbar-thumb,
+#panel > .scroll::-webkit-scrollbar-thumb,
+#dock > .scroll::-webkit-scrollbar-thumb {
+  border-radius: 4px;
+  background: rgba(242, 201, 76, 0.3);
+}
+
+/* Las ventanas crecen con su contenido y lo que se desplaza es el fondo oscuro de detrás */
+#modal {
+  overflow-y: auto;
+  place-items: start center;
+  padding: 64px 36px 44px;
+}
+
+.modal-card {
+  margin: auto 0;
+  max-height: none;
+  overflow: visible;
+}
+
+@media (max-width: 800px) {
+  .modal-card {
+    --fs: 0.34;
+  }
+
+  #sidebar,
+  #panel,
+  #chat,
+  #dock,
+  .menu {
+    --fs: 0.26;
+  }
+
+  #topbar {
+    --fs: 0.24;
+    top: 16px;
+    left: 12px;
+    right: 12px;
+  }
+
+  #sidebar {
+    left: 12px;
+    right: 12px;
+    width: auto;
+  }
+
+  #sidebar > .scroll {
+    padding: 4px 8px;
+    overflow-x: auto;
+    overflow-y: hidden;
+  }
+
+  #panel,
+  #chat {
+    left: 12px;
+    right: 12px;
+    width: auto;
+  }
+
+  #modal {
+    padding: 44px 16px 28px;
+  }
+}
+
+/* ── Tarjetas y botones de pergamino ─────────────────────────────────────── */
+
+/*
+ * Las tarjetas (tropas, investigaciones, misiones, informes, ofertas…) y los botones secundarios
+ * son de pergamino con marco de oro y tinta oscura, como en la maqueta del marco. Dentro del
+ * pergamino se redefinen los colores de texto para que todo lo que usa var(--text), var(--muted),
+ * var(--gold), var(--ok) o var(--bad) se lea bien sin tocar cada regla.
+ */
+:root {
+  --parch-noise: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0.42 0 0 0 0 0.3 0 0 0 0 0.14 0 0 0 0.16 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  --parch-stain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='420' height='260'%3E%3Cfilter id='s'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.012 0.02' numOctaves='3' seed='4' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0.55 0 0 0 0 0.38 0 0 0 0 0.16 0 0 0 0.5 -0.12'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23s)'/%3E%3C/svg%3E");
+  --parch:
+    radial-gradient(ellipse at 50% 45%, rgba(255, 250, 230, 0.5), rgba(255, 250, 230, 0) 65%),
+    radial-gradient(ellipse at 50% 50%, transparent 55%, rgba(125, 82, 30, 0.3) 100%),
+    var(--parch-stain), var(--parch-noise), #e8d6b0;
+  --parch-gold: #c49b55;
+  --parch-ink: #33240f;
+}
+
+.card,
+.army-card,
+.quest,
+.report,
+.offer,
+.daily li,
+.medals li,
+.skill,
+.relic,
+.friend,
+.post,
+.diplo-row {
+  --text: var(--parch-ink);
+  --muted: #6a573d;
+  --gold: #8a5a10;
+  --ok: #2f6e22;
+  --bad: #a32a1a;
+  --panel-border: rgba(140, 95, 30, 0.6);
+  color: var(--parch-ink);
+  background: var(--parch);
+  border: 2px solid var(--parch-gold);
+  border-radius: 4px;
+  box-shadow:
+    0 0 0 1px #3d2a12,
+    inset 0 0 0 1px rgba(255, 245, 215, 0.65),
+    inset 0 0 16px rgba(110, 70, 20, 0.28),
+    0 3px 8px rgba(0, 0, 0, 0.45);
+}
+
+/* Los nombres, en letra romana */
+.card-title b,
+.army-card b,
+.quest b,
+.army-card span:not(.muted) {
+  font-family: var(--font-title);
+}
+
+/* Los estados se siguen viendo en el borde */
+.card.active,
+.daily li.today,
+.medals li.got {
+  border-color: #e0b45c;
+  box-shadow:
+    0 0 0 1px #3d2a12,
+    0 0 0 3px rgba(242, 201, 76, 0.35),
+    inset 0 0 0 1px rgba(255, 245, 215, 0.7),
+    inset 0 0 16px rgba(110, 70, 20, 0.22),
+    0 3px 8px rgba(0, 0, 0, 0.45);
+}
+
+.quest.done {
+  border-color: #6f9d4a;
+}
+
+.report,
+.offer {
+  border-left-width: 5px;
+}
+
+.report.victoria {
+  border-left-color: #3f8a2c;
+}
+
+.report.derrota {
+  border-left-color: #b03a26;
+}
+
+.relic {
+  border-color: color-mix(in srgb, var(--rarity) 70%, #8a6a3a);
+}
+
+.card:not(.locked):hover {
+  border-color: #dcb066;
+  background: var(--parch);
+  filter: brightness(1.04);
+}
+
+/* Lo que va dentro del pergamino: fichas de coste, etiquetas, barras y campos claros */
+:is(.card, .army-card, .quest, .report, .offer, .daily li, .medals li, .skill, .relic, .friend, .post, .diplo-row) :is(.costs li, .card-lvl, .badge-soft) {
+  background: rgba(95, 62, 22, 0.12);
+  color: var(--parch-ink);
+}
+
+:is(.card, .army-card, .quest, .report, .offer, .daily li, .medals li, .skill, .relic, .friend, .post, .diplo-row) .costs li.missing {
+  background: rgba(163, 42, 26, 0.14);
+  color: var(--bad);
+}
+
+:is(.card, .army-card, .quest, .report, .offer, .daily li, .medals li, .skill, .relic, .friend, .post, .diplo-row) :is(.progress, .q-bar, .favor-bar) {
+  background: rgba(80, 52, 20, 0.18);
+}
+
+:is(.card, .army-card, .quest, .report, .offer, .daily li, .medals li, .skill, .relic, .friend, .post, .diplo-row) :is(input, select) {
+  color: var(--parch-ink);
+  background: rgba(255, 250, 235, 0.6);
+  border-color: rgba(120, 82, 30, 0.55);
+}
+
+.card-art,
+.army-card img {
+  border: 2px solid var(--parch-gold);
+  border-radius: 3px;
+  box-shadow:
+    0 0 0 1px #3d2a12,
+    inset 0 0 12px rgba(0, 0, 0, 0.45);
+}
+
+/* Cifras del ejército: recuadros oscuros con filete de oro */
+.army-stats > div,
+.info-row,
+.effect {
+  background: rgba(8, 13, 16, 0.55);
+  border: 1px solid rgba(201, 163, 94, 0.55);
+  border-radius: 3px;
+  box-shadow: inset 0 0 0 1px rgba(255, 235, 190, 0.08);
+}
+
+/* Botones secundarios: pergamino con marco de oro y letra romana */
+.ghost {
+  color: var(--parch-ink);
+  background: var(--parch);
+  border: 2px solid var(--parch-gold);
+  border-radius: 4px;
+  font-family: var(--font-title);
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  box-shadow:
+    0 0 0 1px #3d2a12,
+    inset 0 0 0 1px rgba(255, 245, 215, 0.6),
+    inset 0 -2px 6px rgba(110, 70, 20, 0.3),
+    0 2px 5px rgba(0, 0, 0, 0.4);
+}
+
+.ghost:hover:not(:disabled) {
+  border-color: #e0b45c;
+  filter: brightness(1.06);
+}
+
+.ghost:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+.ghost:disabled {
+  opacity: 0.55;
+  filter: grayscale(0.4);
+  cursor: not-allowed;
+}
+
+/* El botón principal: oro con su marco */
+.primary {
+  border: 2px solid #8a5f1e;
+  border-radius: 4px;
+  font-family: var(--font-title);
+  font-weight: 700;
+  box-shadow:
+    0 0 0 1px #3d2a12,
+    inset 0 1px 0 rgba(255, 255, 255, 0.5),
+    inset 0 -2px 0 rgba(120, 80, 10, 0.35),
+    0 2px 6px rgba(0, 0, 0, 0.35);
+}
+
+/* Los estados que antes cambiaban el fondo: el pergamino se queda, el estado va en el borde */
+.card.active,
+.daily li.today,
+.medals li.got,
+.quest.done,
+.relic.on {
+  background: var(--parch);
+}
+
+.quest.done {
+  box-shadow:
+    0 0 0 1px #3d2a12,
+    0 0 0 3px rgba(111, 160, 70, 0.45),
+    inset 0 0 0 1px rgba(255, 245, 215, 0.7),
+    inset 0 0 16px rgba(110, 70, 20, 0.22),
+    0 3px 8px rgba(0, 0, 0, 0.45);
+}
+
+.relic.on {
+  box-shadow:
+    0 0 0 1px #3d2a12,
+    0 0 12px color-mix(in srgb, var(--rarity) 45%, transparent),
+    inset 0 0 0 1px rgba(255, 245, 215, 0.7),
+    inset 0 0 16px rgba(110, 70, 20, 0.22);
+}

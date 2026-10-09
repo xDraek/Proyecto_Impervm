@@ -44,9 +44,12 @@ export class Hud {
     this.chatChannel = 'global';
     this.rankTab = 'players';
 
-    this.panel = $('#panel');
-    this.sidebar = $('#sidebar');
-    this.dock = $('#dock');
+    // El marco (lo que se muestra u oculta) y dentro, el contenido que se desplaza
+    this.panelBox = $('#panel');
+    this.panel = $('#panel > .scroll');
+    this.sidebar = $('#sidebar > .scroll');
+    this.dockBox = $('#dock');
+    this.dock = $('#dock > .scroll');
     this.alert = $('#alert');
     this.modal = $('#modal');
     this.viewBtn = $('#view-btn');
@@ -234,10 +237,11 @@ export class Hud {
     game.addEventListener('offline', () => ($('#offline').hidden = false));
     game.addEventListener('online', () => ($('#offline').hidden = true));
 
-    // Los paneles empiezan justo debajo de la barra superior, mida lo que mida
+    // Los paneles empiezan debajo de la barra superior, mida lo que mida (con sitio para los
+    // adornos de su marco, que sobresalen por arriba)
     const topbar = $('#topbar');
     new ResizeObserver(() => {
-      document.documentElement.style.setProperty('--top', `${topbar.getBoundingClientRect().bottom + 10}px`);
+      document.documentElement.style.setProperty('--top', `${topbar.getBoundingClientRect().bottom + 30}px`);
     }).observe(topbar);
 
     this.render();
@@ -567,7 +571,7 @@ export class Hud {
   #renderPanel() {
     const id = this.selected;
     if (!id || (!BUILDINGS[id] && !this.game.world.island(id))) {
-      this.panel.hidden = true;
+      this.panelBox.hidden = true;
       this.panelView = null;
       this.panelId = null;
       this.cache.panel = '';
@@ -575,7 +579,7 @@ export class Hud {
     }
     const view = BUILDINGS[id] ? buildingPanel(this, id) : islandPanel(this, id);
     this.panelView = view;
-    this.panel.hidden = false;
+    this.panelBox.hidden = false;
     if (this.panelId === id && this.cache.panel === view.html) return;
 
     // Conservar lo que haya escrito el jugador si sigue en el mismo panel
@@ -841,7 +845,7 @@ export class Hud {
       );
     }
     this.#setHtml(this.dock, 'dock', rows.join(''));
-    this.dock.hidden = !rows.length;
+    this.dockBox.hidden = !rows.length;
   }
 
   async #onDockClick(e) {
