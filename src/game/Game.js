@@ -37,7 +37,7 @@ import {
   WONDER_RESOURCES,
   WORK,
 } from './data.js';
-import { battle, count, hasCombat } from './combat.js';
+import { assault, battle, count, hasCombat, keepAboard, seatsOf, splitForces } from './combat.js';
 import {
   HOUR_MS,
   buildSeconds,
@@ -71,6 +71,7 @@ import {
   travelSeconds,
   unitSeconds,
   wallBonus,
+  navalDefense,
 } from './rules.js';
 
 export const SAVE_VERSION = 4;
@@ -1307,7 +1308,7 @@ export class Game extends EventTarget {
       empate: joint ? `${attackerName} se retiran de tu isla` : `${attackerName} se retira de tu isla`,
       derrota: joint ? `${attackerName} han saqueado tu isla` : `${attackerName} ha saqueado tu isla`,
     }[outcome];
-    this.#report({ t, kind: 'defensa', outcome, title, islandName, battle: pick(result), loot: stolen, towers: wall.towers, enemy: attackerName });
+    this.#report({ t, kind: 'defensa', outcome, title, text: defenseText(result) || undefined, islandName, battle: pick(result), loot: stolen, towers: wall.towers, enemy: attackerName });
     this.#note(`⚔️ ${title}`, outcome === 'derrota' ? 'error' : 'success');
     this.#dirty = true;
     return { result, stolen: stolen ?? {} };
@@ -1740,7 +1741,7 @@ export class Game extends EventTarget {
     }
     const { atkMul, hpMul } = playerCombat(this.state);
     const heroAtk = m.hero ? this.heroBonus('ataque') : 0;
-    const result = battle({ units: m.units, atkMul: atkMul + heroAtk, hpMul }, { units: h.garrison });
+    const result = assault({ units: m.units, atkMul: atkMul + heroAtk, hpMul }, { units: h.garrison });
     if (m.hero) this.#heroXp(result.def.lost, t);
     const killed = count(result.def.lost);
     h.garrison = Object.fromEntries(Object.entries(result.def.left).filter(([, n]) => n > 0));
@@ -1881,7 +1882,7 @@ export class Game extends EventTarget {
       this.state.stats.pvpWins++;
     }
     const title = { victoria: `Has saqueado ${isl.name}`, derrota: `Derrota en ${isl.name}`, empate: `Retirada de ${isl.name}` }[outcome];
-    const text = [names.length ? `🤝 Ataque conjunto con ${names.join(', ')}. El botín se reparte según la bodega de cada uno.` : '', warText].filter(Boolean).join(' ') || undefined;
+    const text = [phaseText(result), names.length ? `🤝 Ataque conjunto con ${names.join(', ')}. El botín se reparte según la bodega de cada uno.` : '', warText].filter(Boolean).join(' ') || undefined;
     this.#report({ t, kind: 'ataque', island: isl.id, islandName: isl.name, outcome, title, text, battle: battleLog, loot: loots[0], enemy, pvp: true });
     this.#note(`⚔️ ${title}${fmtBag(loots[0]) ? ` · botín ${fmtBag(loots[0])}` : ''}`, outcome === 'victoria' ? 'success' : 'error');
 
@@ -1954,7 +1955,8 @@ export class Game extends EventTarget {
     const siege = Object.entries(m.units).reduce((s, [id, n]) => s + (UNITS[id].siege ?? 0) * n, 0);
     const wall = Math.max(0, (isl.wall ?? 0) - siege);
     const heroAtk = m.hero ? this.heroBonus('ataque') : 0;
-    const result = battle({ units: m.units, atkMul: atkMul + heroAtk, hpMul }, { units: garrison, hpMul: 1 + wall });
+    // Primero las flotas y, con el mar libre, el desembarco contra la guarnición y su fortificación
+    const result = assault({ units: m.units, atkMul: atkMul + heroAtk, hpMul }, { units: garrison, wallHp: wall });
     if (m.hero) this.#heroXp(result.def.lost, t);
     this.state.stats.kills += count(result.def.lost);
 
@@ -1963,8 +1965,9 @@ export class Game extends EventTarget {
     m.units = result.att.left;
     this.#mercsLost(result.att.lost);
 
+    // Solo saquean las tropas que han desembarcado
     let loot = null;
-    if (result.winner === 'att') {
+    if (result.winner === 'att' && result.landed) {
       let capacity = 0;
       for (const [id, n] of Object.entries(m.units)) capacity += n * (UNITS[id].cargo ?? 0);
       if (m.hero) capacity = Math.floor(capacity * (1 + this.heroBonus('botin')));
@@ -1994,7 +1997,7 @@ export class Game extends EventTarget {
       empate: `Retirada en ${isl.name}`,
     }[outcome];
     if (isl.type === 'ruinas') loot = { ...m.cargo };
-    const text = razed ? 'No queda nadie en la isla: está arrasada y no habrá nada que saquear hasta que vuelvan a poblarla.' : undefined;
+    const text = [phaseText(result), razed ? 'No queda nadie en la isla: está arrasada y no habrá nada que saquear hasta que vuelvan a poblarla.' : ''].filter(Boolean).join(' ') || undefined;
     this.#report({ t, kind: 'ataque', island: isl.id, islandName: isl.name, outcome, title, text, battle: pick(result), loot, wall });
     this.#note(
       outcome === 'victoria' ? `⚔️ ${title}${loot && fmtBag(loot) ? ` · botín ${fmtBag(loot)}` : ''}` : `⚔️ ${title}`,
@@ -2114,19 +2117,26 @@ export class Game extends EventTarget {
     } else if (roll < 0.66) {
       Object.assign(report, { title: 'Solo niebla', text: 'Días de niebla, gaviotas y silencio. La flota vuelve sin nada que contar.' });
     } else if (roll < 0.78) {
+      // Es una batalla en el mar: luchan los barcos y, si se hunden, las tropas que no caben se ahogan
       const pirata = Math.max(3, Math.round((power / 11) * (0.4 + Math.random() * 0.5)));
-      const army = { pirata, corsario: Math.floor(pirata / 12) };
+      const army = { corsario: Math.max(1, Math.round(pirata * 0.45)) };
       const { atkMul, hpMul } = playerCombat(s);
-      const result = battle({ units: army }, { units: m.units, atkMul, hpMul });
+      const { sea, land } = splitForces(m.units);
+      const fight = battle({ units: army }, { units: sea, atkMul, hpMul });
+      const { aboard, drowned } = keepAboard(land, seatsOf(fight.def.left));
+      const left = { ...fight.def.left, ...aboard };
+      const lostAll = {};
+      for (const [id, n] of Object.entries(m.units)) if (n - (left[id] ?? 0) > 0) lostAll[id] = n - (left[id] ?? 0);
+      const result = { ...fight, def: { start: { ...m.units }, left, lost: lostAll }, naval: fight, drowned, seaWon: true, landed: false, atSea: true };
       s.stats.kills += count(result.att.lost);
-      m.units = result.def.left;
-      this.#mercsLost(result.def.lost);
+      m.units = Object.fromEntries(Object.entries(left).filter(([, n]) => n > 0));
+      this.#mercsLost(lostAll);
       const won = result.winner !== 'att';
       const loot = won ? { oro: 15 * pirata } : null;
       if (loot) add(loot);
       Object.assign(report, {
         title: won ? 'Emboscada pirata rechazada' : 'Emboscada pirata',
-        text: won ? 'Unos piratas os atacan entre la niebla, pero tu flota los pone en fuga.' : 'Unos piratas os atacan entre la niebla y hunden tu flota.',
+        text: (won ? 'Unos corsarios os atacan entre la niebla, pero tu flota los pone en fuga.' : 'Unos corsarios os atacan entre la niebla y hunden tu flota.') + (count(drowned) ? ` Se ahogan ${count(drowned)} soldados que ya no cabían a bordo.` : ''),
         battle: pick(result),
         loot,
         outcome: won ? 'victoria' : 'derrota',
@@ -2203,7 +2213,15 @@ export class Game extends EventTarget {
     for (const pool of pools) for (const [id, n] of Object.entries(pool.units)) if (n > 0) combined[id] = (combined[id] ?? 0) + n;
     const heroHome = this.heroStatus(t) === 'casa';
     const heroDef = heroHome ? this.heroBonus('defensa') : 0;
-    const result = battle(attacker, { units: combined, atkMul: mine.atkMul, hpMul: mine.hpMul + wall.hp + aegis + heroDef, extraAtk: wall.towers });
+    // Primero tu flota (con el faro) contra la suya; si la vences, no llegan a desembarcar
+    const result = assault(attacker, {
+      units: combined,
+      atkMul: mine.atkMul,
+      hpMul: mine.hpMul + aegis + heroDef,
+      navalHpMul: navalDefense(this.level('faro')),
+      wallHp: wall.hp,
+      extraAtk: wall.towers,
+    }, { needLanding: true });
     s.stats.kills += count(result.att.lost);
     if (heroHome) {
       this.#heroXp(result.att.lost, t);
@@ -2271,7 +2289,7 @@ export class Game extends EventTarget {
       empate: 'Los piratas se retiran',
       derrota: 'Los piratas han saqueado la isla',
     }[outcome];
-    this.#report({ t, kind: 'defensa', outcome, title, battle: pick(result), loot: stolen, reward, towers: wall.towers });
+    this.#report({ t, kind: 'defensa', outcome, title, text: defenseText(result) || undefined, battle: pick(result), loot: stolen, reward, towers: wall.towers });
     this.#note(`🏴‍☠️ ${title}${stolen ? ` · se llevan ${fmtBag(stolen)}` : ''}`, outcome === 'derrota' ? 'error' : 'success');
     s.raid = null;
     s.nextRaidAt = t + hours(RAID_MIN_H + Math.random() * (RAID_MAX_H - RAID_MIN_H));
@@ -2381,12 +2399,39 @@ function takeLoot(stock, capacity, share = LOOT_SHARE) {
 }
 
 function pick(result) {
-  return {
+  const phase = (b) => b && { rounds: b.rounds, att: { start: b.att.start, lost: b.att.lost }, def: { start: b.def.start, lost: b.def.lost }, log: b.log };
+  const out = {
     rounds: result.rounds,
     att: { start: result.att.start, lost: result.att.lost },
     def: { start: result.def.start, lost: result.def.lost },
     log: result.log,
   };
+  // Ataques por mar: la batalla naval y la de tierra por separado, y las tropas ahogadas
+  if ('seaWon' in result) {
+    Object.assign(out, { naval: phase(result.naval), land: phase(result.land), seaWon: result.seaWon, landed: result.landed });
+    if (result.atSea) out.atSea = true;
+    if (count(result.drowned ?? {})) out.drowned = result.drowned;
+  }
+  return out;
+}
+
+/** Lo mismo, visto desde la ciudad que se defiende. */
+function defenseText(result) {
+  if (!('seaWon' in result)) return '';
+  if (!result.seaWon) return 'Tu flota les cierra el paso: no han podido desembarcar.';
+  if (result.naval) return result.landed ? 'Han vencido a tu flota y desembarcan.' : 'Han vencido a tu flota, pero no traían tropas para desembarcar.';
+  return result.landed ? '' : 'Se acercan con sus barcos, pero no traen tropas para desembarcar.';
+}
+
+/** Una frase con lo que ha pasado en el mar (para los informes de ataque). */
+function phaseText(result) {
+  const drowned = count(result.drowned ?? {});
+  const parts = [];
+  if (!result.seaWon) parts.push('La flota enemiga os cierra el paso: no habéis podido desembarcar.');
+  else if (result.naval) parts.push('Vuestra flota se hace con el mar.');
+  if (drowned) parts.push(`Se ahogan ${drowned} soldados que ya no cabían en los barcos.`);
+  if (result.seaWon && !result.landed && result.winner !== 'att') parts.push('No lleváis tropas de tierra para desembarcar.');
+  return parts.join(' ');
 }
 
 /**

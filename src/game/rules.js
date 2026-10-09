@@ -108,6 +108,11 @@ export function playerCombat(state) {
   };
 }
 
+/** Vida extra de tus barcos cuando defienden tu ciudad: el faro guía a los tuyos (+4 % por nivel). */
+export function navalDefense(faroLevel) {
+  return 0.04 * faroLevel;
+}
+
 /** Defensa de la muralla; la torre de vigía añade arqueros a las torres. */
 export function wallBonus(level, watch = 0) {
   return { hp: 0.1 * level, towers: 10 * level + 8 * watch };

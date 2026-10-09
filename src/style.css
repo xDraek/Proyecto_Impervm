@@ -1132,6 +1132,16 @@ select:focus {
   font-family: var(--font-title);
 }
 
+/* Ataques por mar: la batalla naval y la de tierra, una debajo de otra */
+.r-body .phase-head {
+  margin: 12px 0 6px;
+  padding-bottom: 3px;
+  border-bottom: 1px solid color-mix(in srgb, var(--gold) 35%, transparent);
+  color: var(--gold);
+  font-family: var(--font-title);
+  font-size: 13px;
+}
+
 .battle table {
   width: 100%;
   border-collapse: collapse;

@@ -32,9 +32,11 @@ const TOPICS = [
     icon: '⚔️',
     title: 'Tropas, barcos y combate',
     body: `<p>El cuartel entrena tropas de tierra y el puerto construye barcos. Las tropas viajan dentro de los barcos (cada barco tiene plazas) y los barcos cargan el botín.</p>
-      <p>El combate dura hasta 6 asaltos: los dos bandos disparan a la vez y el daño se reparte entre los tipos de unidad. Los barcos sin ataque (mercantes, botes) solo caen si cae todo tu ejército.</p>
+      <p>Los ataques van en <b>dos fases</b>. Primero la <b>batalla naval</b>: tus barcos de guerra contra los suyos. Si su flota sigue a flote, no puedes desembarcar y vuelves con lo que quede. Si los barcos que se hunden ya no tienen sitio para tus tropas, las que no caben se ahogan: protege a tus mercantes.</p>
+      <p>Con el mar libre llega el <b>desembarco</b>: tus tropas de tierra contra las suyas, y tus barcos de guerra bombardean la costa con una cuarta parte de su ataque. Sin tropas de tierra no se puede saquear. Si pierdes en tierra, los barcos vuelven con los supervivientes.</p>
+      <p>Cada batalla dura hasta 6 asaltos: los dos bandos disparan a la vez y el daño se reparte entre los tipos de unidad. Los barcos sin ataque (mercantes, botes) solo caen cuando ya no queda ningún barco de guerra que los proteja.</p>
       <p><b>Tropas de élite</b> ⭐ (espartanos, arqueros cretenses, catafractos, elefantes de guerra y liburnas): mucho más fuertes, pero además de comer cobran una <b>paga en oro</b> cada hora. Si el oro se acaba, desertan las que no puedas pagar. Se desbloquean con la investigación <b>Táctica militar</b> (y los elefantes con <b>Doma de elefantes</b>).</p>
-      <p>La <b>muralla</b> da vida a los defensores y sus torres disparan; la <b>torre de vigía</b> añade arqueros. Las <b>catapultas</b> abren brecha en las fortificaciones enemigas. Usa el <b>simulador</b> 🎲 antes de atacar.</p>`,
+      <p>En tu ciudad, tu flota es la primera línea: si vence a la del enemigo, no llegan a desembarcar. El <b>faro</b> da más vida a tus barcos cuando defienden. En tierra, la <b>muralla</b> da vida a los defensores y sus torres disparan; la <b>torre de vigía</b> añade arqueros. Las <b>catapultas</b> abren brecha en las fortificaciones enemigas. Usa el <b>simulador</b> 🎲 antes de atacar.</p>`,
   },
   {
     icon: '⛵',

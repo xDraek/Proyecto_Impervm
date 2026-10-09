@@ -35,7 +35,8 @@ export function playReplay(btn, r) {
   const box = btn.nextElementSibling;
   if (!box) return;
   btn.disabled = true;
-  const b = r.battle;
+  // En los ataques por mar, cada fase (naval o en tierra) tiene su propia repetición
+  const b = (btn.dataset.phase && r.battle[btn.dataset.phase]) || r.battle;
   const frames = [{ att: b.att.start, def: b.def.start }, ...b.log];
   const { attTitle, defTitle } = sideTitles(r);
   const sideHtml = (key, title) =>
@@ -49,7 +50,7 @@ export function playReplay(btn, r) {
     i++;
     const round = box.querySelector('.rp-round');
     if (i >= frames.length) {
-      const verdict = { victoria: '🏆 Victoria', derrota: '💀 Derrota', empate: '🏳️ Nadie gana' }[r.outcome] ?? 'Fin del combate';
+      const verdict = btn.dataset.phase ? 'Fin de la batalla' : ({ victoria: '🏆 Victoria', derrota: '💀 Derrota', empate: '🏳️ Nadie gana' }[r.outcome] ?? 'Fin del combate');
       round.textContent = `${verdict} · ${b.rounds} ${b.rounds === 1 ? 'asalto' : 'asaltos'}`;
       round.classList.add('done');
       btn.disabled = false;
@@ -84,18 +85,50 @@ export function playReplay(btn, r) {
   setTimeout(step, 600);
 }
 
+/**
+ * Ataque por mar: primero la batalla naval y luego la de tierra, cada una con sus bajas y su
+ * repetición, y las tropas que se ahogaron al hundirse los barcos.
+ */
+function phasesHtml(r) {
+  const b = r.battle;
+  const { attTitle, defTitle } = sideTitles(r);
+  const out = [];
+  const phase = (key, heading) => {
+    const p = b[key];
+    out.push(`<h5 class="phase-head">${heading}</h5><div class="battle">${sideTable(attTitle, p.att)}${sideTable(defTitle, p.def)}</div>`);
+    if (p.log?.length) out.push(`<button class="ghost small replay-btn" data-action="replay" data-phase="${key}" data-t="${r.t}">▶ Ver la batalla</button><div class="replay"></div>`);
+  };
+  // Una emboscada en alta mar solo tiene la batalla naval
+  if (b.atSea) {
+    phase('naval', '⚓ Batalla en alta mar');
+    if (b.drowned) out.push(`<div class="info-row"><span>🌊 Ahogados al hundirse los barcos</span><span>${unitList(b.drowned)}</span></div>`);
+    return out;
+  }
+  if (b.naval) phase('naval', `⚓ Batalla naval · ${b.seaWon ? 'los atacantes se hacen con el mar' : 'la flota defensora domina el mar'}`);
+  else out.push('<h5 class="phase-head">⚓ Sin batalla naval: no había barcos de guerra defendiendo</h5>');
+  if (b.drowned) out.push(`<div class="info-row"><span>🌊 Ahogados al hundirse los barcos</span><span>${unitList(b.drowned)}</span></div>`);
+  if (b.land) phase('land', '⚔️ Batalla en tierra');
+  else if (!b.seaWon) out.push('<h5 class="phase-head">⚔️ No hubo desembarco</h5>');
+  else if (!b.landed) out.push('<h5 class="phase-head">⚔️ Nadie desembarcó: no había tropas de tierra</h5>');
+  else out.push('<h5 class="phase-head">⚔️ Desembarco sin resistencia</h5>');
+  return out;
+}
+
 function reportBody(r) {
   const parts = [];
   if (r.text) parts.push(`<p>${escapeHtml(r.text)}</p>`);
-  if (r.battle) {
+  if (r.battle && 'seaWon' in r.battle) parts.push(...phasesHtml(r));
+  else if (r.battle) {
     const { attTitle, defTitle } = sideTitles(r);
     parts.push(`<div class="battle">${sideTable(attTitle, r.battle.att)}${sideTable(defTitle, r.battle.def)}</div>`);
     if (r.battle.log?.length) parts.push(`<button class="ghost small replay-btn" data-action="replay" data-t="${r.t}">▶ Ver el combate</button><div class="replay"></div>`);
+  }
+  if (r.battle) {
     if (!r.shared) parts.push(`<button class="ghost small" data-action="share-report" data-t="${r.t}">📢 Compartir en el chat</button>`);
-    const notes = [`${r.battle.rounds} ${r.battle.rounds === 1 ? 'asalto' : 'asaltos'}`];
+    const notes = r.battle.rounds ? [`${r.battle.rounds} ${r.battle.rounds === 1 ? 'asalto' : 'asaltos'}`] : [];
     if (r.towers) notes.push(`las torres dispararon ${fmtNum(r.towers)} por asalto`);
     if (r.wall) notes.push(`fortificación enemiga +${Math.round(r.wall * 100)} %`);
-    parts.push(`<p class="muted small">${notes.join(' · ')}</p>`);
+    if (notes.length) parts.push(`<p class="muted small">${notes.join(' · ')}</p>`);
   }
   if (r.intel) {
     parts.push(`<div class="info-row"><span>Guarnición vista</span><span>${unitList(r.intel.garrison)}</span></div>`);

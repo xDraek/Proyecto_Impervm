@@ -177,7 +177,7 @@ export const BUILDINGS = {
   faro: {
     name: 'Faro',
     icon: '🗼',
-    description: 'Su luz guía a tus barcos: cada nivel hace las flotas un 4 % más rápidas.',
+    description: 'Su luz guía a tus barcos: cada nivel hace las flotas un 4 % más rápidas y da a tus barcos un 4 % más de vida cuando defienden la ciudad.',
     baseCost: { madera: 150, piedra: 260, cristal: 40 },
     costFactor: 1.6,
     baseTime: 85,

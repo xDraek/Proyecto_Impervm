@@ -790,7 +790,7 @@ export class Hud {
       case 'simulate': {
         const view = game.island(this.selected);
         const attacker = readFleet(root);
-        if (!Object.keys(attacker).length) for (const id of PLAYER_UNITS) if (UNITS[id].atk > 0 && game.units[id] > 0) attacker[id] = game.units[id];
+        if (!Object.keys(attacker).length) for (const id of PLAYER_UNITS) if ((UNITS[id].atk > 0 || id === 'mercante') && game.units[id] > 0) attacker[id] = game.units[id];
         const defender = view?.type === 'jugador' ? (view.intel?.garrison ?? {}) : (view?.garrison ?? {});
         const { atkMul, hpMul } = game.combatBonus();
         const wall = view?.type === 'jugador' ? 0.1 * (view.intel?.wall ?? 0) : (view?.wall ?? 0);
