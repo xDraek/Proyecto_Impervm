@@ -1304,50 +1304,262 @@ function cuartel(level) {
   return g;
 }
 
-function puerto(level) {
-  // Raíz en la playa; -Z apunta mar adentro.
+// Caliza dorada de los muelles, en sillares de varios tonos
+const ASHLAR = ['#e3d6b8', '#d8c9a6', '#ebe0c6', '#cfbf9a'];
+
+/**
+ * Paramento de sillares en hiladas a matajunta: una cara de `len` (a lo largo de X, o de Z con
+ * `alongZ`) de y0 a y1, pegada a la cara del bloque en (x, z), que mira hacia `out` (±1).
+ */
+function ashlarFace(g, { x, z, len, y0, y1, alongZ = false, out = 1, course = 0.2, block = 0.46 }) {
+  let row = 0;
+  for (let y = y0; y < y1 - 0.01; y += course, row++) {
+    const h = Math.min(course, y1 - y) - 0.02;
+    const off = row % 2 ? block / 2 : 0;
+    for (let u = -len / 2 - off; u < len / 2; u += block) {
+      const a = Math.max(u, -len / 2) + 0.01;
+      const b = Math.min(u + block, len / 2) - 0.01;
+      if (b - a < 0.05) continue;
+      const color = ASHLAR[(row * 3 + Math.round((u + len) / block) * 5) % ASHLAR.length];
+      const c = (a + b) / 2;
+      g.add(alongZ ? box(0.03, h, b - a, color, x + out * 0.015, y, z + c) : box(b - a, h, 0.03, color, x + c, y, z + out * 0.015));
+    }
+  }
+}
+
+/** Cabo de amarre entre dos puntos, combado por el peso. */
+function sagRope(g, a, b, sag = 0.1, color = '#8a7350') {
+  const mid = a.clone().lerp(b, 0.5);
+  mid.y -= sag;
+  for (const [p, q] of [[a, mid], [mid, b]]) {
+    const d = q.clone().sub(p);
+    const m = mesh(new THREE.CylinderGeometry(0.012, 0.012, d.length(), 4), color);
+    m.position.copy(p).addScaledVector(d, 0.5);
+    m.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), d.normalize());
+    m.castShadow = false;
+    g.add(m);
+  }
+}
+
+/** Noray de piedra con su remate. */
+function bollard(g, x, y, z) {
+  g.add(cyl(0.06, 0.075, 0.2, 7, '#bfb294', x, y, z), cyl(0.085, 0.06, 0.05, 7, '#bfb294', x, y + 0.2, z));
+}
+
+/** Caja de mercancías con sus listones. */
+function cargoCrate(g, x, y, z, s = 0.32, rot = 0) {
+  const c = box(s, s, s, '#a7783f', x, y, z);
+  c.rotation.y = rot;
+  g.add(c);
+  const band = box(s + 0.02, 0.04, s + 0.02, C.woodDark, x, y + s * 0.45, z);
+  band.rotation.y = rot;
+  g.add(band);
+}
+
+/** Barca de remos amarrada al muelle: se mece con las olas. */
+function rowboat(x, z, rotY, color = '#9a6a3c') {
   const g = new THREE.Group();
-  const len = 5 + Math.min(level, 8) * 0.25;
-  for (let z = -0.6; z > -len; z -= 0.9) {
-    for (const x of [-0.55, 0.55]) g.add(cyl(0.08, 0.08, 1.4, 6, C.woodDark, x, -1.0, z));
+  const hull = new THREE.Group();
+  hull.add(box(1.0, 0.16, 0.36, color, 0, 0, 0), box(0.94, 0.04, 0.3, '#6e4a26', 0, 0.12, 0));
+  for (const sx of [-1, 1]) {
+    // Proa y popa afiladas
+    const tip = mesh(new THREE.ConeGeometry(0.18, 0.3, 4), color);
+    tip.rotation.z = (sx * -Math.PI) / 2;
+    tip.rotation.x = Math.PI / 4;
+    tip.scale.set(1, 1, 0.55);
+    tip.position.set(sx * 0.62, 0.08, 0);
+    hull.add(tip);
   }
-  g.add(box(1.3, 0.12, len + 0.6, C.woodLight, 0, 0.3, -len / 2 + 0.1));
-  // Muelle de piedra en la orilla, almacén porticado y mercancías
-  g.add(box(4.6, 0.3, 1.0, C.stone, 0, 0.12, -0.35));
-  g.add(box(1.5, 0.95, 1.0, C.wall, 2.05, 0, 0.45));
-  colonnade(g, { from: 1.45, to: 2.65, at: -0.15, n: 3, y: 0, h: 0.95, r: 0.07 });
-  g.add(box(1.6, 0.1, 1.35, C.marbleDark, 2.05, 0.95, 0.3));
-  g.add(hipRoof(1.65, 1.4, 0.4, C.roofRed, 2.05, 1.05, 0.3));
-  g.add(amphora(-1.45, 0.42, 0.0, '#b9643a'), amphora(-1.25, 0.42, 0.1, '#a5542f'), box(0.4, 0.4, 0.4, '#c9b48a', -1.9, 0.42, -0.1));
-  // Grúa
-  const crane = new THREE.Group();
-  crane.position.set(0.5, 0.42, -1.2);
-  crane.add(box(0.12, 1.6, 0.12, C.wood, 0, 0, 0));
-  const jib = new THREE.Group();
-  jib.position.y = 1.55;
-  jib.add(box(1.4, 0.1, 0.1, C.wood, 0.55, 0, 0));
-  jib.add(box(0.03, 0.7, 0.03, C.dark, 1.15, -0.7, 0));
-  jib.userData.swing = { speed: 0.4, amp: 0.9 };
-  crane.add(jib);
-  g.add(crane);
-  // Faro desde el nivel 4
+  hull.add(box(1.02, 0.03, 0.38, '#2f6db3', 0, 0.13, 0));
+  for (const bx of [-0.22, 0.2]) hull.add(box(0.07, 0.03, 0.32, C.woodLight, bx, 0.14, 0));
+  // Remos recogidos dentro
+  for (const bz of [-0.06, 0.06]) hull.add(box(0.8, 0.02, 0.03, C.woodLight, 0.05, 0.17, bz));
+  hull.userData.bob = { amp: 0.04, speed: 1.1 + x * 0.1, base: -0.26 };
+  hull.position.y = -0.26;
+  g.add(hull);
+  g.position.set(x, 0, z);
+  g.rotation.y = rotY;
+  return g;
+}
+
+/** Grúa de muelle en A: dos patas de madera, la pluma inclinada y una caja colgando del cabo. */
+function portCrane(x, y, z, rotY) {
+  const g = new THREE.Group();
+  const h = 2.0;
+  for (const s of [-1, 1]) {
+    const leg = box(0.1, h, 0.1, C.wood, s * 0.3, 0, 0);
+    leg.rotation.z = -s * 0.15;
+    g.add(leg);
+  }
+  g.add(box(0.75, 0.08, 0.08, C.woodDark, 0, h * 0.45, 0), box(0.24, 0.14, 0.24, C.woodDark, 0, h - 0.06, 0));
+  // Torno con su rueda para subir el cabo
+  const drum = cyl(0.12, 0.12, 0.5, 8, C.woodLight, 0, 0, 0);
+  drum.rotation.z = Math.PI / 2;
+  drum.position.set(0, 0.55, 0);
+  g.add(drum);
+  // La pluma gira despacio llevando la carga del barco al muelle
+  const boom = new THREE.Group();
+  boom.position.set(0, h, 0);
+  // La pluma arranca de lo alto de la A y se inclina hacia fuera
+  const armGeo = new THREE.BoxGeometry(0.09, 1.7, 0.09);
+  armGeo.translate(0, 0.85, 0);
+  const arm = mesh(armGeo, C.woodLight);
+  arm.rotation.x = 0.95;
+  boom.add(arm);
+  const tipZ = Math.sin(0.95) * 1.7;
+  const tipY = Math.cos(0.95) * 1.7;
+  boom.add(box(0.015, tipY + 0.55, 0.015, '#8a7350', 0, -0.55, tipZ));
+  const load = new THREE.Group();
+  cargoCrate(load, 0, 0, 0, 0.34);
+  load.position.set(0, -0.9, tipZ);
+  boom.add(load);
+  boom.userData.swing = { speed: 0.3, amp: 0.7 };
+  g.add(boom);
+  g.position.set(x, y, z);
+  g.rotation.y = rotY;
+  return g;
+}
+
+/** Faro de piedra en la punta del rompeolas: torre cuadrada en dos cuerpos con el fuego arriba. */
+function moleTower(x, y, z) {
+  const g = new THREE.Group();
+  g.add(box(1.05, 0.35, 1.05, '#d8c9a6', 0, 0, 0));
+  g.add(box(0.8, 1.5, 0.8, '#e3d6b8', 0, 0.35, 0));
+  ashlarFace(g, { x: 0, z: 0.4, len: 0.8, y0: 0.35, y1: 1.85, course: 0.25, block: 0.4 });
+  ashlarFace(g, { x: 0.4, z: 0, len: 0.8, y0: 0.35, y1: 1.85, alongZ: true, course: 0.25, block: 0.4 });
+  g.add(box(0.95, 0.08, 0.95, C.marbleDark, 0, 1.85, 0));
+  g.add(box(0.58, 0.7, 0.58, '#ebe0c6', 0, 1.93, 0));
+  // Ventanuco de la escalera
+  g.add(box(0.12, 0.22, 0.02, C.dark, 0, 1.1, 0.42), box(0.1, 0.18, 0.02, C.dark, 0, 2.2, 0.3));
+  g.add(box(0.72, 0.07, 0.72, C.marbleDark, 0, 2.63, 0));
+  for (const [px, pz] of [[-0.24, -0.24], [0.24, -0.24], [-0.24, 0.24], [0.24, 0.24]]) g.add(box(0.06, 0.4, 0.06, C.marble, px, 2.7, pz));
+  const fire = cyl(0.17, 0.2, 0.3, 8, '#fff2a8', 0, 2.72, 0, { emissive: '#ffd34a', emissiveIntensity: 1.6 });
+  fire.userData.flicker = true;
+  g.add(fire);
+  g.add(box(0.62, 0.06, 0.62, C.marbleDark, 0, 3.1, 0));
+  const cap = mesh(new THREE.SphereGeometry(0.22, 8, 5, 0, Math.PI * 2, 0, Math.PI / 2), '#a8743a', { metalness: 0.4, roughness: 0.5 });
+  cap.position.y = 3.16;
+  g.add(cap);
+  g.position.set(x, y, z);
+  return g;
+}
+
+/**
+ * Puerto de piedra: un muelle de sillares a lo largo de la orilla con su almacén porticado y la
+ * mercancía, un espigón con noráys y cabos donde atracan los barcos, una grúa de madera, barcas de
+ * remos amarradas y, desde el nivel 4, un rompeolas con su faro cuadrado.
+ */
+function puerto(level) {
+  // Raíz en la playa; -Z apunta mar adentro. El agua queda a y = -0.2 y la orilla en z ≈ -1.7.
+  const g = new THREE.Group();
+  const top = 0.4;
+  const deep = -1.1;
+  const water = -0.2;
+  const len = 5.8 + Math.min(level, 8) * 0.3;
+  const front = -1.9;
+  // Muelle a lo largo de la orilla, con el enlosado encima y el paramento de sillares al agua
+  const qw = 7.4;
+  g.add(box(qw, top - deep, 3.0, '#d8c9a6', 0, deep, front + 1.5));
+  g.add(box(qw - 0.04, 0.03, 2.96, '#e8dcc0', 0, top, front + 1.5));
+  for (let i = 0; i < 9; i++) g.add(box(0.02, 0.031, 2.9, '#cfc0a0', -qw / 2 + 0.8 * (i + 0.5), top, front + 1.5));
+  ashlarFace(g, { x: 0, z: front, len: qw, y0: water - 0.2, y1: top, out: -1 });
+  for (const sx of [-1, 1]) ashlarFace(g, { x: sx * qw / 2, z: front + 1.5, len: 3.0, y0: water - 0.2, y1: top, alongZ: true, out: sx });
+  // Bordillo del muelle
+  g.add(box(qw, 0.05, 0.16, '#cbbb98', 0, top, front + 0.08));
+  // Espigón de sillares mar adentro, con una cabeza más ancha al final
+  const jw = 1.1;
+  const jz = front - len / 2;
+  g.add(box(jw, top - deep, len, '#d8c9a6', 0, deep, jz));
+  g.add(box(jw - 0.04, 0.03, len, '#e8dcc0', 0, top, jz));
+  for (const sx of [-1, 1]) ashlarFace(g, { x: sx * jw / 2, z: jz, len, y0: water - 0.2, y1: top, alongZ: true, out: sx });
+  const head = front - len;
+  g.add(box(jw + 0.5, top - deep + 0.02, 0.9, '#d8c9a6', 0, deep, head - 0.2));
+  g.add(box(jw + 0.46, 0.03, 0.86, '#e8dcc0', 0, top + 0.02, head - 0.2));
+  ashlarFace(g, { x: 0, z: head - 0.65, len: jw + 0.5, y0: water - 0.2, y1: top + 0.02, out: -1 });
+  // Noráys a los dos lados del espigón y cabos combados entre ellos
+  const posts = [];
+  for (let z = front - 0.5; z > head + 0.2; z -= 1.15) posts.push(z);
+  for (const sx of [-1, 1]) {
+    const bx = sx * (jw / 2 - 0.12);
+    posts.forEach((z, i) => {
+      bollard(g, bx, top, z);
+      if (i) sagRope(g, new THREE.Vector3(bx, top + 0.18, posts[i - 1]), new THREE.Vector3(bx, top + 0.18, z), 0.12);
+    });
+  }
+  // Noráys en el borde del muelle
+  for (const bx of [-3.3, -2.0, 1.9, 3.3]) bollard(g, bx, top, front + 0.15);
+
+  // Almacén porticado (stoa) al fondo del muelle: muro de sillares, columnas y tejado de terracota
+  const stoa = (x0, x1, z0, h, cols) => {
+    const w = x1 - x0;
+    const cx = (x0 + x1) / 2;
+    g.add(box(w, 0.12, 1.5, '#cbbb98', cx, top, z0 + 0.7));
+    g.add(box(w, h, 0.25, '#e3d6b8', cx, top + 0.12, z0 + 1.32));
+    ashlarFace(g, { x: cx, z: z0 + 1.2, len: w, y0: top + 0.12, y1: top + 0.12 + h, out: -1, course: 0.24, block: 0.5 });
+    for (const sx of [x0, x1]) g.add(box(0.22, h, 1.4, '#e3d6b8', sx + (sx === x0 ? 0.11 : -0.11), top + 0.12, z0 + 0.72));
+    colonnade(g, { from: x0 + 0.15, to: x1 - 0.15, at: z0 + 0.12, n: cols, y: top + 0.12, h, r: 0.08, color: '#ece2cc' });
+    g.add(box(w + 0.1, 0.14, 1.55, '#e8dcc0', cx, top + 0.12 + h, z0 + 0.72));
+    g.add(hipRoof(w + 0.45, 1.95, 0.42, C.roofRed, cx, top + 0.26 + h, z0 + 0.72));
+    // Hileras de tejas en el alero
+    for (let k = 0; k <= Math.floor(w / 0.3); k++) g.add(box(0.05, 0.05, 0.04, '#a5502f', x0 + 0.1 + k * 0.3, top + 0.24 + h, z0 - 0.22));
+  };
+  stoa(-3.55, -1.05, front + 1.25, 1.05, 5);
+  if (level >= 3) stoa(1.5, 3.55, front + 1.45, 0.9, 4);
+  // Ánforas y cajas a la sombra del pórtico y en el muelle (más con el nivel)
+  const goods = Math.min(14, 4 + level);
+  for (let i = 0; i < goods; i++) {
+    const row = Math.floor(i / 7);
+    const k = i % 7;
+    g.add(amphora(-3.25 + k * 0.33, top + 0.12, front + 2.2 - row * 0.32, k % 3 ? '#b9643a' : '#a5542f', 0.75));
+  }
+  cargoCrate(g, -2.9, top, front + 0.75, 0.34, 0.2);
+  cargoCrate(g, -2.5, top, front + 0.55, 0.3, -0.1);
+  cargoCrate(g, -2.75, top + 0.34, front + 0.7, 0.28, 0.4);
+  if (level >= 2) {
+    cargoCrate(g, -1.6, top, front + 0.6, 0.32, 0);
+    g.add(amphora(-1.2, top, front + 0.5, '#b9643a', 0.7), amphora(-1.0, top, front + 0.62, '#a5542f', 0.7));
+  }
+  if (level >= 5) {
+    cargoCrate(g, 2.3, top, front + 0.6, 0.32, 0.3);
+    cargoCrate(g, 2.7, top, front + 0.45, 0.3, 0);
+  }
+  // Grúa en su plataforma de sillares, junto al arranque del espigón
+  g.add(box(0.95, 0.35, 0.95, '#d8c9a6', 1.05, top, front + 0.6));
+  ashlarFace(g, { x: 1.05, z: front + 0.125, len: 0.95, y0: top, y1: top + 0.35, out: -1, course: 0.175, block: 0.32 });
+  g.add(portCrane(1.05, top + 0.35, front + 0.6, Math.PI + 0.35));
+  // Barcas de remos amarradas al muelle
+  const boats = level >= 2 ? [[-3.0, -3.3, '#9a6a3c'], [-1.85, -2.0, '#8a5a30']] : [[-3.0, -3.3, '#9a6a3c']];
+  for (const [bx, px, color] of boats) {
+    g.add(rowboat(bx, front - 0.3, 0.04, color));
+    sagRope(g, new THREE.Vector3(px, top + 0.18, front + 0.15), new THREE.Vector3(bx - 0.45, -0.05, front - 0.3), 0.05);
+  }
+
+  // Rompeolas desde el nivel 4: un brazo de sillares con su pretil, mar adentro, y el faro al final
   if (level >= 4) {
-    // En la punta del muelle, sobre un islote de rocas
-    const fx = 0;
-    const fz = -len - 0.9;
-    // Torrecilla de piedra con el fuego arriba
-    g.add(cyl(0.7, 0.95, 1.3, 8, C.stoneDark, fx, -1.1, fz));
-    g.add(box(0.75, 1.3, 0.75, C.marble, fx, 0.2, fz));
-    g.add(box(0.9, 0.1, 0.9, C.marbleDark, fx, 1.5, fz));
-    g.add(cyl(0.3, 0.34, 0.8, 8, C.marble, fx, 1.6, fz));
-    g.add(cyl(0.26, 0.26, 0.35, 8, '#fff2a8', fx, 2.4, fz, { emissive: '#ffd34a', emissiveIntensity: 1.5 }));
-    const top = mesh(new THREE.ConeGeometry(0.38, 0.35, 8), C.roofRed);
-    top.position.set(fx, 2.93, fz);
-    g.add(top);
+    const mx = 3.35;
+    const ml = len + 0.6;
+    const mz = front - ml / 2;
+    g.add(box(0.9, top - deep, ml, '#d8c9a6', mx, deep, mz));
+    g.add(box(0.86, 0.03, ml, '#e8dcc0', mx, top, mz));
+    for (const sx of [-1, 1]) ashlarFace(g, { x: mx + sx * 0.45, z: mz, len: ml, y0: water - 0.2, y1: top, alongZ: true, out: sx });
+    // Pretil por el lado del mar abierto
+    g.add(box(0.2, 0.35, ml, '#e3d6b8', mx + 0.35, top, mz));
+    // Escollera de bloques sueltos contra el pretil
+    for (let k = 0; k < Math.floor(ml / 0.42); k++) {
+      const rock = mesh(new THREE.DodecahedronGeometry(0.3 + (k % 3) * 0.06), k % 2 ? '#bdb097' : '#cbbfa6');
+      rock.position.set(mx + 0.55 + (k % 2) * 0.12, water - 0.08 + (k % 3) * 0.05, front - 0.3 - k * 0.42);
+      rock.scale.set(0.9, 0.75, 1.1);
+      rock.rotation.set(k * 0.7, k, 0);
+      g.add(rock);
+    }
+    g.add(moleTower(mx, top, front - ml - 0.1));
+    g.add(box(1.2, top - deep, 1.2, '#d8c9a6', mx, deep, front - ml - 0.1));
+    ashlarFace(g, { x: mx, z: front - ml - 0.7, len: 1.2, y0: water - 0.2, y1: top, out: -1 });
   }
-  // Amarres para los barcos que hay en casa
+
+  // Amarres para los barcos que hay en casa, a los dos lados del espigón
   g.userData.docks = [];
-  for (let z = -1.8; z > -len; z -= 2.0) for (const x of [-1.6, 1.6]) g.userData.docks.push({ x, z });
+  for (let z = -4.1; z > head + 1.4; z -= 3.4) for (const x of [-1.6, 1.6]) g.userData.docks.push({ x, z });
   return g;
 }
 
@@ -1913,43 +2125,210 @@ function faro(level) {
   return g;
 }
 
-function astillero(level) {
-  // -Z mira al mar: la grada baja hacia la playa
+/** Cuadernas de un casco a medio hacer sobre su quilla (a lo largo de Z, proa hacia -Z). */
+function hullFrame(len, beam, n, planks) {
   const g = new THREE.Group();
-  g.add(box(3.4, 0.15, 2.0, C.woodDark, 0, 0, 0.6));
-  // Grada inclinada con un casco a medio hacer
-  const slip = box(1.4, 0.12, 4.2, C.woodLight, 0, 0, 0);
-  slip.position.set(-0.6, 0.1, -1.6);
-  slip.rotation.x = -0.12;
-  g.add(slip);
-  const ribs = Math.min(8, 4 + level);
-  for (let i = 0; i < ribs; i++) {
-    const z = -0.2 - i * 0.42;
-    const y = 0.35 + (z + 0.2) * 0.12;
-    const rib = new THREE.Mesh(new THREE.TorusGeometry(0.55, 0.05, 4, 10, Math.PI), mat(C.wood));
-    rib.position.set(-0.6, y + 0.55, z);
+  // Picaderos y quilla
+  for (let k = 0; k < 4; k++) g.add(box(0.3, 0.16, 0.18, C.woodDark, 0, 0, len / 2 - 0.25 - (k * (len - 0.5)) / 3));
+  g.add(box(0.1, 0.12, len, C.wood, 0, 0.16, 0));
+  // Roda y codaste curvados en los extremos
+  for (const sz of [-1, 1]) {
+    const post = mesh(new THREE.TorusGeometry(0.42, 0.05, 4, 8, Math.PI / 2), C.wood);
+    post.rotation.y = sz > 0 ? -Math.PI / 2 : Math.PI / 2;
+    post.position.set(0, 0.7, sz * (len / 2 - 0.42));
+    g.add(post);
+  }
+  // Cuadernas: más grandes en el centro del casco
+  for (let i = 0; i < n; i++) {
+    const t = (i + 0.5) / n;
+    const r = (beam / 2) * Math.pow(Math.sin(Math.PI * (0.12 + 0.76 * t)), 0.6);
+    const rib = mesh(new THREE.TorusGeometry(r, 0.035, 4, 10, Math.PI), '#c08a4a');
     rib.rotation.z = Math.PI;
-    rib.castShadow = true;
+    rib.position.set(0, 0.22 + r, -len / 2 + 0.35 + t * (len - 0.7));
     g.add(rib);
   }
-  g.add(box(0.12, 0.12, ribs * 0.42 + 0.4, C.woodDark, -0.6, 0.12, -0.2 - (ribs * 0.42) / 2));
-  // Andamio y grúa
-  for (const z of [-0.6, -2.2]) g.add(box(0.1, 2.0, 0.1, C.woodLight, 0.4, 0.1, z), box(0.1, 2.0, 0.1, C.woodLight, -1.6, 0.1, z));
-  g.add(box(2.1, 0.08, 0.08, C.woodLight, -0.6, 2.0, -0.6), box(2.1, 0.08, 0.08, C.woodLight, -0.6, 2.0, -2.2));
-  const crane = new THREE.Group();
-  crane.position.set(1.3, 0.15, -0.6);
-  crane.add(box(0.14, 2.4, 0.14, C.wood, 0, 0, 0));
-  const jib = new THREE.Group();
-  jib.position.y = 2.35;
-  jib.add(box(1.8, 0.1, 0.1, C.wood, -0.7, 0, 0), box(0.03, 0.8, 0.03, C.dark, -1.5, -0.8, 0));
-  jib.userData.swing = { speed: 0.35, amp: 0.7 };
-  crane.add(jib);
-  g.add(crane);
-  // Taller y pilas de troncos
-  g.add(box(1.4, 1.0, 1.1, C.wood, 1.0, 0.15, 1.0), gableRoof(1.6, 0.6, 1.3, C.roofRed, 1.0, 1.15, 1.0));
-  const piles = Math.min(3, 1 + Math.floor(level / 3));
-  for (let p = 0; p < piles; p++) {
-    for (let i = 0; i < 3; i++) g.add(log(1.4, 0.13, -1.2 + p * 0.0, 0.15 + i * 0.24, 0.9 + p * 0.45 - 0.1 * i, 0));
+  // Tracas de forro ya clavadas en la parte de abajo (más con el nivel)
+  for (let k = 0; k < planks; k++) {
+    const a = 0.35 + k * 0.32;
+    for (const sx of [-1, 1]) {
+      const r = beam / 2;
+      const strake = box(0.04, 0.09, len * (0.72 - k * 0.06), '#a87545', sx * Math.sin(a) * r * 0.95, 0.22 + r - Math.cos(a) * r * 0.95, 0);
+      strake.rotation.z = sx * a;
+      g.add(strake);
+    }
+  }
+  return g;
+}
+
+/**
+ * Astillero: una explanada de piedra junto a la orilla con la nave cubierta de madera y teja donde
+ * se arma un casco, la grada que baja al agua con un barco casi listo, el pórtico de izar, pilas de
+ * troncos y tablones, carpinteros trabajando y un embarcadero con su barca.
+ */
+function astillero(level) {
+  // -Z mira al mar; la hierba acaba hacia z = -1..-3, la arena baja a y ≈ -0.5 y el agua está a
+  // unos -0.67, a partir de z ≈ -4.5
+  const g = new THREE.Group();
+  const top = 0.12;
+  // Explanada de tierra apisonada sobre un muro de sillares al lado del mar
+  g.add(box(6.6, 0.85, 3.2, '#d8c9a6', 0, top - 0.85, 0));
+  g.add(box(6.56, 0.02, 3.16, '#cdb58a', 0, top, 0));
+  ashlarFace(g, { x: 0, z: -1.6, len: 6.6, y0: -0.7, y1: top, out: -1, course: 0.24 });
+  for (const sx of [-1, 1]) ashlarFace(g, { x: sx * 3.3, z: 0, len: 3.2, y0: -0.7, y1: top, alongZ: true, out: sx, course: 0.24 });
+  // Virutas y serrín por el suelo
+  for (let i = 0; i < 9; i++) g.add(box(0.3 + (i % 3) * 0.1, 0.012, 0.22, '#e2c48c', -2.8 + i * 0.68, top, -0.9 + ((i * 7) % 5) * 0.45));
+
+  // Nave cubierta: postes sobre basas de piedra, tirantes y un tejado de teja a dos aguas
+  const sx0 = -3.05;
+  const sx1 = -0.55;
+  const scx = (sx0 + sx1) / 2;
+  const posts = [1.35, 0.15, -1.05];
+  const ph = 1.6;
+  for (const x of [sx0, sx1]) {
+    for (const z of posts) {
+      g.add(box(0.24, 0.16, 0.24, '#d8c9a6', x, top, z));
+      g.add(box(0.13, ph, 0.13, C.wood, x, top + 0.16, z));
+    }
+    g.add(box(0.12, 0.14, 2.65, C.woodDark, x, top + 0.16 + ph, 0.15));
+    // Tornapuntas bajo la viga
+    for (const z of posts.slice(0, 2)) {
+      const brace = box(0.06, 0.5, 0.06, C.woodDark, x, top + ph - 0.25, z - 0.2);
+      brace.rotation.x = 0.7;
+      g.add(brace);
+    }
+  }
+  for (const z of posts) {
+    g.add(box(2.65, 0.12, 0.12, C.woodDark, scx, top + 0.3 + ph, z));
+    g.add(box(0.08, 0.55, 0.08, C.woodDark, scx, top + 0.42 + ph, z));
+  }
+  g.add(gableRoof(3.25, 0.75, 3.15, C.roofRed, scx, top + 0.42 + ph, 0.15));
+  const ridge = cyl(0.04, 0.04, 3.2, 6, '#a5502f', 0, 0, 0);
+  ridge.rotation.x = Math.PI / 2;
+  ridge.position.set(scx, top + 1.18 + ph, 0.15);
+  g.add(ridge);
+  // Muro de sillares al fondo de la nave, con herramientas colgadas
+  g.add(box(2.5, 0.9, 0.18, '#e3d6b8', scx, top, 1.45));
+  ashlarFace(g, { x: scx, z: 1.36, len: 2.5, y0: top, y1: top + 0.9, out: -1, course: 0.22, block: 0.42 });
+  for (let k = 0; k < 4; k++) g.add(box(0.04, 0.35, 0.02, k % 2 ? C.woodDark : '#6b6b6b', scx - 0.9 + k * 0.5, top + 0.95, 1.33));
+  // El casco que se arma dentro: cuadernas y, con el nivel, el forro
+  const frame = hullFrame(2.3, 1.0, Math.min(10, 4 + level), Math.min(3, Math.floor(level / 3)));
+  frame.position.set(scx, top, 0.1);
+  g.add(frame);
+  // Andamio a un costado del casco con su escalera, y un carpintero clavando
+  const deck = 0.85;
+  for (const z of [1.05, -0.75]) g.add(box(0.06, deck, 0.06, C.woodLight, scx + 0.8, top, z));
+  g.add(box(0.36, 0.05, 1.95, C.woodLight, scx + 0.8, top + deck, 0.15));
+  const ladder = new THREE.Group();
+  for (const lx of [-0.09, 0.09]) ladder.add(box(0.03, 1.0, 0.03, C.woodDark, lx, 0, 0));
+  for (let y = 0.15; y < 1.0; y += 0.18) ladder.add(box(0.18, 0.025, 0.025, C.woodDark, 0, y, 0));
+  ladder.position.set(scx + 0.8, top, -0.95);
+  ladder.rotation.x = -0.3;
+  g.add(ladder);
+  const nailer = worker('martillo', scx + 0.8, 0.5, scx + 0.2, 0.5, { color: '#d8cfba', speed: 5, phase: 0.6 });
+  nailer.position.y = top + deck + 0.03;
+  g.add(nailer);
+  g.add(worker('martillo', scx - 0.7, -0.75, scx - 0.2, -0.2, { color: '#c9b48a', speed: 4.2, phase: 2 }));
+
+  // Grada: la plataforma sobre la explanada y la rampa de tablones que baja hasta el agua
+  const wx = 1.05;
+  g.add(box(1.5, 0.08, 3.2, C.woodDark, wx, top, 0));
+  for (const rx of [-0.42, 0.42]) g.add(box(0.12, 0.08, 3.2, C.woodLight, wx + rx, top + 0.08, 0));
+  const ramp = new THREE.Group();
+  const drop = 1.1;
+  const run = 4.6;
+  const slope = Math.atan2(drop, run);
+  const rl = Math.hypot(drop, run);
+  ramp.add(box(1.2, 0.08, rl, C.woodDark, 0, -0.08, -rl / 2));
+  for (const rx of [-0.42, 0.42]) ramp.add(box(0.12, 0.08, rl, C.woodLight, rx, 0, -rl / 2));
+  for (let k = 0; k * 0.5 < rl; k++) ramp.add(box(1.3, 0.05, 0.1, '#7a5230', 0, -0.03, -0.2 - k * 0.5));
+  ramp.position.set(wx, top + 0.08, -1.6);
+  ramp.rotation.x = -slope;
+  g.add(ramp);
+  // Pilotes bajo el tramo de la rampa que va sobre el agua
+  for (let k = 1; k <= 3; k++) {
+    const z = -1.6 - k * 1.1;
+    const y = top - (k * 1.1 * drop) / run;
+    for (const rx of [-0.55, 0.55]) g.add(box(0.1, 1.0, 0.1, C.woodDark, wx + rx, y - 1.05, z));
+  }
+  // El barco casi listo sobre su cuna, con la proa hacia el mar
+  if (level >= 3) {
+    const ship = new THREE.Group();
+    const hull = shipHull({ len: 3.0, beam: 0.92, depth: 0.5, rise: 0.28, full: 0.7, color: '#b08050', band: '#2b2620' });
+    ship.add(hull.mesh);
+    sternPost(ship, -1.5, hull.top(0));
+    const bowCurl = mesh(new THREE.TorusGeometry(0.1, 0.03, 4, 7, Math.PI), C.woodDark);
+    bowCurl.rotation.y = -Math.PI / 2;
+    bowCurl.position.set(0, hull.top(1) + 0.06, 1.42);
+    ship.add(bowCurl);
+    // Mástil sin vela todavía
+    ship.add(cyl(0.035, 0.045, 1.4, 6, C.wood, 0, hull.top(0.5) - 0.05, 0.1));
+    ship.rotation.y = Math.PI;
+    ship.position.set(wx, top + 0.3 + 0.5, 0);
+    g.add(ship);
+    // Cuna y puntales a los lados del casco
+    for (const z of [-0.9, 0.2, 1.1]) {
+      g.add(box(1.1, 0.14, 0.16, C.woodDark, wx, top + 0.16, z));
+      for (const side of [-1, 1]) {
+        const shore = box(0.06, 0.62, 0.06, C.woodLight, wx + side * 0.62, top + 0.12, z);
+        shore.rotation.z = side * 0.35;
+        g.add(shore);
+      }
+    }
+  } else {
+    // Una quilla recién puesta en la grada
+    const keel = hullFrame(2.4, 0.85, 3, 0);
+    keel.position.set(wx, top + 0.16, 0);
+    g.add(keel);
+  }
+
+  // Pórtico de izar sobre la grada, al borde del agua, con su aparejo
+  if (level >= 2) {
+    const gz = -3.5;
+    const gh = 2.5;
+    for (const px of [wx - 0.95, wx + 0.95]) {
+      g.add(box(0.16, gh + 1.0, 0.16, C.wood, px, -1.0, gz));
+      for (const sz of [-1, 1]) {
+        const strut = box(0.08, 1.4, 0.08, C.woodDark, px, -0.6, gz + sz * 0.32);
+        strut.rotation.x = -sz * 0.4;
+        g.add(strut);
+      }
+    }
+    g.add(box(2.3, 0.16, 0.18, C.woodDark, wx, gh, gz));
+    for (const sx of [-1, 1]) {
+      const knee = box(0.08, 0.6, 0.08, C.woodDark, wx + sx * 0.75, gh - 0.45, gz);
+      knee.rotation.z = sx * 0.75;
+      g.add(knee);
+    }
+    // Polea con el cabo y una viga colgando, que se mece
+    const hoist = new THREE.Group();
+    hoist.position.set(wx + 0.25, gh, gz);
+    hoist.add(box(0.1, 0.18, 0.1, '#6b6b6b', 0, -0.2, 0), box(0.015, 1.4, 0.015, '#8a7350', 0, -1.6, 0));
+    hoist.add(box(0.12, 0.12, 1.1, C.woodLight, 0, -1.75, 0));
+    hoist.userData.swing = { speed: 0.5, amp: 0.25 };
+    g.add(hoist);
+  }
+
+  // Troncos, tablones, el banco de trabajo bajo un toldo y un hachero desbastando una viga
+  g.add(logPile(2.6, 0.95, 0, 1.2, 3, 0.14));
+  if (level >= 4) g.add(logPile(-1.8, -1.4, 0, 1.0, 2, 0.12));
+  g.add(plankStack(2.6, -0.1, 0, Math.min(6, 2 + Math.floor(level / 2))));
+  g.add(box(1.0, 0.06, 0.4, C.woodLight, 2.45, top + 0.42, -1.25), box(0.06, 0.42, 0.06, C.woodDark, 2.05, top, -1.25), box(0.06, 0.42, 0.06, C.woodDark, 2.85, top, -1.25));
+  for (const [px, pz] of [[1.95, -1.45], [3.0, -1.45]]) g.add(box(0.05, 1.2, 0.05, C.woodLight, px, top, pz));
+  const awning = box(1.25, 0.02, 0.9, '#efe6d2', 2.47, top + 1.1, -1.1);
+  awning.rotation.x = -0.25;
+  g.add(awning);
+  g.add(worker('hacha', 2.45, -0.85, 2.45, -1.25, { color: '#b9a27a', speed: 3.6, phase: 1.3 }));
+  if (level >= 5) g.add(worker('martillo', wx - 0.9, 0.9, wx - 0.45, 0.9, { color: '#d8cfba', speed: 4.6, phase: 0.2 }));
+
+  // Escalones al pie del muro y un embarcadero de tablones con su barca
+  for (let k = 0; k < 3; k++) g.add(box(0.8, 0.2, 0.25, '#d8c9a6', -2.35, top - 0.2 * (k + 1), -1.72 - k * 0.25));
+  if (level >= 4) {
+    // Llega hasta donde ya hay fondo para la barca
+    g.add(box(0.8, 0.07, 4.4, C.woodLight, -2.35, -0.38, -4.1));
+    for (let z = -2.4; z > -6.4; z -= 0.8) for (const px of [-0.35, 0.35]) g.add(cyl(0.05, 0.05, 1.5, 5, C.woodDark, -2.35 + px, -1.8, z));
+    const boat = rowboat(-1.65, -5.6, Math.PI / 2 + 0.06, '#9a6a3c');
+    boat.position.y = -0.47;
+    g.add(boat);
   }
   return g;
 }

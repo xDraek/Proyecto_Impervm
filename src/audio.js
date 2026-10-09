@@ -1,5 +1,5 @@
-// Sonido con Web Audio: la música de fondo y las gaviotas son pistas grabadas
-// (public/audio); el mar, la lluvia y los efectos se sintetizan al momento.
+// Sonido con Web Audio: la música de fondo, las gaviotas y la lluvia son pistas grabadas
+// (public/audio); el mar y los efectos se sintetizan al momento.
 // El navegador no deja sonar nada hasta que el jugador interactúa, así que el
 // contexto se crea en el primer clic o tecla.
 
@@ -241,28 +241,37 @@ document.addEventListener('visibilitychange', () => {
 
 let rain = null;
 
-/** Intensidad de la lluvia (0 a 1): un siseo de ruido blanco filtrado. */
+/**
+ * Intensidad de la lluvia (0 a 1): la pista grabada de lluvia en bucle, por debajo de la música
+ * para que se mezcle con ella. Sin lluvia, la pista se para del todo.
+ */
 export function setRain(k) {
   if (!ctx) return;
-  if (!rain) {
-    const len = ctx.sampleRate * 3;
-    const buf = ctx.createBuffer(1, len, ctx.sampleRate);
-    const data = buf.getChannelData(0);
-    for (let i = 0; i < len; i++) data[i] = Math.random() * 2 - 1;
-    const src = ctx.createBufferSource();
-    src.buffer = buf;
-    src.loop = true;
-    const filter = ctx.createBiquadFilter();
-    filter.type = 'bandpass';
-    filter.frequency.value = 2400;
-    filter.Q.value = 0.6;
-    rain = ctx.createGain();
-    rain.gain.value = 0;
-    src.connect(filter).connect(rain).connect(ambientBus);
-    src.start();
+  rain ??= track('/audio/lluvia.mp3', 0.32, ambientBus);
+  // Los restos de un chaparrón que ya se va cuentan como nada
+  const level = k < 0.05 ? 0 : Math.min(1, k) * rain.volume;
+  rain.level = level;
+  if (document.hidden) return;
+  fade(rain, level, 2.5);
+  if (level === 0 && rain.playing) {
+    clearTimeout(rain.stop);
+    rain.stop = setTimeout(() => {
+      if (rain.level === 0) {
+        rain.el.pause();
+        rain.playing = false;
+      }
+    }, 12000);
   }
-  rain.gain.setTargetAtTime(0.09 * k, ctx.currentTime, 1.5);
 }
+
+// Con la pestaña en segundo plano, la lluvia también se calla (y vuelve al volver)
+document.addEventListener('visibilitychange', () => {
+  if (!rain) return;
+  if (document.hidden) {
+    rain.el.pause();
+    rain.playing = false;
+  } else if (rain.level > 0) fade(rain, rain.level, 1);
+});
 
 /** Un trueno lejano: un golpe grave de ruido que se apaga despacio. */
 export function thunder(power = 1) {

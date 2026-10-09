@@ -568,6 +568,18 @@ export class World {
      */
     // Zonas enteras donde no va nada más (ni hierba): los campos de la granja
     const zones = [];
+    // La explanada del astillero, que llega hasta la playa: sin hierba ni árboles encima
+    {
+      const c = polar(L.astillero.r, L.astillero.angle);
+      const rot = Math.atan2(-c.x, -c.z);
+      zones.push((q, margin) => {
+        const dx = q.x - c.x;
+        const dz = q.z - c.z;
+        const x = dx * Math.cos(rot) - dz * Math.sin(rot);
+        const z = dx * Math.sin(rot) + dz * Math.cos(rot);
+        return Math.abs(x) < 4.5 + margin && z > -2.4 - margin && z < 2.3 + margin;
+      });
+    }
     const free = (p, pad = 0.7, size = 0) => {
       const r = Math.hypot(p.x, p.z);
       if (r + size > coastAt(p) - 1.3) return false;
