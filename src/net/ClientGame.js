@@ -38,6 +38,7 @@ export class ClientGame extends Game {
     this.world.joints = snap.joint ?? [];
     this.traffic = snap.traffic ?? [];
     this.support = snap.support ?? [];
+    this.owed = snap.owed ?? {};
     this.due = false;
     this.lastSync = Date.now();
     this.#showNotes(first);
@@ -194,6 +195,14 @@ export class ClientGame extends Game {
 
   recall(id) {
     return this.#act('recall', id);
+  }
+
+  plunder(id) {
+    return this.#act('plunder', id);
+  }
+
+  breakPort() {
+    return this.#act('breakPort');
   }
 
   claimQuest(id) {

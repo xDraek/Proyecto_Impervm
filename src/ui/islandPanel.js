@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { COLONY, ISLAND_TYPES, MISSION_TYPES, PLAYER_UNITS, RESOURCES, RESOURCE_KEYS, UNITS, WONDERS, WONDER_LEVELS, WONDER_RESOURCES } from '../game/data.js';
+import { BLOCKADE, COLONY, ISLAND_TYPES, MISSION_TYPES, OCCUPATION, OUTPOST_MISSIONS, PLAYER_UNITS, RESOURCES, RESOURCE_KEYS, UNITS, WONDERS, WONDER_LEVELS, WONDER_RESOURCES } from '../game/data.js';
 import { colonyUpgrade, colonyYield } from '../game/rules.js';
 import { NEWBIE_POINTS } from '../game/Game.js';
 import { createIslandBase, createIslandFeature, islandLook } from '../scene/islands.js';
@@ -20,6 +20,14 @@ function playerSection(game, view) {
   if (view.vacation) lines.push('<p class="hint ok">🏖️ Está de vacaciones: su isla no se puede atacar ni espiar.</p>');
   else if (view.inactive) lines.push('<p class="hint">💤 Lleva más de una semana sin aparecer por su ciudad.</p>');
   if (view.protected) lines.push(`<p class="hint ok">🛡️ Protección de novato: con menos de ${NEWBIE_POINTS} puntos nadie puede atacar esta ciudad.</p>`);
+  const port = view.port;
+  if (port && port.by !== game.userId) {
+    lines.push(
+      port.kind === 'invadir'
+        ? `<p class="hint warn">🦅 Ocupada por ${escapeHtml(port.name)} · se irán como mucho en <span data-until="${port.until}"></span>. Nadie más la puede atacar mientras tanto.</p>`
+        : `<p class="hint warn">⛓️ ${escapeHtml(port.name)} bloquea su puerto · como mucho <span data-until="${port.until}"></span> más.</p>`,
+    );
+  }
   const intel = view.intel;
   const spy = intel
     ? `<h4>Informe de tus espías <span class="muted small">(${fmtAgo(intel.t)})</span></h4>
@@ -27,7 +35,11 @@ function playerSection(game, view) {
       <div class="info-row"><span>Recursos</span><span>${bag(intel.stock)}</span></div>
       <div class="info-row"><span>🏰 Muralla</span><b>Nivel ${intel.wall ?? 0}</b></div>`
     : '<p class="desc small">Manda un bote explorador para espiar sus tropas y sus recursos antes de atacar.</p>';
-  const intro = ally
+  const intro = view.port?.by === game.userId
+    ? view.port.kind === 'invadir'
+      ? 'Una ciudad que ocupan tus tropas.'
+      : 'Una ciudad cuyo puerto bloquean tus barcos.'
+    : ally
     ? 'Una ciudad aliada: no podéis atacaros, pero puedes mandarle recursos.'
     : view.relation === 'pacto'
       ? 'Vuestras alianzas tienen un pacto de no agresión: no podéis atacaros mientras dure.'
@@ -35,11 +47,39 @@ function playerSection(game, view) {
         ? '⚔️ Vuestras alianzas están en guerra. Si la saqueas, tus barcos cargan un 20 % más de botín.'
         : 'La ciudad de otro jugador. Si la atacas y ganas, te llevas lo que quepa en tus barcos (salvo lo que esconde su almacén).';
   return `<p class="desc">${intro}</p>
-    ${lines.join('')}${spy}
+    ${lines.join('')}${stationSection(game, view)}${spy}
     <div class="modal-actions">
       <button class="ghost small" data-action="profile" data-name="${escapeHtml(view.ownerName)}">👤 Perfil</button>
       <button class="ghost small" data-action="mail-to" data-name="${escapeHtml(view.ownerName)}">✉️ Mensaje</button>
     </div>`;
+}
+
+/** Tu bloqueo de esta ciudad o tu ocupación: tropas, tributo, saqueo y retirada. */
+function stationSection(game, view) {
+  const m = game.missions.find((x) => x.target === view.id && x.phase === 'estacionada' && (x.type === 'invadir' || x.type === 'bloquear'));
+  if (!m) return '';
+  if (m.type === 'bloquear') {
+    return `<div class="port-box">
+      <h4>⛓️ Bloqueas su puerto</h4>
+      <p class="desc small">No zarpa nadie, no entran transportes ni mercaderes y sus colonias no le mandan nada. Puede intentar romperlo con sus barcos, o sus aliados con tropas de apoyo.</p>
+      <div class="info-row"><span>Tu flota</span><span>${unitList(m.units)}</span></div>
+      <div class="info-row"><span>Aguanta como mucho</span><b class="q-time" data-until="${m.until}"></b></div>
+      <button class="ghost wide" data-action="recall" data-mission="${m.id}">⚓ Levantar el bloqueo</button>
+    </div>`;
+  }
+  const owed = game.owed?.[m.id] ?? {};
+  const ready = (m.plunderAt ?? 0) <= game.now();
+  return `<div class="port-box occupied">
+    <h4>🦅 Ocupas esta ciudad</h4>
+    <p class="desc small">Te quedas el ${Math.round(OCCUPATION.tribute * 100)} % de lo que produce y controlas su puerto. Cada ${OCCUPATION.plunderHours} h puedes saquear su almacén: barcos requisados llevan a tu capital el tributo y lo saqueado. Para atacar desde aquí, elige «Zarpar desde ${escapeHtml(view.name)}» al mandar una flota a otra isla.</p>
+    <div class="info-row"><span>Tropas ocupando</span><span>${unitList(m.units)}</span></div>
+    <div class="info-row"><span>Tributo apartado</span><span>${bag(owed) || '<span class="muted">Nada todavía</span>'}</span></div>
+    ${Object.keys(m.cargo ?? {}).length ? `<div class="info-row"><span>Botín guardado</span><span>${bag(m.cargo)}</span></div>` : ''}
+    <div class="info-row"><span>Se acaba en</span><b class="q-time" data-until="${m.until}"></b></div>
+    <button class="primary wide" data-action="plunder" data-mission="${m.id}" data-ready-at="${m.plunderAt ?? 0}" ${ready ? '' : 'disabled'}>💰 Saquear y mandarlo a casa</button>
+    ${ready ? '' : `<p class="muted small">Podrás volver a saquear en <span data-until="${m.plunderAt}"></span>.</p>`}
+    <button class="ghost wide" data-action="recall" data-mission="${m.id}">⚓ Retirar las tropas (se llevan el tributo)</button>
+  </div>`;
 }
 
 function colonySection(game, view) {
@@ -186,8 +226,9 @@ function infoSectionFor(game, view, t) {
 }
 
 function inboundSection(game, view) {
-  if (!view.inbound.length) return '';
-  const rows = view.inbound
+  const moving = view.inbound.filter((m) => m.phase !== 'estacionada');
+  if (!moving.length) return '';
+  const rows = moving
     .map((m) => {
       const t = MISSION_TYPES[m.type];
       const until = m.phase === 'ida' ? m.arrive : m.back;
@@ -197,20 +238,45 @@ function inboundSection(game, view) {
   return `<h4>Flotas en camino</h4><ul class="mini-list">${rows}</ul>`;
 }
 
-function fleetForm(game, view) {
+/** Ciudades ocupadas desde las que puede zarpar una flota hacia `targetId`. */
+function outpostsFor(game, targetId) {
+  return game.occupations().filter((m) => m.target !== targetId);
+}
+
+/** Tropas disponibles en el origen elegido (`from`: id de la ocupación, o nada para tu capital). */
+export function poolFor(game, from) {
+  if (from == null) return game.units;
+  return game.occupations().find((m) => m.id === from)?.units ?? {};
+}
+
+function fleetForm(hud, game, view) {
   if (view.type === 'continente' && !view.horde) return '';
   if (game.level('puerto') < 1) return '<div class="section"><h4>Enviar flota</h4><p class="desc">Construye un puerto en tu isla para poder zarpar.</p></div>';
-  const home = PLAYER_UNITS.filter((id) => game.units[id] > 0);
-  if (!home.length) return '<div class="section"><h4>Enviar flota</h4><p class="desc">No tienes tropas ni barcos en casa. Entrénalos en el cuartel y el puerto.</p></div>';
+  // Origen: tu capital o una ciudad que ocupas
+  const outposts = outpostsFor(game, view.id);
+  const base = outposts.find((m) => String(m.id) === String(hud.fleetFrom ?? '')) ?? null;
+  const pool = base ? base.units : game.units;
+  const fromSelect = outposts.length
+    ? `<label class="joint-pick">⚓ Zarpar desde <select name="from">
+        <option value="">${escapeHtml(game.homeIsland?.name ?? 'tu capital')} (tu capital)</option>
+        ${outposts.map((m) => `<option value="${m.id}" ${m === base ? 'selected' : ''}>🦅 ${escapeHtml(m.targetName)} (ocupada)</option>`).join('')}
+      </select></label>`
+    : '';
+  const closed = !base && game.portClosed() ? `<p class="hint warn">${game.state.occupied ? '🦅 Tu ciudad está ocupada' : '⛓️ Tu puerto está bloqueado'}: no puede zarpar ninguna flota desde tu capital.${outposts.length ? ' Puedes zarpar desde una ciudad que ocupes.' : ''}</p>` : '';
+  const home = PLAYER_UNITS.filter((id) => pool[id] > 0);
+  if (!home.length) {
+    const empty = base ? `No te quedan tropas en ${escapeHtml(base.targetName)}.` : 'No tienes tropas ni barcos en casa. Entrénalos en el cuartel y el puerto.';
+    return `<div class="section"><h4>Enviar flota</h4>${fromSelect}${closed}<p class="desc">${empty}</p></div>`;
+  }
 
   const rows = home
     .map((id) => {
       const u = UNITS[id];
       return `<div class="fleet-row">
         <span class="fleet-unit u-cell" title="${u.name}">${unitIcon(id)} ${u.name}</span>
-        <span class="muted">${fmtNum(game.units[id])}</span>
-        <input type="number" name="f-${id}" min="0" max="${game.units[id]}" placeholder="0" inputmode="numeric" aria-label="${u.name} a enviar" />
-        <button class="ghost small" data-action="fleet-all" data-unit="${id}">Todos</button>
+        <span class="muted">${fmtNum(pool[id])}</span>
+        <input type="number" name="f-${id}" min="0" max="${pool[id]}" placeholder="0" inputmode="numeric" aria-label="${u.name} a enviar" />
+        <button class="ghost small" data-action="fleet-all" data-unit="${id}" data-max="${pool[id]}">Todos</button>
       </div>`;
     })
     .join('');
@@ -222,18 +288,24 @@ function fleetForm(game, view) {
   const known = view.explored;
   const hostile = known && (['barbaros', 'ciudadela', 'piratas', 'kraken', 'jugador'].includes(view.type) || (view.type === 'continente' && !!view.horde));
   if (view.type !== 'brumas' && view.colonizedBy == null && hostile) types.push('atacar');
-  if (known && view.type === 'jugador' && !(view.alliance && view.alliance.id === game.alliance?.id)) types.push('sabotaje');
+  const enemyCity = known && view.type === 'jugador' && !(view.alliance && view.alliance.id === game.alliance?.id);
+  if (enemyCity) types.push('invadir', 'bloquear', 'sabotaje');
   if (known && view.type === 'jugador') types.push('transporte');
   if (view.type === 'jugador' && view.alliance && view.alliance.id === game.alliance?.id) types.push('apoyo');
   if (view.type === 'libre' && view.explored && view.colonizedBy == null) types.push('colonizar');
   if (view.type === 'ciudadela' && view.explored && view.colonizedBy == null) types.push('conquistar');
+  // Desde una ciudad ocupada solo se lanzan ataques y espías
+  const allowed = base ? types.filter((t) => OUTPOST_MISSIONS.includes(t)) : types;
 
-  const buttons = types
+  const buttons = allowed
     .map((t) => {
-      const label = t === 'explorar' && view.type === 'jugador' ? 'Espiar' : t === 'sabotaje' ? 'Sabotear' : MISSION_TYPES[t].name;
-      return `<button class="${t === 'atacar' ? 'danger' : 'primary'} small" data-action="mission" data-type="${t}">${MISSION_TYPES[t].icon} ${label}</button>`;
+      const label = t === 'explorar' && view.type === 'jugador' ? 'Espiar' : t === 'sabotaje' ? 'Sabotear' : t === 'bloquear' ? 'Bloquear' : MISSION_TYPES[t].name;
+      return `<button class="${['atacar', 'invadir', 'bloquear'].includes(t) ? 'danger' : 'primary'} small" data-action="mission" data-type="${t}">${MISSION_TYPES[t].icon} ${label}</button>`;
     })
     .join('');
+  const warHint = enemyCity
+    ? `<p class="hint small">🦅 <b>Invadir</b>: si tus tropas desembarcan y acaban con su ejército, se quedan ocupando la ciudad (${OCCUPATION.hours} h como mucho): te llevas tributo, saqueas su almacén y atacas desde allí. ⛓️ <b>Bloquear</b>: solo barcos de guerra; si vencen a su flota, cierran su puerto ${BLOCKADE.hours} h como mucho.</p>`
+    : '';
   const cargoForm = types.includes('transporte')
     ? `<h4>Recursos para transportar</h4><div class="payload">${RESOURCE_KEYS.map(
         (r) => `<label title="${RESOURCES[r].name}">${RESOURCES[r].icon}<input type="number" name="p-${r}" min="0" placeholder="0" inputmode="numeric" /></label>`,
@@ -245,14 +317,16 @@ function fleetForm(game, view) {
       ? `<div class="hint">🏴 Para conquistarla, tus tropas tienen que acabar con toda la guarnición. Los colonos van en un mercante, se quedan con él y llevan:</div>${costList(game.planMission('conquistar', view.id, { mercante: 1, lancero: 1 }).cost ?? {}, game.resources)}`
       : '';
   return `<div class="section">
-    <h4>Enviar flota <span class="muted small">(${game.missions.length}/${game.fleetSlots()} en el mar)</span></h4>
+    <h4>Enviar flota <span class="muted small">(${game.fleetsAtSea()}/${game.fleetSlots()} en el mar)</span></h4>
+    ${fromSelect}${closed}
     <div class="fleet">${rows}</div>
-    ${game.heroStatus() === 'casa' ? `<label class="hero-toggle"><input type="checkbox" name="with-hero" /> 🎖️ Que vaya ${escapeHtml(game.hero.name)} (Nv ${game.hero.level})</label>` : ''}
+    ${game.heroStatus() === 'casa' && !base ? `<label class="hero-toggle"><input type="checkbox" name="with-hero" /> 🎖️ Que vaya ${escapeHtml(game.hero.name)} (Nv ${game.hero.level})</label>` : ''}
     ${jointSelect(game, view)}
     <div class="fleet-summary" data-fleet-summary></div>
     ${cargoForm}
     ${colony}
     <div class="mission-buttons">${buttons}</div>
+    ${warHint}
     ${hostile ? '<button class="ghost wide sim-btn" data-action="simulate">🎲 Simular el combate</button>' : ''}
     <div class="hint warn" data-fleet-reason></div>
   </div>`;
@@ -272,7 +346,8 @@ function jointSelect(game, view) {
 
 /** Opciones de la flota: almirante y ataque conjunto. */
 export function readOpts(root) {
-  return { hero: !!root.querySelector('[name="with-hero"]')?.checked, join: root.querySelector('[name="join"]')?.value || undefined };
+  const from = root.querySelector('[name="from"]')?.value;
+  return { hero: !!root.querySelector('[name="with-hero"]')?.checked, join: root.querySelector('[name="join"]')?.value || undefined, from: from ? Number(from) : undefined };
 }
 
 /** Unidades elegidas en el formulario de flota. */
@@ -299,13 +374,14 @@ export function readPayload(root) {
  * Atajos cuando no eliges unidades: explorar manda un bote y un transporte,
  * los mercantes que hagan falta para la carga.
  */
-export function fleetFor(game, type, units, payload = {}) {
+export function fleetFor(game, type, units, payload = {}, from) {
   if (Object.keys(units).length) return units;
-  if ((type === 'explorar' || type === 'sabotaje') && game.units.bote > 0) return { bote: 1 };
-  if (type === 'transporte' && game.units.mercante > 0) {
+  const pool = poolFor(game, from);
+  if ((type === 'explorar' || type === 'sabotaje') && pool.bote > 0) return { bote: 1 };
+  if (type === 'transporte' && pool.mercante > 0) {
     const total = Object.values(payload).reduce((a, b) => a + b, 0);
     const need = Math.max(1, Math.ceil(total / UNITS.mercante.cargo));
-    return { mercante: Math.min(need, game.units.mercante) };
+    return { mercante: Math.min(need, pool.mercante) };
   }
   return units;
 }
@@ -327,7 +403,7 @@ function refreshFleet(game, id, root) {
   const payload = readPayload(root);
   const opts = readOpts(root);
   for (const btn of root.querySelectorAll('[data-action="mission"]')) {
-    const plan = game.planMission(btn.dataset.type, id, fleetFor(game, btn.dataset.type, units, payload), payload, opts);
+    const plan = game.planMission(btn.dataset.type, id, fleetFor(game, btn.dataset.type, units, payload, opts.from), payload, opts);
     btn.disabled = !plan.ok;
     btn.title = plan.ok ? `Llegada en ${fmtTime(plan.seconds)}` : plan.reason;
     anyOk ||= plan.ok;
@@ -379,7 +455,7 @@ export function islandPanel(hud, id) {
     ${islandArt(game, view)}
     ${infoSection(game, view)}
     ${inboundSection(game, view)}
-    ${fleetForm(game, view)}`;
+    ${fleetForm(hud, game, view)}`;
   return {
     html,
     refresh(root) {

@@ -4,6 +4,7 @@ import {
   BUILDINGS,
   COLONY,
   COLONY_COST,
+  OCCUPATION,
   PLAYER_UNITS,
   RESEARCH,
   RESEARCH_COST_FACTOR,
@@ -307,7 +308,9 @@ export function economy(state, t = state.lastUpdate) {
     buildings[b.produces] += producerOutput(id, level) * share;
     if (share < 1) taxes += workTaxes(id, level, share);
   }
-  for (const col of state.colonies ?? []) if (!(col.raidedUntil > t)) colonies[col.specialty] += colonyYield(col);
+  // Con el puerto bloqueado u ocupado, las colonias no pueden mandar nada a la capital
+  const closed = portClosed(state);
+  for (const col of state.colonies ?? []) if (!(col.raidedUntil > t) && !closed) colonies[col.specialty] += colonyYield(col);
   const event = worldEventAt(t).event;
   const eventBonus = {};
   for (const res of RESOURCE_KEYS) {
@@ -319,10 +322,21 @@ export function economy(state, t = state.lastUpdate) {
   }
   const upkeep = upkeepPerHour(state);
   const pay = payPerHour(state);
-  const net = { ...gross, comida: gross.comida - upkeep, oro: gross.oro - pay };
+  // Ciudad ocupada: los invasores se quedan una parte de todo lo que se produce
+  const tribute = {};
+  for (const res of RESOURCE_KEYS) tribute[res] = state.occupied ? Math.max(0, gross[res]) * OCCUPATION.tribute : 0;
+  const net = {};
+  for (const res of RESOURCE_KEYS) net[res] = gross[res] - tribute[res];
+  net.comida -= upkeep;
+  net.oro -= pay;
   const hungry = {};
-  for (const res of RESOURCE_KEYS) hungry[res] = res === 'comida' ? net.comida : res === 'oro' ? gross.oro * 0.5 - pay : net[res] * 0.5;
-  return { base, buildings, research, colonies, taxes, bonus, eventBonus, gross, upkeep, pay, net, hungry };
+  for (const res of RESOURCE_KEYS) hungry[res] = res === 'comida' ? net.comida : res === 'oro' ? (gross.oro - tribute.oro) * 0.5 - pay : net[res] * 0.5;
+  return { base, buildings, research, colonies, taxes, bonus, eventBonus, gross, tribute, upkeep, pay, net, hungry, closed };
+}
+
+/** Si el puerto de la ciudad está cerrado por un bloqueo o una ocupación enemiga. */
+export function portClosed(state) {
+  return !!(state.blockade || state.occupied);
 }
 
 /** Lo que el almacén esconde de cada recurso y los piratas no pueden robar. */

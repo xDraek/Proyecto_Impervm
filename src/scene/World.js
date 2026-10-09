@@ -2405,6 +2405,18 @@ export class World {
     return new Route(this.#navigate(mouth, end));
   }
 
+  /** Ruta entre dos islas que no son la tuya (flotas que zarpan de una ciudad ocupada). */
+  #routeBetween(fromId, toId) {
+    const at = (id) => this.islands[id]?.pos.clone().setY(0) ?? null;
+    const from = at(fromId);
+    const to = at(toId);
+    if (!from || !to) return this.#routeTo(toId);
+    const dir = to.clone().sub(from).normalize();
+    const a = from.clone().addScaledVector(dir, this.#offshore(from, 14));
+    const b = to.clone().addScaledVector(dir, -this.#offshore(to, 14));
+    return new Route(this.#navigate(a, b));
+  }
+
   #syncFleets() {
     const missions = this.game.missions;
     const incoming = this.game.incoming ?? [];
@@ -2420,7 +2432,7 @@ export class World {
     }
     for (const m of missions) {
       if (this.fleets.has(m.id)) continue;
-      const route = this.#routeTo(m.target, hashString(String(m.id)) % 3);
+      const route = m.from ? this.#routeBetween(m.from, m.target) : this.#routeTo(m.target, hashString(String(m.id)) % 3);
       const type = SHIP_PRIORITY.find((s) => m.units[s]) ?? 'mercante';
       const group = new THREE.Group();
       const ship = createShip(type);
@@ -2434,7 +2446,8 @@ export class World {
       group.scale.setScalar(2.6);
       this.scene.add(group);
       const lineGeo = new THREE.BufferGeometry().setFromPoints(route.points.map((p) => p.clone().setY(0.3)));
-      const line = new THREE.Line(lineGeo, new THREE.LineDashedMaterial({ color: m.type === 'atacar' ? '#ff9a8a' : '#ffffff', dashSize: 3, gapSize: 2.5, transparent: true, opacity: 0.7 }));
+      const hostile = m.type === 'atacar' || m.type === 'invadir' || m.type === 'bloquear';
+      const line = new THREE.Line(lineGeo, new THREE.LineDashedMaterial({ color: hostile ? '#ff9a8a' : m.type === 'tributo' ? '#ffd27a' : '#ffffff', dashSize: 3, gapSize: 2.5, transparent: true, opacity: 0.7 }));
       line.computeLineDistances();
       this.scene.add(line);
       this.fleets.set(m.id, { group, line, route });

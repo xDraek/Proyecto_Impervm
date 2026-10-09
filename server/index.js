@@ -86,11 +86,18 @@ const ACTIONS = {
   trade: (g, [from, to, n]) => (own(RESOURCES, from) && own(RESOURCES, to) ? g.trade(from, to, int(n)) : bad()),
   sendMission: (g, [type, target, u, load, opts]) =>
     own(MISSION_TYPES, type) && typeof target === 'string'
-      ? g.sendMission(type, target, units(u), resources(load), { hero: opts?.hero === true, join: typeof opts?.join === 'string' && opts.join.length < 40 ? opts.join : undefined })
+      ? g.sendMission(type, target, units(u), resources(load), {
+          hero: opts?.hero === true,
+          join: typeof opts?.join === 'string' && opts.join.length < 40 ? opts.join : undefined,
+          // Zarpar desde una ciudad ocupada: el id de la misión que la ocupa
+          from: opts?.from != null && int(opts.from) >= 0 ? int(opts.from) : undefined,
+        })
       : bad(),
   hireHero: (g, [name]) => g.hireHero(typeof name === 'string' ? name : ''),
   heroSkill: (g, [skill]) => (own(HERO_SKILLS, skill) ? g.heroSkill(skill) : bad()),
   recall: (g, [id]) => g.recall(int(id)),
+  plunder: (g, [id]) => (int(id) >= 0 ? g.plunder(int(id)) : bad()),
+  breakPort: (g) => g.breakPort(),
   claimQuest: (g, [id]) => (typeof id === 'string' ? g.claimQuest(id) : bad()),
   claimDaily: (g) => g.claimDaily(),
   claimTask: (g, [id]) => (typeof id === 'string' ? g.claimTask(id) : bad()),

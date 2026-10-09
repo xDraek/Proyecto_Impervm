@@ -1,6 +1,6 @@
 import { clock, universe } from '../src/config.js';
 import { RESOURCES } from '../src/game/data.js';
-import { count } from '../src/game/combat.js';
+import { assault, battle, count, hasCombat, splitForces } from '../src/game/combat.js';
 import { Game, newState } from '../src/game/Game.js';
 import { ACHIEVEMENTS, CONTEST_CATEGORIES, CONTEST_DAYS, CONTEST_PRIZES, HORDE, WONDERS } from '../src/game/data.js';
 import { playerCombat, wonderLevel, wonderOf, worldEventAt } from '../src/game/rules.js';
@@ -31,6 +31,14 @@ const TOKEN_HOURS = { registro: 24, correo: 24, clave: 1, permiso: 0.5 };
 const tokenHash = (token) => createHash('sha256').update(String(token)).digest('hex');
 const cleanEmail = (email) => String(email ?? '').trim().toLowerCase();
 const ALLIANCE_RE = /^[\p{L}\p{N}_ .'-]{3,30}$/u;
+// Flotas que avisan al llegar a tu ciudad
+const HOSTILE = new Set(['atacar', 'invadir', 'bloquear']);
+
+/** Quién bloquea el puerto u ocupa la ciudad (para quien la mira desde fuera). */
+function portOf(state) {
+  const info = state.occupied ?? state.blockade;
+  return info ? { kind: state.occupied ? 'invadir' : 'bloquear', by: info.by, name: info.name, until: info.until } : null;
+}
 const TAG_RE = /^[\p{L}\p{N}]{2,5}$/u;
 
 export class WorldServer {
@@ -372,6 +380,7 @@ export class WorldServer {
       inactive: this.isInactive(userId),
       banner: game.state.banner ?? null,
       alliance: a ? { id: a.id, tag: a.tag, name: a.name } : null,
+      port: portOf(game.state),
     };
   }
 
@@ -710,6 +719,142 @@ export class WorldServer {
     return res;
   }
 
+  // ── Bloqueos y ocupaciones ─────────────────────────────────────────────────
+
+  /** Una flota llega a bloquear el puerto de `ownerId`: combate naval contra su flota. */
+  blockadePlayer(ownerId, payload, t) {
+    const target = this.games.get(ownerId);
+    if (!target || target.state.vacation) return null;
+    target.update(t);
+    const res = target.receiveBlockade(payload, t);
+    target.dirty = true;
+    this.pendingPush.add(ownerId);
+    return res;
+  }
+
+  /** Empieza un bloqueo o una ocupación de la ciudad de `ownerId` (la ocupación releva a cualquier bloqueo). */
+  seizePort(ownerId, kind, info, t) {
+    const target = this.games.get(ownerId);
+    if (!target) return false;
+    target.update(t);
+    if (kind === 'invadir' && target.state.blockade) {
+      const b = this.stationAt(ownerId, 'bloquear');
+      if (b?.mission) b.game.endStation(b.mission, t, 'relevo');
+      target.state.blockade = null;
+      if (b?.game) this.pendingPush.add(b.game.userId);
+    }
+    target.portSeized(kind, info, t);
+    target.dirty = true;
+    this.pendingPush.add(ownerId);
+    this.mapCache = null;
+    return true;
+  }
+
+  /**
+   * Quién bloquea o ocupa la ciudad de `ownerId` (la ocupación primero, o el `kind` pedido):
+   * { kind, info, game, mission } (sin `mission` si la flota ya no está), o null.
+   */
+  stationAt(ownerId, kind = null) {
+    const s = this.games.get(ownerId)?.state;
+    if (!s) return null;
+    kind ??= s.occupied ? 'invadir' : s.blockade ? 'bloquear' : null;
+    const info = kind === 'invadir' ? s.occupied : kind === 'bloquear' ? s.blockade : null;
+    if (!info) return null;
+    const game = this.games.get(info.by) ?? null;
+    const mission = game?.state.missions.find((m) => m.id === info.mission && m.type === kind && m.phase === 'estacionada') ?? null;
+    return { kind, info, game, mission };
+  }
+
+  /** Se acaba un bloqueo o una ocupación en la isla `islandId`. Devuelve el tributo que se llevan. */
+  liftStation(islandId, { by, mission, kind, reason, who }, t) {
+    const owner = this.islands.get(islandId)?.owner;
+    const target = this.games.get(owner);
+    const info = kind === 'invadir' ? target?.state.occupied : target?.state.blockade;
+    if (!info || info.by !== by || info.mission !== mission) return {};
+    target.update(t);
+    const owed = target.portFreed(kind, { reason, who }, t);
+    target.dirty = true;
+    this.pendingPush.add(owner);
+    this.pendingPush.add(by);
+    this.mapCache = null;
+    return owed;
+  }
+
+  /**
+   * Alguien combate contra quien bloquea u ocupa la ciudad de `ownerId`: el dueño desde dentro
+   * (`fromSea: false`; contra un bloqueo, solo con barcos) o sus aliados llegando por mar.
+   * Devuelve { kind, result, broken, enemy } o null.
+   */
+  fightStation(ownerId, attacker, t, { fromSea = true } = {}) {
+    let st = this.stationAt(ownerId);
+    if (!st) return null;
+    const victim = this.games.get(ownerId);
+    // Que quien la mantiene llegue a este instante (puede que se le acabe el tiempo justo antes)
+    if (st.mission) {
+      st.game.update(t);
+      st = this.stationAt(ownerId);
+      if (!st) return null;
+    }
+    if (!st.mission) {
+      // La flota ya no está: la ciudad queda libre sin combate
+      victim.state[st.kind === 'invadir' ? 'occupied' : 'blockade'] = null;
+      victim.dirty = true;
+      return { kind: st.kind, result: null, broken: true, enemy: st.info.name };
+    }
+    const occ = playerCombat(st.game.state);
+    const def = { units: { ...st.mission.units }, atkMul: occ.atkMul, hpMul: occ.hpMul };
+    const result = fromSea ? assault(attacker, def, { needLanding: st.kind === 'invadir' }) : battle(attacker, def);
+    const left = splitForces(result.def.left);
+    // Sin barcos de guerra no hay bloqueo; sin soldados, no hay ocupación
+    const broken = st.kind === 'bloquear' ? !hasCombat(left.sea) : !hasCombat(left.land);
+    st.game.stationFought(st.mission, { result, broken, enemy: attacker.name }, t);
+    st.game.dirty = true;
+    victim.dirty = true;
+    this.pendingPush.add(st.game.userId);
+    this.pendingPush.add(ownerId);
+    return { kind: st.kind, result, broken, enemy: st.info.name };
+  }
+
+  /** Quien ocupa la ciudad de `ownerId` la saquea: { tribute, loot }. */
+  plunderCity(ownerId, payload, t) {
+    const target = this.games.get(ownerId);
+    if (!target?.state.occupied) return null;
+    target.update(t);
+    const res = target.plunderedBy(payload, t);
+    target.dirty = true;
+    this.pendingPush.add(ownerId);
+    return res;
+  }
+
+  /**
+   * Bloqueos y ocupaciones que ya no se sostienen: la flota ha desaparecido, ya no quedan soldados
+   * ocupando o los dos jugadores ya no están enfrentados (aliados o con un pacto).
+   */
+  #checkStations(now) {
+    for (const [uid, game] of this.games) {
+      for (const kind of ['invadir', 'bloquear']) {
+        const st = this.stationAt(uid, kind);
+        if (!st) continue;
+        if (!st.mission) {
+          game.update(now);
+          game.portFreed(kind, { reason: 'tiempo' }, now);
+          game.dirty = true;
+          this.pendingPush.add(uid);
+          continue;
+        }
+        const rel = this.relation(st.info.by, uid);
+        const units = splitForces(st.mission.units);
+        const empty = kind === 'invadir' ? !hasCombat(units.land) : !hasCombat(units.sea);
+        if (rel === 'aliado' || rel === 'pacto' || empty) {
+          st.game.update(now);
+          st.game.endStation(st.mission, now, empty ? 'tiempo' : 'paz');
+          st.game.dirty = true;
+          this.pendingPush.add(st.game.userId);
+        }
+      }
+    }
+  }
+
   attackPlayer(ownerId, payload, t) {
     const target = this.games.get(ownerId);
     if (!target || target.state.vacation) return null;
@@ -821,6 +966,7 @@ export class WorldServer {
     }
     if (this.meta.contest && Date.now() >= this.meta.contest.end) this.#finishContest();
     this.#updateHordes(now);
+    this.#checkStations(now);
     // Enlaces de correo caducados (cada diez minutos)
     if (Date.now() - (this.tokenSweep ?? 0) > 600_000) {
       this.tokenSweep = Date.now();
@@ -866,7 +1012,10 @@ export class WorldServer {
     const near = this.islandsNear(game.state.home, VIEW_RADIUS);
     const ids = new Set(near.map((i) => i.id));
     // También las islas lejanas a las que van tus flotas o que son tus colonias
-    for (const m of game.state.missions) ids.add(m.target);
+    for (const m of game.state.missions) {
+      ids.add(m.target);
+      if (m.from) ids.add(m.from);
+    }
     for (const c of game.state.colonies) {
       ids.add(c.id);
       // También su continente, para ver su maravilla y si hay horda
@@ -904,7 +1053,20 @@ export class WorldServer {
       joint: this.#jointList(userId),
       traffic: this.#traffic(userId, game.state.home),
       support: this.supportersAt(game.state.home, userId).map(({ game: g, mission }) => ({ from: g.name, units: mission.units })),
+      owed: this.#owedTo(game),
     };
+  }
+
+  /** Tributo apartado en cada ciudad que ocupa este jugador (id de la misión → recursos). */
+  #owedTo(game) {
+    const out = {};
+    for (const m of game.state.missions) {
+      if (m.type !== 'invadir' || m.phase !== 'estacionada') continue;
+      const owner = this.islands.get(m.target)?.owner;
+      const occ = this.games.get(owner)?.state.occupied;
+      if (occ?.by === game.userId && occ.mission === m.id) out[m.id] = Object.fromEntries(Object.entries(occ.owed ?? {}).map(([r, n]) => [r, Math.floor(n)]));
+    }
+    return out;
   }
 
   /** Flotas de otros jugadores que navegan cerca de ti (sin decir qué llevan), para ver el mar con vida. */
@@ -915,9 +1077,10 @@ export class WorldServer {
     const out = [];
     for (const [uid, g] of this.games) {
       if (uid === userId) continue;
-      const from = this.islands.get(g.state.home);
+      const home = this.islands.get(g.state.home);
       for (const m of g.state.missions) {
         if (m.target === homeId || (m.phase !== 'ida' && m.phase !== 'vuelta')) continue;
+        const from = m.from ? this.islands.get(m.from) : home;
         const to = this.islands.get(m.target);
         if (!to || !(near(from) || near(to))) continue;
         const ship = ['dromon', 'galeon', 'trirreme', 'brulote', 'mercante', 'bote'].find((s) => m.units[s]) ?? 'mercante';
@@ -951,10 +1114,10 @@ export class WorldServer {
     const list = [];
     for (const [uid, other] of this.games) {
       for (const m of other.state.missions) {
-        if (m.target !== homeId || m.phase !== 'ida' || m.type !== 'atacar') continue;
-        const from = this.islands.get(other.state.home);
+        if (m.target !== homeId || m.phase !== 'ida' || !HOSTILE.has(m.type)) continue;
+        const from = this.islands.get(m.from ?? other.state.home);
         const size = Object.values(m.units).reduce((a, b) => a + b, 0);
-        list.push({ id: `${uid}-${m.id}`, from: other.name, fromIsland: from?.name, x: from?.x, z: from?.z, depart: m.depart, arrive: m.arrive, size });
+        list.push({ id: `${uid}-${m.id}`, type: m.type, from: other.name, fromIsland: from?.name, x: from?.x, z: from?.z, depart: m.depart, arrive: m.arrive, size });
       }
     }
     return list.sort((a, b) => a.arrive - b.arrive);

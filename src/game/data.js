@@ -692,7 +692,28 @@ export const MISSION_TYPES = {
   expedicion: { name: 'Expedición', icon: '🧭' },
   transporte: { name: 'Transporte', icon: '📦' },
   apoyo: { name: 'Apoyo', icon: '🛡️' },
+  bloquear: { name: 'Bloquear puerto', icon: '⛓️' },
+  invadir: { name: 'Invadir', icon: '🦅' },
+  tributo: { name: 'Tributo', icon: '💰' },
 };
+
+/**
+ * Bloquear un puerto: tus barcos de guerra vencen a su flota y se quedan frente a la ciudad.
+ * Mientras dure, de allí no zarpa nadie, no entran transportes ni mercaderes y sus colonias no
+ * pueden mandarle nada. `hours`: lo más que aguanta la flota en el mar.
+ */
+export const BLOCKADE = { hours: 8 };
+
+/**
+ * Invadir una ciudad: si tus tropas desembarcan y acaban con su ejército, se quedan ocupándola.
+ * Mientras tanto controlas su puerto (como un bloqueo), te llevas `tribute` de todo lo que produce
+ * y puedes lanzar ataques desde allí. Cada `plunderHours` puedes saquear su almacén (hasta
+ * `plunderShare` de lo que no esconde) y mandarlo a casa con el tributo. Como mucho `max`
+ * ocupaciones a la vez y `hours` horas cada una.
+ */
+export const OCCUPATION = { hours: 24, tribute: 0.2, plunderHours: 4, plunderShare: 0.5, max: 3 };
+/** Misiones que se pueden lanzar desde una ciudad ocupada. */
+export const OUTPOST_MISSIONS = ['atacar', 'explorar', 'sabotaje', 'bloquear', 'invadir'];
 
 // ── Templo ───────────────────────────────────────────────────────────────────
 // duration: horas de juego que dura el efecto (0 = instantáneo).
