@@ -200,6 +200,8 @@ export class World {
     this.carts = [];
     this.boats = [];
     this.dolphins = [];
+    // Ovejas del prado de la granja (pastan, levantan la cabeza y dan unos pasos)
+    this.flock = [];
     this.weather = { dark: 0, rain: 0, storm: false, flash: 0, rainSound: -1 };
     this.fx = [];
     // Los combates que ya había al entrar no se vuelven a ver
@@ -853,11 +855,18 @@ export class World {
     scene.add(this.houseGroup);
 
     // El rebaño, en el prado de la granja (donde no hay casas ni campos)
-    for (let i = 0; i < 13; i++) {
-      const p = polar(farm.r + 2.2 + rand() * 4.5, farm.angle + 22 + rand() * 22);
-      if (!free(p, 0.3, 0.35)) continue;
-      blockers.push({ p, r: 0.35 });
-      place(sheep(), p, rand() * Math.PI * 2, 0.9 + rand() * 0.3);
+    for (let i = 0; i < 60 && this.flock.length < 10; i++) {
+      const p = polar(farm.r + 2.2 + rand() * 4.5, farm.angle + 20 + rand() * 26);
+      // Cada una pasta en su corro: se mueve un poco alrededor de donde está
+      if (!free(p, 0.3, 0.55)) continue;
+      blockers.push({ p, r: 0.55 });
+      const s = sheep();
+      s.position.copy(p);
+      s.rotation.y = rand() * Math.PI * 2;
+      s.scale.setScalar(0.95 + rand() * 0.3);
+      s.userData.graze = { home: p.clone(), state: 'pace', t: rand() * 6, speed: 0, phase: rand() * 10 };
+      scene.add(s);
+      this.flock.push(s);
     }
 
     // Pebeteros de mármol a los lados de la avenida del puerto (arden de noche)
@@ -1725,6 +1734,7 @@ export class World {
         }
       }
       const bob = PAVE_Y + (!w.cart && moving ? Math.abs(Math.sin(t * 9 + i)) * 0.04 : 0);
+      if (w.cart) v.userData.roll?.(moving || w.turn > 0 ? w.speed * dt : 0, t);
       if (w.avenue) {
         v.position.copy(onAvenue(w.s, w.lane)).setY(bob);
         let heading = gate + (w.dir > 0 ? 0 : Math.PI);
@@ -1749,8 +1759,57 @@ export class World {
     return out;
   }
 
+  /**
+   * Las ovejas: casi siempre pastan con la cabeza gacha; de vez en cuando la levantan a mirar o dan
+   * unos pasos (sin salir de su corro) moviendo las patas.
+   */
+  #updateFlock(dt, t) {
+    for (const s of this.flock) {
+      const g = s.userData.graze;
+      const { head, legs } = s.userData;
+      g.t -= dt;
+      if (g.t <= 0) {
+        // Siguiente cosa que hacer
+        const r = Math.random();
+        if (r < 0.55) {
+          g.state = 'pace';
+          g.t = 4 + Math.random() * 6;
+        } else if (r < 0.8) {
+          g.state = 'look';
+          g.t = 1.5 + Math.random() * 2.5;
+        } else {
+          g.state = 'walk';
+          g.t = 1.2 + Math.random() * 2;
+          // Hacia un sitio de su corro
+          const a = Math.random() * TAU;
+          const to = g.home.clone().add(new THREE.Vector3(Math.sin(a), 0, Math.cos(a)).multiplyScalar(Math.random() * 0.35));
+          g.heading = Math.atan2(to.x - s.position.x, to.z - s.position.z);
+        }
+      }
+      let pitch = 0.95 + Math.sin(t * 3 + g.phase) * 0.06;
+      let step = 0;
+      if (g.state === 'look') pitch = -0.05 + Math.sin(t * 0.8 + g.phase) * 0.05;
+      else if (g.state === 'walk') {
+        pitch = 0.25;
+        // Gira despacio hacia donde va y avanza
+        const diff = ((g.heading - s.rotation.y + Math.PI * 3) % TAU) - Math.PI;
+        s.rotation.y += Math.sign(diff) * Math.min(Math.abs(diff), dt * 2.2);
+        if (Math.abs(diff) < 0.6) {
+          const v = 0.28 * dt * s.scale.x;
+          s.position.x += Math.sin(s.rotation.y) * v;
+          s.position.z += Math.cos(s.rotation.y) * v;
+          step = 1;
+          if (s.position.distanceTo(g.home) > 0.4) g.t = 0;
+        }
+      }
+      head.rotation.x += (pitch - head.rotation.x) * Math.min(1, dt * 4);
+      legs.forEach((leg, k) => (leg.rotation.x = step * Math.sin(t * 9 + (k === 0 || k === 3 ? 0 : Math.PI)) * 0.45));
+    }
+  }
+
   #updateLife(dt, t) {
     this.#updateWalkers(dt, t);
+    this.#updateFlock(dt, t);
     const obstacles = this.#seaObstacles();
     // Pesqueros: cada uno por su círculo; si una flota o una isla les corta el paso, viran en redondo
     for (const [i, boat] of this.boats.entries()) {
@@ -1822,8 +1881,14 @@ export class World {
       const a = f.phase + t * f.speed;
       gull.position.set(Math.sin(a) * f.r, f.h + Math.sin(t * 0.7 + i) * 0.8, Math.cos(a) * f.r);
       gull.rotation.set(0, a + (f.speed > 0 ? Math.PI / 2 : -Math.PI / 2), f.speed > 0 ? -0.25 : 0.25);
+      // Aleteo: el ala entera sube y baja y la punta la sigue con algo de retraso; a ratos planean
+      const glide = Math.sin(t * 0.35 + i * 1.7) > 0.3;
+      const beat = glide ? 0.12 + Math.sin(t * 1.5 + i) * 0.05 : Math.sin(t * 7 + i) * 0.5;
+      const tip = glide ? -0.08 : Math.sin(t * 7 + i - 0.7) * 0.35;
       for (const wing of gull.children) {
-        if (wing.userData.side) wing.rotation.z = wing.userData.side * Math.sin(t * 7 + i) * 0.45;
+        if (!wing.userData.side) continue;
+        wing.rotation.z = wing.userData.side * beat;
+        wing.userData.outer.rotation.z = wing.userData.side * tip;
       }
     }
   }
@@ -1957,11 +2022,29 @@ export class World {
     }
   }
 
-  /** Las gaviotas se oyen cuando vuelan sobre la isla cerca de donde miras (solo en la vista de la isla). */
+  /**
+   * Las gaviotas se oyen de vez en cuando (unos segundos cada medio minuto o minuto y medio), y solo
+   * si vuelan sobre la isla cerca de donde miras (en la vista de la isla).
+   */
   #gullSound(dt) {
     this.gullClock = (this.gullClock ?? 0) + dt;
     if (this.gullClock < 0.4 || this.showcase) return;
+    const step = this.gullClock;
     this.gullClock = 0;
+    // Entre graznido y graznido, silencio
+    const call = (this.gullCall ??= { wait: 10 + Math.random() * 20, left: 0 });
+    if (call.left > 0) call.left -= step;
+    else {
+      call.wait -= step;
+      if (call.wait <= 0) {
+        call.left = 4 + Math.random() * 4;
+        call.wait = 30 + Math.random() * 60;
+      }
+    }
+    if (call.left <= 0) {
+      setGulls(0);
+      return;
+    }
     let k = 0;
     if (this.view === 'isla') {
       const target = this.controls.target;
@@ -2801,11 +2884,60 @@ function fishermansHut() {
   return g;
 }
 
+/**
+ * Oveja: vellón lanudo de bolas, patas y cara oscuras, orejas caídas. Mira hacia +Z; la cabeza
+ * (userData.head) gira en el cuello para pastar y las patas (userData.legs) en la cadera para andar.
+ */
 function sheep() {
   const g = new THREE.Group();
-  g.add(box(0.42, 0.26, 0.28, '#f4f1e8', 0, 0.14, 0));
-  g.add(box(0.14, 0.14, 0.14, '#3a332c', 0.26, 0.26, 0));
-  for (const [x, z] of [[-0.14, -0.09], [0.14, -0.09], [-0.14, 0.09], [0.14, 0.09]]) g.add(box(0.05, 0.14, 0.05, '#3a332c', x, 0, z));
+  const wool = ['#f4f1e8', '#ece6d8', '#f7f4ec'];
+  const dark = '#2f2a25';
+  const body = mesh(new THREE.SphereGeometry(0.2, 9, 7), wool[0]);
+  body.scale.set(0.85, 0.78, 1.2);
+  body.position.y = 0.32;
+  g.add(body);
+  // Rizos del vellón por encima y por los lados
+  for (let k = 0; k < 9; k++) {
+    const a = (k / 9) * Math.PI * 2;
+    const puff = mesh(new THREE.DodecahedronGeometry(0.075 + (k % 3) * 0.012), wool[k % 3]);
+    puff.position.set(Math.sin(a) * 0.12, 0.4 + (k % 2) * 0.04, Math.cos(a) * 0.17);
+    g.add(puff);
+  }
+  const tail = mesh(new THREE.DodecahedronGeometry(0.05), wool[1]);
+  tail.position.set(0, 0.36, -0.25);
+  g.add(tail);
+  // Patas con su pezuña (giran en la cadera)
+  const legs = [];
+  for (const [x, z] of [[-0.08, 0.12], [0.08, 0.12], [-0.08, -0.12], [0.08, -0.12]]) {
+    const leg = new THREE.Group();
+    leg.position.set(x, 0.24, z);
+    const shin = cyl(0.022, 0.02, 0.22, 5, dark, 0, -0.24, 0);
+    leg.add(shin, cyl(0.026, 0.026, 0.03, 5, '#1c1915', 0, -0.24, 0));
+    g.add(leg);
+    legs.push(leg);
+  }
+  // Cabeza: cara negra alargada, orejas caídas y un mechón de lana en la frente
+  const head = new THREE.Group();
+  head.position.set(0, 0.38, 0.2);
+  const face = mesh(new THREE.SphereGeometry(0.07, 7, 6), dark);
+  face.scale.set(0.8, 0.85, 1.35);
+  face.position.set(0, 0, 0.09);
+  head.add(face);
+  for (const s of [-1, 1]) {
+    const ear = box(0.08, 0.025, 0.04, dark, s * 0.07, 0.01, 0.06);
+    ear.rotation.z = s * -0.5;
+    head.add(ear);
+    const eye = mesh(new THREE.SphereGeometry(0.012, 5, 4), '#e8dcc0');
+    eye.position.set(s * 0.045, 0.025, 0.12);
+    head.add(eye);
+  }
+  const tuft = mesh(new THREE.DodecahedronGeometry(0.055), wool[2]);
+  tuft.position.set(0, 0.05, 0.04);
+  head.add(tuft);
+  head.rotation.x = 0.9;
+  g.add(head);
+  g.userData.head = head;
+  g.userData.legs = legs;
   return g;
 }
 
@@ -2831,23 +2963,174 @@ function dolphin() {
   return g;
 }
 
+/** Rueda de carro de radios: llanta, cubo y ocho radios (gira en su eje X). */
+function cartWheel(r) {
+  const w = new THREE.Group();
+  const rim = mesh(new THREE.TorusGeometry(r, 0.035, 5, 16), '#6e4a2a');
+  rim.rotation.y = Math.PI / 2;
+  w.add(rim);
+  const hub = cyl(0.06, 0.06, 0.1, 8, '#4a3220', 0, 0, 0);
+  hub.rotation.z = Math.PI / 2;
+  hub.position.y = 0;
+  w.add(hub);
+  for (let k = 0; k < 8; k++) {
+    const spoke = box(0.025, r * 2 - 0.04, 0.035, '#8b5a2b', 0, 0, 0);
+    spoke.position.y = 0;
+    spoke.rotation.x = (k * Math.PI) / 8;
+    w.add(spoke);
+  }
+  w.userData.rig = true;
+  return w;
+}
+
+/**
+ * Carro de bueyes: un buey rojizo con la cara blanca y los cuernos en lira, uncido al yugo, y una
+ * carreta de tablas con estacas, ruedas de radios y cargada de sacos de arpillera y un cesto. Mira
+ * hacia +Z. Al andar giran las ruedas y el buey mueve las patas (userData.roll).
+ */
 function cart() {
   const g = new THREE.Group();
   g.userData.cart = true;
-  // Buey delante (+Z) y carro con sacos detrás
-  g.add(box(0.36, 0.34, 0.75, '#8a6a4a', 0, 0.22, 0.7));
-  g.add(box(0.24, 0.24, 0.28, '#7a5a3a', 0, 0.38, 1.15));
-  for (const [x, z] of [[-0.12, 0.45], [0.12, 0.45], [-0.12, 0.95], [0.12, 0.95]]) g.add(box(0.07, 0.22, 0.07, '#5e3b1c', x, 0, z));
-  g.add(box(0.05, 0.05, 0.6, C.woodDark, 0, 0.35, 0.1));
-  g.add(box(0.7, 0.32, 0.9, C.wood, 0, 0.28, -0.5));
-  for (const x of [-0.4, 0.4]) {
-    const wheel = cyl(0.24, 0.24, 0.06, 10, C.woodDark, 0, 0, 0);
-    wheel.rotation.z = Math.PI / 2;
-    wheel.position.set(x, 0.24, -0.5);
-    g.add(wheel);
+  const hide = '#9a5a32';
+  const cream = '#eadfca';
+  const hoof = '#2a2420';
+  // ── El buey, delante ──
+  const ox = new THREE.Group();
+  ox.position.set(0, 0, 0.78);
+  const body = mesh(new THREE.CapsuleGeometry(0.17, 0.42, 4, 10), hide);
+  body.rotation.x = Math.PI / 2;
+  body.scale.set(1, 1, 1.15);
+  body.position.set(0, 0.5, 0);
+  ox.add(body);
+  // Barriga clara y la cruz algo levantada
+  const belly = mesh(new THREE.CapsuleGeometry(0.13, 0.3, 3, 8), cream);
+  belly.rotation.x = Math.PI / 2;
+  belly.position.set(0, 0.42, 0.02);
+  ox.add(belly);
+  const withers = mesh(new THREE.SphereGeometry(0.15, 8, 6), hide);
+  withers.position.set(0, 0.6, 0.2);
+  ox.add(withers);
+  const legs = [];
+  for (const [x, z] of [[-0.1, 0.24], [0.1, 0.24], [-0.1, -0.24], [0.1, -0.24]]) {
+    const leg = new THREE.Group();
+    leg.position.set(x, 0.4, z);
+    leg.add(cyl(0.045, 0.04, 0.22, 6, hide, 0, -0.22, 0), cyl(0.035, 0.035, 0.16, 6, cream, 0, -0.36, 0));
+    leg.add(box(0.075, 0.05, 0.085, hoof, 0, -0.4, 0.005));
+    leg.userData.rig = true;
+    ox.add(leg);
+    legs.push(leg);
   }
-  for (const [x, c] of [[-0.15, '#e9dcc0'], [0.17, '#d8c49a']]) g.add(box(0.28, 0.24, 0.32, c, x, 0.6, -0.5));
-  return g;
+  // Cabeza: cara blanca, morro oscuro, orejas y cuernos en lira
+  const head = new THREE.Group();
+  head.position.set(0, 0.58, 0.42);
+  // Testuz ancho y la cara que se estrecha hacia el morro, inclinada hacia abajo
+  const brow = mesh(new THREE.SphereGeometry(0.095, 8, 6), cream);
+  brow.scale.set(1.05, 0.9, 0.9);
+  head.add(brow);
+  const face = mesh(new THREE.CylinderGeometry(0.055, 0.085, 0.24, 7), cream);
+  face.rotation.x = Math.PI / 2 + 0.6;
+  face.position.set(0, -0.08, 0.09);
+  head.add(face);
+  const muzzle = mesh(new THREE.SphereGeometry(0.065, 7, 5), '#5a4a40');
+  muzzle.scale.set(1.1, 0.8, 0.9);
+  muzzle.position.set(0, -0.17, 0.17);
+  head.add(muzzle);
+  for (const s of [-1, 1]) {
+    // Orejas caídas a los lados y cuernos que salen hacia fuera y se curvan hacia arriba
+    const ear = box(0.1, 0.035, 0.06, hide, s * 0.13, -0.02, -0.01);
+    ear.rotation.z = s * -0.4;
+    head.add(ear);
+    const horn = cyl(0.026, 0.032, 0.14, 6, '#e8dcc2', 0, 0, 0);
+    horn.position.set(s * 0.15, 0.05, -0.02);
+    horn.rotation.z = (s * -Math.PI) / 2;
+    head.add(horn);
+    const up = mesh(new THREE.ConeGeometry(0.024, 0.16, 6), '#e8dcc2');
+    up.position.set(s * 0.25, 0.11, -0.02);
+    up.rotation.z = -s * 0.35;
+    head.add(up);
+    const tip = mesh(new THREE.ConeGeometry(0.012, 0.05, 5), '#4a4038');
+    tip.position.set(s * 0.278, 0.2, -0.02);
+    tip.rotation.z = -s * 0.35;
+    head.add(tip);
+    const eye = mesh(new THREE.SphereGeometry(0.017, 5, 4), '#1c1915');
+    eye.position.set(s * 0.075, -0.02, 0.07);
+    head.add(eye);
+  }
+  ox.add(head);
+  // Cola con su borla
+  const tail = cyl(0.015, 0.015, 0.38, 4, hide, 0, 0, 0);
+  tail.position.set(0, 0.42, -0.42);
+  tail.rotation.x = 0.15;
+  ox.add(tail, box(0.05, 0.08, 0.05, '#3a2a1e', 0, 0.2, -0.44));
+  // Yugo sobre la cruz, atado con correas, y la lanza que va al carro
+  ox.add(box(0.62, 0.08, 0.09, '#8b5a2b', 0, 0.74, 0.28));
+  for (const s of [-1, 1]) {
+    ox.add(box(0.03, 0.26, 0.11, '#4a3220', s * 0.17, 0.5, 0.28));
+    ox.add(cyl(0.05, 0.05, 0.05, 6, '#a38457', s * 0.24, 0.73, 0.28));
+  }
+  g.add(ox);
+  // Dos varas, una a cada lado del buey, del frente del carro a los extremos del yugo
+  for (const sx of [-1, 1]) {
+    const from = new THREE.Vector3(sx * 0.3, 0.5, 0.06);
+    const to = new THREE.Vector3(sx * 0.27, 0.74, 1.06);
+    const d = to.clone().sub(from);
+    const shaft = mesh(new THREE.BoxGeometry(0.055, 0.055, d.length()), '#7a5230');
+    shaft.position.copy(from).addScaledVector(d, 0.5);
+    shaft.lookAt(shaft.position.clone().add(d));
+    g.add(shaft);
+    // Atadura de cuerda donde la vara se une al yugo
+    g.add(cyl(0.045, 0.045, 0.07, 6, '#a38457', to.x, to.y - 0.035, to.z));
+  }
+
+  // ── La carreta, detrás ──
+  const cz = -0.42;
+  const wood = ['#8b5a2b', '#7a4f26', '#946232'];
+  g.add(box(0.7, 0.06, 1.05, '#6e4a2a', 0, 0.4, cz));
+  for (const s of [-1, 1]) {
+    // Laterales de dos tablas y estacas que asoman por arriba
+    for (const [y, k] of [[0.46, 0], [0.6, 1]]) g.add(box(0.04, 0.12, 1.05, wood[k], s * 0.35, y, cz));
+    for (const z of [-0.47, 0, 0.47]) g.add(box(0.05, 0.4, 0.05, '#5e3b1c', s * 0.37, 0.4, cz + z));
+  }
+  for (const s of [-1, 1]) {
+    for (const [y, k] of [[0.46, 2], [0.6, 0]]) g.add(box(0.66, 0.12, 0.04, wood[k], 0, y, cz + s * 0.51));
+  }
+  // Eje y ruedas
+  g.add(box(0.95, 0.06, 0.06, '#4a3220', 0, 0.25, cz));
+  const wheels = [];
+  for (const s of [-1, 1]) {
+    const wheel = cartWheel(0.28);
+    wheel.position.set(s * 0.45, 0.28, cz);
+    g.add(wheel);
+    wheels.push(wheel);
+  }
+  // La carga: sacos de arpillera atados por arriba y un cesto de mimbre
+  const sack = (x, y, z, s, c) => {
+    const bag = mesh(new THREE.SphereGeometry(0.14, 8, 6), c);
+    bag.scale.set(s, s * 1.1, s);
+    bag.position.set(x, y, z);
+    g.add(bag);
+    // La boca fruncida y atada, con la tela abierta en flor por encima
+    const neck = mesh(new THREE.ConeGeometry(0.06 * s, 0.09 * s, 6), c);
+    neck.position.set(x, y + 0.16 * s, z);
+    g.add(neck, cyl(0.028 * s, 0.028 * s, 0.03, 6, '#8a7350', x, y + 0.17 * s, z));
+    g.add(cyl(0.05 * s, 0.02 * s, 0.05 * s, 6, c, x, y + 0.19 * s, z));
+  };
+  sack(-0.14, 0.58, cz - 0.28, 1.0, '#d9c9a3');
+  sack(0.15, 0.58, cz - 0.2, 0.95, '#cfbd94');
+  sack(0.12, 0.58, cz + 0.22, 1.0, '#d9c9a3');
+  sack(0.02, 0.8, cz - 0.05, 0.9, '#e2d4b0');
+  g.add(cyl(0.15, 0.12, 0.2, 10, '#b08a4e', -0.13, 0.43, cz + 0.22));
+  for (const y of [0.48, 0.56]) g.add(cyl(0.155, 0.155, 0.02, 10, '#8a6a3a', -0.13, y, cz + 0.22));
+
+  // Al andar: giran las ruedas y el buey mueve las patas en diagonal
+  let travelled = 0;
+  g.userData.roll = (dist, t) => {
+    travelled += dist;
+    for (const w of wheels) w.rotation.x = travelled / 0.28;
+    const k = dist > 0 ? 1 : 0;
+    legs.forEach((leg, i) => (leg.rotation.x = k * Math.sin(t * 6 + (i === 0 || i === 3 ? 0 : Math.PI)) * 0.4));
+  };
+  return bakeStatic(g);
 }
 
 /** Las banderas (las que ondean con el color principal) toman el color del estandarte del jugador. */

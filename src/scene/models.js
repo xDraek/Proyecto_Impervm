@@ -1930,20 +1930,56 @@ export function createVillager(i) {
   return g;
 }
 
+/**
+ * Gaviota patiamarilla: cuerpo blanco ahusado, lomo y alas gris perla con las puntas negras y su
+ * lunar blanco, pico amarillo y cola en abanico. Mira hacia +Z. Cada ala (userData.side) gira en el
+ * hombro y su mitad de fuera (userData.outer) en el codo, para que el aleteo se doble.
+ */
 export function createGull() {
   const g = new THREE.Group();
-  const white = mat('#f4f4f2');
-  const body = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.12, 0.5), white);
-  g.add(body);
+  const white = mat('#f6f6f3');
+  const grey = mat('#b9c0c7');
+  const black = mat('#2a2a2a');
+  const part = (geo, material, x, y, z) => {
+    const m = new THREE.Mesh(geo, material);
+    m.position.set(x, y, z);
+    g.add(m);
+    return m;
+  };
+  part(new THREE.SphereGeometry(0.1, 9, 7), white, 0, 0, 0).scale.set(0.95, 0.85, 2.5);
+  // Lomo gris entre las alas
+  part(new THREE.SphereGeometry(0.08, 8, 5, 0, Math.PI * 2, 0, Math.PI / 2), grey, 0, 0.03, -0.02).scale.set(1, 0.6, 2.2);
+  part(new THREE.SphereGeometry(0.075, 8, 6), white, 0, 0.06, 0.27);
+  const beak = part(new THREE.ConeGeometry(0.022, 0.11, 6), mat('#f2c230'), 0, 0.045, 0.37);
+  beak.rotation.x = Math.PI / 2;
+  for (const s of [-1, 1]) part(new THREE.SphereGeometry(0.012, 5, 4), black, s * 0.05, 0.08, 0.31);
+  // Cola en abanico, blanca
+  const tail = part(new THREE.ConeGeometry(0.1, 0.2, 4), white, 0, 0.01, -0.3);
+  tail.rotation.x = -Math.PI / 2;
+  tail.scale.set(1, 1, 0.25);
   for (const s of [-1, 1]) {
     const wing = new THREE.Group();
-    wing.position.x = s * 0.07;
-    const blade = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.03, 0.22), white);
-    blade.position.x = s * 0.35;
-    const tip = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.031, 0.18), mat('#3a3a3a'));
-    tip.position.x = s * 0.62;
-    wing.add(blade, tip);
+    wing.position.set(s * 0.07, 0.03, 0.02);
+    // Mitad de dentro: ancha, gris con el borde de ataque blanco
+    const inner = new THREE.Mesh(new THREE.BoxGeometry(0.44, 0.025, 0.24), grey);
+    inner.position.x = s * 0.22;
+    const edge = new THREE.Mesh(new THREE.BoxGeometry(0.44, 0.027, 0.04), white);
+    edge.position.set(s * 0.22, 0, 0.11);
+    wing.add(inner, edge);
+    // Mitad de fuera: más estrecha y echada hacia atrás, con la punta negra
+    const outer = new THREE.Group();
+    outer.position.x = s * 0.44;
+    const hand = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.022, 0.18), grey);
+    hand.position.set(s * 0.17, 0, -0.03);
+    const tip = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.024, 0.13), black);
+    tip.position.set(s * 0.4, 0, -0.07);
+    const spot = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.026, 0.05), white);
+    spot.position.set(s * 0.44, 0, -0.07);
+    outer.add(hand, tip, spot);
+    outer.rotation.y = s * 0.28;
+    wing.add(outer);
     wing.userData.side = s;
+    wing.userData.outer = outer;
     g.add(wing);
   }
   return g;

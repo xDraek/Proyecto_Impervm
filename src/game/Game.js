@@ -1971,7 +1971,9 @@ export class Game extends EventTarget {
     );
     if (outcome === 'victoria') this.state.stats.victories++;
     if (loot) this.state.stats.loot += count(loot);
-    if (isl.type === 'kraken' && outcome === 'victoria') {
+    // Solo cuenta (y da reliquia) si el Kraken estaba y ha caído en esta batalla: mientras se recupera
+    // de su derrota, en la fosa solo quedan sus corsarios
+    if (isl.type === 'kraken' && outcome === 'victoria' && (result.def.lost?.kraken ?? 0) > 0) {
       this.state.stats.kraken++;
       this.#note('🐙 ¡Has derrotado al Kraken! Los mares son tuyos.', 'success');
       this.#findRelic(t, 'entre los restos del Kraken', { epica: 30, legendaria: 70 });

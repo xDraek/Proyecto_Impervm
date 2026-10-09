@@ -228,7 +228,8 @@ export function surfaceDetail(material, kind, { masonry = true } = {}) {
   return material;
 }
 
-const ANIMATED = ['spin', 'swing', 'wave', 'smoke', 'flicker', 'bob', 'wiggle', 'sparks'];
+// `rig`: piezas que mueve su dueño (las ruedas y las patas del carro de bueyes)
+const ANIMATED = ['spin', 'swing', 'wave', 'smoke', 'flicker', 'bob', 'wiggle', 'sparks', 'rig'];
 
 /**
  * Funde en una sola malla las piezas de `root` que no se mueven ni brillan
